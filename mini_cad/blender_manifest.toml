@@ -1,0 +1,23 @@
+schema_version = "1.0.0"
+
+id = "mini_cad"
+version = "0.15.2"
+name = "Mini CAD"
+tagline = "Bezier tel kafesten parametrik CAD yuzeyleri"
+maintainer = "Mini CAD"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+copyright = [
+  "2026 Mini CAD",
+  "2026 Paul Ogunsola / RenderCraftStudio - FORGE (GPL-3.0-or-later): boolean, mesh-to-solid, fillet guard layers, fillet ghost preview and snap math adapted",
+]
+
+tags = ["Modeling", "Mesh"]
+
+[permissions]
+network = "OpenCASCADE kutuphanesini pip ile indirmek icin"
+files = "Cekirdek kutuphanesini diske kurmak icin"

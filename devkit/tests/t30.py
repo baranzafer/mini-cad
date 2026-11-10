@@ -1,0 +1,45 @@
+# Çizim aracı matematiği
+import sys, types, math, numpy as np
+sys.path.insert(0, "/home/claude")
+pkg = types.ModuleType("mini_cad"); pkg.__path__ = ["/home/claude/mini_cad"]; sys.modules["mini_cad"] = pkg
+from mini_cad import drawmath as dm
+arc = dm.tangent_arc((0,0,0), (1,0,0), (1,1,0))
+pts = np.vstack([dm.sample(s, 50) for s in arc["segs"]])
+err = np.abs(np.linalg.norm(pts - arc["center"], axis=1) - arc["radius"]).max()
+print("çeyrek yay: R=%.3f açı=%.1f° parça=%d sapma=%.1e uç teğeti=%s" % (arc["radius"], math.degrees(arc["angle"]), len(arc["segs"]), err, np.round(arc["end_tangent"], 3)))
+arc2 = dm.tangent_arc((0,0,0), (1,0,0), (-0.5,1,0.3))
+pts = np.vstack([dm.sample(s, 50) for s in arc2["segs"]])
+err = np.abs(np.linalg.norm(pts - arc2["center"], axis=1) - arc2["radius"]).max()
+print("3D geniş yay: açı=%.1f° parça=%d sapma=%.1e son nokta=%s" % (math.degrees(arc2["angle"]), len(arc2["segs"]), err, np.round(arc2["segs"][-1]["p"][3], 6)))
+print("teğet doğrultuda yay -> düz:", dm.tangent_arc((0,0,0),(1,0,0),(2,0,0)))
+segs = [dm.line_seg((0,0,0),(1,0,0))] + arc["segs"] + [dm.line_seg((1,1,0),(0,1,0))]
+bp = dm.bezier_points(segs, False)
+print("bezier noktaları:", [(p["tl"], p["tr"]) for p in bp])
+sq = [dm.line_seg(a,b) for a,b in [((0,0,0),(1,0,0)),((1,0,0),(1,1,0)),((1,1,0),(0,1,0)),((0,1,0),(0,0,0))]]
+print("kapalı kare nokta sayısı:", len(dm.bezier_points(sq, True)))
+pl = dm.Plane.axis("XZ", (0,0,0)); print("XZ normal:", pl.n, "| uv(1,5,2)=", pl.uv((1,5,2)))
+print("otomatik düzlem (yukarıdan bakış):", dm.auto_axis_plane((0.1,-0.2,-0.97)), "| önden:", dm.auto_axis_plane((0,1,-0.1)))
+pf = dm.Plane.from_normal((0,0,0),(0,0.7071,0.7071),"FACE"); print("yüz düzlemi dik eksenler:", round(float(np.dot(pf.u,pf.v)),6), round(float(np.dot(pf.u,pf.n)),6))
+plxy = dm.Plane.axis("XY",(0,0,0))
+print("uzunluk kilidi:", np.round(dm.apply_locks(plxy,(0,0,0),(3,4,0),length=10),6), "| açı kilidi 90°:", np.round(dm.apply_locks(plxy,(0,0,0),(3,4,0),angle=90),6))
+print("ikisi:", np.round(dm.apply_locks(plxy,(0,0,1),(3,4,1),length=2,angle=45),4))
+# çıkarım
+q, info = dm.refine((0,0),(5,0.1),[],[],[],0.05); print("yatay:", np.round(q,4), info["kind"])
+q, info = dm.refine((0,0),(3.1,3.05),[(1,1,"seg")],[],[],0.05); print("paralel:", np.round(q,3), info["kind"], info.get("ref_seg"))
+q, info = dm.refine((0,0),(4.97,0.08),[],[(5.0,9.0,"n1")],[],0.05); print("yatay+hiza:", np.round(q,4), info["kind"], info.get("guides"))
+q, info = dm.refine((0,0),(2.3,1.6),[],[(2.31,7,"n")],[],0.05,tol_deg=1); print("hiza:", np.round(q,3), info["kind"])
+q, info = dm.refine((0,0),(1.0,1.7),[],[],[],0.05,shift=True); print("shift 15°:", np.round(q,3), info["kind"])
+q, info = dm.refine((9,9),(3.0,0.02),[],[],[((0,0),(1,0),"s")],0.05,tol_deg=0.1); print("uzantı:", np.round(q,3), info["kind"])
+print("kesişim:", dm.segment_intersection((0,0,0),(2,2,0),(0,2,0),(2,0,0),1e-6), "| uçta:", dm.segment_intersection((0,0,0),(1,0,0),(1,0,0),(1,1,0),1e-6))
+print("ışına en yakın:", np.round(dm.closest_on_segment_to_ray((0,0,0),(2,0,0),(1.3,5,1),(0,-1,0)),4))
+t=np.linspace(0,2*np.pi,25); C=np.c_[2+np.cos(t),np.sin(t),np.zeros_like(t)]; C[-1]=C[0]
+print("çember merkezi:", np.round(dm.circle_center(C),4), "| poly ortası:", np.round(dm.poly_mid([(0,0,0),(1,0,0),(1,3,0)]),3))
+a3 = dm.arc_3pt((1,0,0),(0,1,0),(-1,0,0)); pts=np.vstack([dm.sample(s,40) for s in a3["segs"]])
+print("3 nokta yay: R=%.3f açı=%.1f° merkez=%s sapma=%.1e ortadan geçer=%s" % (a3["radius"], math.degrees(a3["angle"]), np.round(a3["center"],6), np.abs(np.linalg.norm(pts,axis=1)-1).max(), bool(np.min(np.linalg.norm(pts-np.array([0,1,0]),axis=1))<3e-3)))
+a3b = dm.arc_3pt((1,0,0),(0,-1,0),(-1,0,0)); print("ters yön ortası y<0:", bool(dm.sample(a3b["segs"][0],5)[2][1] < 0), "| doğrusal:", dm.arc_3pt((0,0,0),(1,0,0),(2,0,0)))
+ca = dm.center_arc((0,0,0),(1,0,0),(0,2,0),(0,0,1)); print("merkez yay: açı=%.1f° bitiş=%s" % (math.degrees(ca["angle"]), np.round(ca["end"],6)), "| flip:", round(math.degrees(dm.center_arc((0,0,0),(1,0,0),(0,2,0),(0,0,1),flip=True)["angle"]),1))
+c = dm.circle((0,0,0),2.0,dm.Plane.axis("XY",(0,0,0))); print("daire parça:", len(c), "kapalı:", np.allclose(c[-1]["p"][3], c[0]["p"][0]), "| kapalı bezier noktası:", len(dm.bezier_points(c, True)), [p["tl"] for p in dm.bezier_points(c, True)])
+r = dm.rectangle((0,0,1),(2,1,1),dm.Plane.axis("XY",(0,0,1))); print("dikdörtgen köşeleri:", [tuple(np.round(s["p"][0],3)) for s in r])
+cv = [(0,0,0),(1,2,0),(3,2,0),(4,0,0),(6,1,0)]; bs = dm.bspline_bezier(cv)
+print("CV spline:", len(bs), "parça | uçlar:", np.round(bs[0]["p"][0],3), np.round(bs[-1]["p"][3],3), "| ek yerleri C1:", all(np.allclose(np.cross(bs[i]["p"][3]-bs[i]["p"][2], bs[i+1]["p"][1]-bs[i+1]["p"][0]),0, atol=1e-9) for i in range(len(bs)-1)))
+fb = dm.fit_bezier([(0,0,0),(1,1,0),(2,0,0),(3,1,0)]); print("geçen spline:", len(fb), "| noktalardan geçer:", np.round([s["p"][3] for s in fb],3).tolist(), "| tutamaç türleri:", [(p["tl"],p["tr"]) for p in dm.bezier_points(fb, False)])
