@@ -13,10 +13,14 @@ Kısıtlar  Eksen · Paralel · Dik · Doğrusal · Eşit · Çakışık · Sabi
   Taslak düzenleme  taslağın noktalarını ve eğri tutamaçlarını sürükle; X/Y/Z eksen kilidi
                     (3. eksende düzenleme); pürüzsüz birleşimde karşı tutamaç hizalı kalır.
                     Tıklanan noktada pivot çıkar; oklarından sürükleyince o eksende taşınır.
-                    Sürüklerken uç / orta / merkez, kılavuzlar ve ızgara yakalaması geçerli.
+                    Sürüklerken uç / orta / merkez, kılavuzlar ve ızgara yakalaması geçerli;
+                    ölçü yardımcısı uzunluk / açıyı gösterir, yazarak değer girilir (Tab).
   Ctrl+Z / Ctrl+Shift+Z  taslak aşamasında geri al / yinele (Bitir'den sonra Blender'ınki)
   T                 iz: referans noktadan eksenler boyunca (ölçü yazarak) başlangıç noktası
   Düzlem seçimi     1/2 yön (eksen düzlemi ya da yüz), 2/2 yükseklik (fare / nokta / yazarak)
+  U                 geçici zemin: ızgaranın yönünü / yüksekliğini değiştir (sağ tık: yön aynı,
+                    sadece yükseklik); tekrar U'ya basılana kadar yeni çizgiler bu zemine
+                    çizilir, sonra asıl düzleme dönülür. Shift+U: başka bir geçici zemin
   Rakam yaz         ölçü; Tab ile sonraki alan; Enter ile noktayı koy (ör. 25mm, 30)
   C                 başlangıca dönüp kapat      F  kapalı çizgiden yüzey (Ctrl+F: yeni gövde)
   Shift             15° adımlar        Ctrl  yakalamayı kapat        Backspace  geri al
@@ -147,6 +151,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self._hsig = None
         self.track = None
         self.off = None
+        self.temp = None                 # geçici zemin (U): {"saved", "plane", "label", "grid_o"}
+        self.temp_pick = None            # geçici zemin seçiliyor: {"saved"}
         self.phase = "PLANE" if getattr(sc, "minicad_pick_plane", True) else "DRAW"
         self.palette = palette.Palette(self.ui_scale)
         self.created = 0
@@ -199,6 +205,15 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             except Exception:
                 pass
             return
+        if self.phase == "PLANE" and getattr(self, "temp_pick", None) is not None:
+            txt = ("GEÇİCİ ZEMİN (1/2: yön): eksen düzlemine ya da gövde yüzüne tıkla  |  X/Y/Z/V: "
+                   "eksen / görünüş düzlemi  |  Sağ tık / Enter: mevcut yön, sadece yükseklik  |  "
+                   "Esc: iptal")
+            try:
+                context.workspace.status_text_set(txt)
+            except Exception:
+                pass
+            return
         if self.phase == "PLANE":
             txt = ("ÇİZİM DÜZLEMİNİ SEÇ (1/2: yön): eksen düzlemine ya da gövde yüzüne tıkla  |  X/Y/Z/V: "
                    "eksen / görünüş düzlemi  |  Sağ tık / Enter: atla (otomatik)  |  Esc: çık")
@@ -226,10 +241,13 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                    f"{'nokta' if is_pt else 'kenar'} seçildi  |  Sağ tık: çizime dön  |  "
                    "Simgeye sağ tık: dondur / sil  |  Esc: duraklat")
         else:
+            tz = getattr(self, "temp", None)
+            if tz is not None:
+                plane = f"GEÇİCİ ZEMİN {tz['label']} (U: normale dön, Shift+U: başka zemin)"
             txt = (f"{self._tool_name()} · düzlem: {plane}  |  Tık: nokta  |  Sağ tık/Enter: "
                    "bitir  |  Yaz: ölçü, Tab: sonraki alan  |  W/L/A/E/M/O/R/S/K/P: araç  |  Q: önceki "
                    "araç  |  C: kapat  "
-                   "|  F: yüzey  |  Ctrl+Z / Ctrl+Shift+Z: taslakta geri al / yinele  |  Shift+Q: düzlem seç  |  X/Y/Z/V: düzlem  |  I: ızgara "
+                   "|  F: yüzey  |  Ctrl+Z / Ctrl+Shift+Z: taslakta geri al / yinele  |  Shift+Q: düzlem seç  |  U: geçici zemin  |  X/Y/Z/V: düzlem  |  I: ızgara "
                    f"{'açık' if self.grid_on else 'kapalı'}  |  Shift: 15°  |  Ctrl: yakalama "
                    "yok  |  Esc: duraklat")
         if self.msg:
@@ -409,6 +427,11 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             self.phase, self.off = "PLANE", None
             self._status(context)
             self.area.tag_redraw()
+            return {"RUNNING_MODAL"}
+        if event.type == "ESC" and press and self.phase == "PLANE" and \
+                getattr(self, "temp_pick", None) is not None:
+            self._temp_cancel(context)
+            self._refresh(context)
             return {"RUNNING_MODAL"}
         if event.type == "ESC" and press:
             self._finalize_stage()
@@ -597,6 +620,13 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                 self._status(context, "İz: referans noktaya tıkla, sonra eksen boyunca ilerle "
                                       "(ölçü yazabilirsin) · her tık yeni bacak · Enter / sağ tık:"
                                       " son noktayı kullan · Esc: iptal")
+                self._refresh(context)
+                return {"RUNNING_MODAL"}
+            if event.type == "U" and not self.tool.startswith("C_"):
+                if self.temp is not None and not event.shift:
+                    self._temp_end(context)            # asıl düzleme dön
+                else:
+                    self._temp_begin(context)          # geçici zemin seç (Shift+U: başkası)
                 self._refresh(context)
                 return {"RUNNING_MODAL"}
             if event.type == "Q" and event.shift:

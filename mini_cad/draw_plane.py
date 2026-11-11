@@ -14,8 +14,9 @@ from mathutils import Vector
 from . import core
 from . import drawmath as dm
 from .draw_common import (
-    COL_ACTIVE, COL_BOX, COL_GRID, COL_GUIDE, COL_TEXT, GRID_MIN_PX, GRID_PX, MODIFIERS,
-    PLANE_COLS, SHAPE_TOOLS, _axis_col, _dashed, _poly, _rect, _text, parse_length,
+    COL_ACTIVE, COL_BOX, COL_GRID, COL_GUIDE, COL_SNAP, COL_TEXT, GRID_MIN_PX, GRID_PX,
+    MODIFIERS, PLANE_COLS, SHAPE_TOOLS, _Refs, _axis_col, _dashed, _marker, _poly, _rect, _text,
+    parse_length,
 )
 
 
@@ -106,7 +107,7 @@ class PlaneMixin:
         gs = self._grid_step(p)
         tol = GRID_PX * self.ui_scale * self._px_size(p)
         q = list(plane.uv(p))
-        g0 = plane.uv(np.zeros(3))
+        g0 = plane.uv(self._grid_origin())
         hit = False
         for ax, locked in ((0, lock_u), (1, lock_v)):
             if locked:
@@ -171,6 +172,7 @@ class PlaneMixin:
             print("[Mini CAD] görünüm çevrilemedi:", e)
 
     def _set_plane(self, mode):
+        self.temp = self.temp_pick = None          # açık düzlem seçimi: geçici zemin biter
         if mode == "PICK":
             self.phase = "PLANE"
             self.hover_plane = None
@@ -206,6 +208,12 @@ class PlaneMixin:
                 self._start_offset(context, name, pl)
             self.area.tag_redraw()
             return {"RUNNING_MODAL"}
+        if event.type in {"RIGHTMOUSE", "RET", "NUMPAD_ENTER", "SPACE"} and \
+                getattr(self, "temp_pick", None) is not None:
+            base = self._base_plane()               # yön aynı kalır, sadece yükseklik
+            self._start_offset(context, base.name, base)
+            self.area.tag_redraw()
+            return {"RUNNING_MODAL"}
         if event.type in {"RIGHTMOUSE", "RET", "NUMPAD_ENTER", "SPACE"}:
             self.phase = "DRAW"
             self.hover_plane = None
@@ -215,6 +223,10 @@ class PlaneMixin:
         if event.type in {"X", "Y", "Z"} and not event.ctrl:
             name = {"X": "YZ", "Y": "XZ", "Z": "XY"}[event.type]
             self._start_offset(context, name, dm.Plane.axis(name, (0.0, 0.0, 0.0)))
+            self.area.tag_redraw()
+            return {"RUNNING_MODAL"}
+        if event.type == "V" and not event.ctrl and getattr(self, "temp_pick", None) is not None:
+            self._start_offset(context, "VIEW", self._make_plane("VIEW", np.zeros(3)))
             self.area.tag_redraw()
             return {"RUNNING_MODAL"}
         if event.type == "V" and not event.ctrl:
@@ -251,19 +263,24 @@ class PlaneMixin:
         den = 1.0 - b * b
         t = float(np.dot(w0, n) - b * np.dot(w0, rd)) / den if den > 1e-9 else off["t"]
         off["kind"] = None
+        off["snap"] = off["snap_kind"] = None
         typed = self._signed_len(self.typed[0]) if self.typed[0] else None
+        t_main = self._main_height(base)
         if typed is not None:
             t, off["kind"] = typed, "Yazılan"
         elif not self.ctrl:
             snap = self._point_snap(mx, my, ro, rd)
+            p = o + n * t
+            tol = GRID_PX * self.ui_scale * self._px_size(p)
             if snap is not None:
                 t = float(np.dot(np.asarray(snap[0]) - o, n))
                 off["kind"] = snap[1] + " yüksekliği"
-                off["snap"] = np.asarray(snap[0])
+                off["snap"] = np.asarray(snap[0], dtype=np.float64)
+                off["snap_kind"] = snap[1]
+            elif t_main is not None and abs(t - t_main) <= tol * 2.0:
+                t, off["kind"] = t_main, "Ana düzlem"
             elif self.grid_on:
-                p = o + n * t
                 gs = self._grid_step(p)
-                tol = GRID_PX * self.ui_scale * self._px_size(p)
                 g = round(t / gs) * gs
                 if abs(g - t) <= tol * 1.5:
                     t, off["kind"] = g, "Izgara"
@@ -276,7 +293,16 @@ class PlaneMixin:
         base = off["base"]
         plane = base.moved(base.o + base.n * t)
         self.off = None
+        tp = getattr(self, "temp_pick", None)
         self._lock_plane(context, off["name"], plane)
+        if tp is not None:
+            self.temp_pick = None
+            label = f"{dm.PLANE_LABELS.get(off['name'], off['name'])} · yükseklik {core.fmt_len(t)}"
+            self.temp = {"saved": tp["saved"], "plane": plane, "label": label,
+                         "grid_o": off.get("snap") if off.get("snap") is not None else None}
+            self._status(context, f"Geçici zemin: {label} · yeni çizgiler bu zemine çizilir · "
+                                  "U: normal düzleme dön")
+            return
         if abs(t) > 1e-12:
             self._status(context, f"Çizim düzlemi: {dm.PLANE_LABELS.get(off['name'], off['name'])}"
                                   f" · yükseklik {core.fmt_len(t)}")
@@ -339,16 +365,30 @@ class PlaneMixin:
             return
         s = self.ui_scale
         mx, my = self.mouse
-        a, b = self._px(off["base"].o), self._px(off["base"].o + off["base"].n * off["t"])
+        base, t = off["base"], off["t"]
+        a, b = self._px(base.o), self._px(base.o + base.n * t)
         if a is not None and b is not None:
             _dashed(a, b, COL_GUIDE, region)
-        txt = f"Yükseklik: {self.typed[0] + '_' if self.typed[0] else core.fmt_len(off['t'])}"
+            if abs(t) > 1e-12:                       # ölçü: taban → yeni düzlem
+                _text((a[0] + b[0]) * 0.5 + 6 * s, (a[1] + b[1]) * 0.5 + 6 * s,
+                      core.fmt_len(t), COL_TEXT, int(12 * s))
+        sp = off.get("snap")
+        if sp is not None:                           # hiza: yakalanan nokta → taban düzlemi
+            p, q = self._px(sp), self._px(sp - base.n * t)
+            if p is not None:
+                if q is not None:
+                    _dashed(q, p, COL_GUIDE, region)
+                _marker(off.get("snap_kind") or "Uç", p[0], p[1], 6 * s, region)
+                if b is not None:
+                    _dashed(p, b, COL_GUIDE, region, dash=3, gap=4)
         if off["kind"]:
-            txt += f"  ({off['kind']})"
-        _rect(mx + 14 * s, my - 26 * s, mx + 14 * s + 9 * s * len(txt) * 0.62 + 12 * s,
-              my - 6 * s, COL_BOX)
-        _text(mx + 20 * s, my - 20 * s, txt, COL_ACTIVE if self.typed[0] else COL_TEXT,
-              int(12 * s))
+            _text(mx + 12 * s, my + 10 * s, off["kind"], COL_SNAP, int(11 * s))
+        val = self.typed[0] + "_" if self.typed[0] else core.fmt_len(t)
+        rows = [("Yükseklik", val, True)]
+        t_main = self._main_height(base) if getattr(self, "temp_pick", None) else None
+        if t_main is not None:
+            rows.append(("Fark", core.fmt_len(t - t_main), False))
+        self._draw_rows((mx, my), rows)
 
     def _quad(self, pl, center_uv, S):
         h = S / 2
@@ -380,7 +420,7 @@ class PlaneMixin:
             return
         c = self.cursor
         gs = self._grid_step(c)
-        g0 = pl.uv(np.zeros(3))
+        g0 = pl.uv(self._grid_origin())
         q = pl.uv(c)
         cu = g0[0] + round((q[0] - g0[0]) / gs) * gs
         cv = g0[1] + round((q[1] - g0[1]) / gs) * gs
@@ -401,3 +441,85 @@ class PlaneMixin:
             return
         sh.uniform_float("color", COL_GRID[:3] + (a,))
         batch.draw(sh)
+
+    # ------------------------------------------------------------ geçici zemin (U)
+
+    def _grid_origin(self):
+        """Izgaranın kökeni: geçici zeminde yükseklik bir noktadan alındıysa o nokta."""
+        tmp = getattr(self, "temp", None)
+        if tmp is not None and tmp.get("grid_o") is not None:
+            return tmp["grid_o"]
+        return np.zeros(3)
+
+    def _base_plane(self):
+        """Şu anki çizim düzleminin yönü (yükseklik bu düzlemden ölçülür)."""
+        if self.plane_mode == "LOCK" and self.locked is not None:
+            return self.locked
+        if self.plane_mode in dm.AXIS_PLANES:
+            return dm.Plane.axis(self.plane_mode, (0.0, 0.0, 0.0))
+        pl = self.tmp_plane or self._make_plane(self.plane_mode, np.zeros(3))
+        if pl.name in dm.AXIS_PLANES:
+            return dm.Plane.axis(pl.name, (0.0, 0.0, 0.0))
+        return pl
+
+    def _main_plane(self):
+        """Geçici zemin seçilirken / açıkken asıl (geri dönülecek) düzlem; yoksa None."""
+        src = getattr(self, "temp_pick", None) or getattr(self, "temp", None)
+        if src is None:
+            return None
+        mode, locked = src["saved"]
+        if mode == "LOCK" and locked is not None:
+            return locked
+        if mode in dm.AXIS_PLANES:
+            return dm.Plane.axis(mode, (0.0, 0.0, 0.0))
+        return None
+
+    def _main_height(self, base):
+        """Asıl düzlemin, taban düzleminin normali boyunca yüksekliği (paralel değilse None)."""
+        main = self._main_plane()
+        if main is None or abs(abs(float(np.dot(main.n, base.n))) - 1.0) > 1e-6:
+            return None
+        return float(np.dot(main.o - base.o, base.n))
+
+    def _temp_begin(self, context):
+        """U: geçici zemin seç (1/2 yön, 2/2 yükseklik). Süren çizgi taslağa eklenir."""
+        if self.segs or self.start is not None or self.stage:
+            self._commit(context)
+        tmp = getattr(self, "temp", None)
+        saved = tmp["saved"] if tmp is not None else (self.plane_mode, self.locked)
+        self.temp_pick = {"saved": saved}
+        try:
+            self.refs = _Refs(context, self.sketch)    # taslak noktalarına da yapışsın
+            self.dirty = False
+        except Exception:
+            pass
+        self.track = None
+        self.sk_sel = self.sk_hover = None
+        self.typed, self.field = ["", ""], 0
+        self.preview, self.cursor, self.info, self.snap_kind = [], None, None, None
+        self.phase = "PLANE"
+        self.hover_plane = None
+        self._status(context, "Geçici zemin")
+
+    def _temp_end(self, context):
+        """U (geçici zemin açıkken): asıl düzleme dön; normal akış devam eder."""
+        tmp = getattr(self, "temp", None)
+        if tmp is None:
+            return
+        if self.segs or self.start is not None or self.stage:
+            self._commit(context)
+        mode, locked = tmp["saved"]
+        self.temp = None
+        self.plane_mode, self.locked = mode, locked
+        self.plane = None
+        self.tmp_plane = None
+        self.shape_plane = None
+        self._status(context, "Geçici zemin kapandı · asıl çizim düzlemine dönüldü")
+
+    def _temp_cancel(self, context):
+        """Esc (geçici zemin seçilirken): seçimden vazgeç, önceki duruma dön."""
+        self.temp_pick = None
+        self.off = None
+        self.phase = "DRAW"
+        self.hover_plane = None
+        self._status(context, "Geçici zemin seçimi iptal edildi")

@@ -72,6 +72,28 @@ class SnapMixin:
         t = dm.unit(t)
         return None if t is None else (t, (pid[0], pid[1], seg))
 
+    def _sketch_end_tangent(self, p):
+        """Taslaktaki açık bir çizginin ucundan dışarı doğru teğet (p o uçtaysa; en son
+        çizilen öncelikli). (yön, ("@sketch", çizgi, uca bağlı segment, uç: 0 / 3))"""
+        if p is None:
+            return None
+        p = np.asarray(p, dtype=np.float64)
+        tol = 1e-7 * (1.0 + float(np.abs(p).max()))
+        for k in range(len(self.sketch) - 1, -1, -1):
+            st = self.sketch[k]
+            segs = st["segs"]
+            if st["cyclic"] or not segs:
+                continue
+            for j, end in ((len(segs) - 1, 3), (0, 0)):
+                sg = segs[j]
+                if float(np.linalg.norm(np.asarray(sg["p"][end]) - p)) > tol:
+                    continue
+                t = dm.end_tangent(sg) if end == 3 else dm.start_tangent(sg)
+                if t is None:
+                    continue
+                return (t if end == 3 else -t), ("@sketch", k, j, end)
+        return None
+
     def _lock_anchor(self):
         """Yazılan değerlerin ve kılavuzların ölçüldüğü nokta."""
         if self.tool in SHAPE_TOOLS and self.stage:

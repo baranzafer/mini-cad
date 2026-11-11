@@ -207,7 +207,8 @@ def _tool_lines():
                        f"kısıt seçimi={[r[:4] for r in op.c_refs]} · yakalama açık={op.snap_on} · "
                        f"aşama={op.phase} · taslak={len(op.sketch)} çizgi · iz="
                        f"{len(op.track['pts']) if op.track else None} · sürükleme="
-                       f"{op.sk_drag['key'] if op.sk_drag else None}")
+                       f"{op.sk_drag['key'] if op.sk_drag else None} · geçici zemin="
+                       f"{(getattr(op, 'temp', None) or {}).get('label')}")
     except Exception as e:
         out.append(f"Çiz durumu okunamadı: {e}")
     return out or ["(Kenar Seç ve Çiz kapalı)"]

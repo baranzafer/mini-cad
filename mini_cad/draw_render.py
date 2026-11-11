@@ -141,6 +141,8 @@ class RenderMixin:
                           COL_SNAP, int(11 * self.ui_scale))
                 if self.sk_drag is None:
                     self._draw_input(region, cur)
+                else:
+                    self._draw_drag_input(region, cur)
             st = {"tool": self.tool, "plane": self.plane_mode,
                   "opts": {"auto": getattr(bpy.context.scene, "minicad_auto_constraints", True),
                            "show": getattr(bpy.context.scene, "minicad_show_constraints", True),
@@ -152,6 +154,11 @@ class RenderMixin:
                   "picking": self.phase in ("PLANE", "OFFSET"),
                   "target": getattr(bpy.context.scene, "minicad_draw_target", "ACTIVE"),
                   "sketch": len(self.sketch)}
+            if self.phase == "DRAW" and getattr(self, "temp", None) is not None:
+                sc = self.ui_scale
+                txt = f"Geçici zemin: {self.temp['label']}  ·  U: normale dön"
+                _rect(10 * sc, 10 * sc, 10 * sc + 7.2 * sc * len(txt) + 14 * sc, 34 * sc, COL_BOX)
+                _text(17 * sc, 17 * sc, txt, COL_SNAP, int(12 * sc))
             if self.phase == "DRAW":
                 self._draw_sketch2d(region)
                 self._draw_pivot(region)
@@ -205,8 +212,14 @@ class RenderMixin:
             txt = self.typed[i]
             val = (txt + ("_" if i == self.field else "")) if txt else live
             rows.append((name, val, i == self.field))
+        self._draw_rows(cur, rows)
+
+    def _draw_rows(self, cur, rows):
+        """İmleç yanında ölçü kutusu: [(ad, değer, etkin alan mı)]."""
         if not rows:
             return
+        sc = self.ui_scale
+        size = int(12 * sc)
         x = cur[0] + 18 * sc
         y = cur[1] - 22 * sc
         h = 18 * sc

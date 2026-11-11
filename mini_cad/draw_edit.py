@@ -8,9 +8,10 @@ import numpy as np
 
 from . import drawmath as dm
 from .draw_common import (
-    AXIS_COLS, COL_RUBBER, GRID_PX, GUIDE_PX, MODIFIERS, PASS_KEYS, _move_handle, _move_node,
-    _poly, _project, _text,
+    AXIS_COLS, COL_GUIDE, COL_RUBBER, COL_TEXT, GRID_PX, GUIDE_PX, MODIFIERS, PASS_KEYS,
+    _dashed, _move_handle, _move_node, _poly, _project, _text, parse_angle, parse_length,
 )
+from . import core
 
 
 class EditMixin:
@@ -78,6 +79,7 @@ class EditMixin:
             st = self.sketch[key[1]]
             base = self._cur_plane() or self.tmp_plane or self._make_plane(self.plane_mode, pos)
             self.sk_sel = key
+            self.typed, self.field = ["", ""], 0
             self.sk_drag = {"key": key, "press": (mx, my), "moved": axis is not None,
                             "axis": axis, "pivot": axis is not None,
                             "orig": [dict(sg, p=tuple(np.array(q) for q in sg["p"]))
@@ -178,12 +180,21 @@ class EditMixin:
             if not d["moved"] and math.hypot(mx - d["press"][0], my - d["press"][1]) < \
                     4 * self.ui_scale:
                 return {"RUNNING_MODAL"}
+            if not d["moved"]:
+                self._status(context, "Sürükleme · ölçü yaz (uzunluk, Tab: açı) · X/Y/Z: eksen "
+                                      "kilidi · bırak / Enter: uygula · sağ tık / Esc: iptal")
             d["moved"] = True
             self._drag_apply(mx, my)
             self.area.tag_redraw()
             return {"RUNNING_MODAL"}
-        if event.type == "LEFTMOUSE" and not press:
+        if press and self._drag_typing(event, mx, my):
+            return {"RUNNING_MODAL"}
+        if (event.type == "LEFTMOUSE" and not press) or \
+                (event.type in {"RET", "NUMPAD_ENTER"} and press):
+            if any(self.typed):
+                d["moved"] = True
             self.sk_drag = None
+            self.typed, self.field = ["", ""], 0
             if self.tool == "SELECT":
                 self.cursor, self.info, self.snap_kind = None, None, None
             if d["moved"]:
@@ -213,6 +224,49 @@ class EditMixin:
             return {"RUNNING_MODAL"}
         return {"RUNNING_MODAL"} if event.type not in PASS_KEYS else {"PASS_THROUGH"}
 
+    def _drag_typing(self, event, mx, my):
+        """Sürüklerken ölçü yazma (çizimdeki gibi): rakamlar, Tab, Backspace. İşlendiyse True."""
+        d = self.sk_drag
+        if event.type == "TAB":
+            if d["axis"] is None:
+                self.field = 1 - self.field
+        elif event.type == "BACK_SPACE":
+            if not self.typed[self.field]:
+                return True
+            self.typed[self.field] = self.typed[self.field][:-1]
+        else:
+            ch = event.unicode or ""
+            typing = bool(self.typed[self.field])
+            if not ch or event.ctrl or event.type in {"X", "Y", "Z"} or \
+                    not (ch in "0123456789.,-+°" or
+                         (typing and (ch.isalpha() or ch in "'\""))):
+                return False                     # X / Y / Z: eksen kilidi
+            self.typed[self.field] += ch
+        d["moved"] = True
+        self._drag_apply(mx, my)
+        self.area.tag_redraw()
+        return True
+
+    def _dim_anchor(self):
+        """Sürüklemede ölçünün alındığı nokta: tutamaçta bağlı olduğu nokta, noktada
+        çizgideki komşu nokta (önceki; yoksa sonraki)."""
+        d = self.sk_drag
+        if d is None:
+            return None
+        if d["key"][0] == "h":
+            return self._drag_anchor()
+        st = self.sketch[d["key"][1]]
+        segs = d["orig"]
+        n = len(segs)
+        j = d["key"][2]
+        if j > 0:
+            return np.array(segs[j - 1]["p"][0])
+        if st["cyclic"] and n > 1:
+            return np.array(segs[-1]["p"][0])
+        if n >= 1:
+            return np.array(segs[0]["p"][3])
+        return None
+
     def _drag_anchor(self):
         """Sürüklenen tutamacın bağlı olduğu nokta (kılavuzlar ona göre)."""
         d = self.sk_drag
@@ -240,7 +294,11 @@ class EditMixin:
             bb = float(np.dot(rdn, ax))
             den = 1.0 - bb * bb
             t = float(np.dot(w0, ax) - bb * np.dot(w0, rdn)) / den if den > 1e-9 else 0.0
-            if self.grid_on and not no_snap:
+            typed = self._signed_len(self.typed[0]) if self.typed[0] else None
+            if typed is not None:
+                t = typed
+                self.info = {"kind": f"{'XYZ'[d['axis']]} · yazılan"}
+            elif self.grid_on and not no_snap:
                 q = p0 + ax * t
                 gs = self._grid_step(q)
                 g = round(float(q[d["axis"]]) / gs) * gs - float(p0[d["axis"]])
@@ -255,7 +313,15 @@ class EditMixin:
             new = plane.ray_hit(ro, rd)
             if new is None:
                 return
-            if not no_snap:
+            anc = self._dim_anchor()
+            v0 = parse_length(self.typed[0]) if self.typed[0] else None
+            v1 = parse_angle(self.typed[1]) if self.typed[1] else None
+            locked = anc is not None and (v0 is not None or v1 is not None)
+            if locked:
+                new = dm.apply_locks(plane, anc, new, v0, v1)
+                new = new - plane.n * plane.dist(new)    # sürüklenen öğenin yüksekliği kalsın
+                self.info = {"kind": "Yazılan", "plane": plane}
+            elif not no_snap:
                 snap = self._point_snap_excluding(mx, my, ro, rd, p0)
                 if snap is not None:
                     new = np.asarray(snap[0], dtype=np.float64)
@@ -321,3 +387,40 @@ class EditMixin:
                 r = 3.5 * s
                 _poly([(p[0] - r, p[1] - r), (p[0] + r, p[1] - r), (p[0] + r, p[1] + r),
                        (p[0] - r, p[1] + r)], col, 1.6, region, closed=True)
+
+    def _draw_drag_input(self, region, cur):
+        """Sürüklerken dinamik ölçü (çizimdeki gibi): ölçü noktasından uzunluk ve açı,
+        imleç yanında ölçü kutusu; yazılan değer kilitler. Eksen kilidinde kaydırma."""
+        d = self.sk_drag
+        if d is None or not d["moved"] or self.cursor is None:
+            return
+        sc = self.ui_scale
+        size = int(12 * sc)
+        if d["axis"] is not None:
+            t = float(self.cursor[d["axis"]] - d["pos"][d["axis"]])
+            names = ((f"{'XYZ'[d['axis']]} kaydırma", core.fmt_len(t)),)
+            a, b = self._px(d["pos"]), self._px(self.cursor)
+            if a is not None and b is not None:
+                _dashed(a, b, AXIS_COLS[d["axis"]], region)
+        else:
+            anc = self._dim_anchor()
+            if anc is None:
+                return
+            pl = d["plane"]
+            L = float(np.linalg.norm(self.cursor - anc))
+            ang = dm.seg_angle(pl, anc, self.cursor)
+            ap, cp = self._px(anc), self._px(self.cursor)
+            if ap is not None and cp is not None:
+                if d["key"][0] == "pt":
+                    _dashed(ap, cp, COL_GUIDE, region)
+                mid = ((ap[0] + cp[0]) * 0.5, (ap[1] + cp[1]) * 0.5)
+                _text(mid[0] + 6 * sc, mid[1] + 6 * sc, core.fmt_len(L), COL_TEXT, size)
+                _text(ap[0] + 8 * sc, ap[1] - 16 * sc, f"{ang:.1f}°", COL_TEXT, size)
+            names = (("Tutamaç" if d["key"][0] == "h" else "Uzunluk", core.fmt_len(L)),
+                     ("Açı", f"{ang:.1f}°"))
+        rows = []
+        for i, (name, live) in enumerate(names):
+            txt = self.typed[i]
+            val = (txt + ("_" if i == self.field else "")) if txt else live
+            rows.append((name, val, i == self.field))
+        self._draw_rows(cur, rows)

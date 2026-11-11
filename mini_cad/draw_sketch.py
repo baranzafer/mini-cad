@@ -104,6 +104,8 @@ class SketchMixin:
             self.start = cur
             self.node_ids = {0: self.snap_id} if self.snap_id else {}
             self.start_tan = self._end_tangent_of(self.snap_id) if self.snap_id else None
+            if self.start_tan is None:            # taslaktaki (henüz kaydedilmemiş) çizginin ucu
+                self.start_tan = self._sketch_end_tangent(cur)
             if self.plane is None:
                 self.plane = (self.tmp_plane or self._make_plane(self.plane_mode, cur)).moved(cur)
             else:
@@ -372,6 +374,7 @@ class SketchMixin:
             return {}
         out, n_auto = {}, 0
         written = []
+        sk_map = {}                              # taslak indeksi -> (çizgi, spline)
         for i, st in enumerate(strokes):
             try:
                 si = self._write_spline(context, ob, st["segs"], st["cyclic"])
@@ -380,13 +383,14 @@ class SketchMixin:
                 continue
             out[i] = (ob.name, si, len(st["segs"]))
             written.append((st, si))
+            sk_map[i] = (st, si)
         _LAST["curve"] = ob.name
         self.created += 1
         for st, si in written:
             try:
                 n_auto += self._auto_constraints(context, ob, si, st["segs"], st["cyclic"],
                                                  st["node_ids"], solve=False)
-                n_auto += self._auto_tangent(context, ob, si, st)
+                n_auto += self._auto_tangent(context, ob, si, st, sk_map)
             except Exception:
                 traceback.print_exc()
         try:
@@ -415,13 +419,35 @@ class SketchMixin:
         self._hist_reset()                       # kaydedildi: geri alma artık Blender'da
         return out
 
-    def _auto_tangent(self, context, ob, si, st):
+    def _auto_tangent(self, context, ob, si, st, sk_map=None):
         start_tan = st.get("start_tan")
         segs = st["segs"]
         if start_tan is None or not segs or not segs[0].get("tan_start") or \
                 not getattr(context.scene, "minicad_auto_constraints", True):
             return 0
         t = dm.start_tangent(segs[0])
+        ref = start_tan[1]
+        if ref[0] == "@sketch":                   # aynı taslaktaki çizginin ucundan başladı
+            src = (sk_map or {}).get(ref[1])
+            if src is None or t is None:
+                return 0
+            sst, ssi = src
+            try:
+                sg = sst["segs"][ref[2]]
+            except Exception:
+                return 0
+            tr = dm.end_tangent(sg) if ref[3] == 3 else dm.start_tangent(sg)
+            if tr is None:
+                return 0
+            tr = tr if ref[3] == 3 else -tr
+            p0, pe = np.asarray(segs[0]["p"][0]), np.asarray(sg["p"][ref[3]])
+            tol = 1e-7 * (1.0 + float(np.abs(p0).max()))
+            if float(np.linalg.norm(p0 - pe)) > tol or \
+                    float(np.dot(t, tr)) < math.cos(math.radians(1.0)):
+                return 0                          # taslakta düzenlenip birleşim / teğetlik bozulmuş
+            c = constraints.add("TANGENT", [("seg", ob, ssi, ref[2]), ("seg", ob, si, 0)],
+                                auto=True, solve=False)
+            return 0 if c is None else 1
         if t is None or float(np.dot(t, start_tan[0])) < math.cos(math.radians(1.0)):
             return 0                              # taslakta düzenlenip teğetlik bozulmuş
         o2 = bpy.data.objects.get(start_tan[1][0])

@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.15.2)
+# Mini CAD — Geliştirme Notları (v0.15.3)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -8,7 +8,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-1. İki dosyayı yükle: `mini_cad_v0.15.2.zip` (eklenti) ve `mini_cad_devkit_v0.15.2.zip`
+1. İki dosyayı yükle: `mini_cad_v0.15.3.zip` (eklenti) ve `mini_cad_devkit_v0.15.3.zip`
    (testler + araçlar).
 2. Açılış mesajında şunu söyle: "Mini CAD projesine devam ediyoruz, önce DEVELOPMENT.md'yi oku."
    Ardından isteklerini yaz. Mümkünse birkaç isteği tek mesajda topla.
@@ -20,8 +20,10 @@ hangi dosyaya bakılacağını söyler.
    ```
    Beklenen sonuç: `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den beri
    bayat; "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
-4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t44.py` ...),
+4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t45.py` ...),
    sürümü artır ve paketle (§8).
+5. Kod GitHub'da da tutuluyor: `baranzafer/mini-cad` deposunda eklenti `mini_cad/`, testler ve
+   araçlar `devkit/` klasöründe. Her sürüm ayrı bir commit olarak eklenir.
 
 ---
 
@@ -121,14 +123,14 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `constraints_refs.py` | 86 | Kısıt veri erişimi: referans noktaları, dünya konumu, `all_constraints` |
 | `constraints_tangent.py` | 355 | Teğet planlaması (§6) |
 | `constraints_glyphs.py` | 98 | Kısıt simgesi çizimi, `glyph_at` |
-| `draw.py` | 681 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
+| `draw.py` | 711 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
 | `draw_common.py` | 448 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
-| `draw_plane.py` | 403 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış |
-| `draw_snap.py` | 573 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
-| `draw_sketch.py` | 582 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
-| `draw_edit.py` | 323 | EditMixin: taslak noktası / tutamaç sürükleme, pivot, sürüklerken yakalama |
+| `draw_plane.py` | 525 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (U) |
+| `draw_snap.py` | 595 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
+| `draw_sketch.py` | 608 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
+| `draw_edit.py` | 426 | EditMixin: taslak noktası / tutamaç sürükleme, pivot, sürüklerken yakalama, sürüklerken ölçü yardımcısı |
 | `draw_glyphs.py` | 197 | ConstraintUIMixin: kısıt için kenar / nokta seçimi, simge sağ tık menüsü |
-| `draw_render.py` | 220 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
+| `draw_render.py` | 233 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
 | `drawmath.py` | 585 | bpy'siz çizim matematiği: düzlemler, doğru / yay / daire / dikdörtgen, B-spline→Bézier (Boehm), Catmull-Rom, kalem, kılavuz rafinesi |
 | `snapmath.py` | 410 | FORGE snap_math (GPL başlıklı kopya) |
 | `palette.py` | 424 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
@@ -137,7 +139,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `panels.py` | 530 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
 | `bool_overlay.py` | 177 | Boolean vurgusu, CAD kenarları, hayalet çizimi |
 | `wire.py` | 308 | Mesh kenarlarından bezier tel kafes |
-| `recorder.py` | 531 | Ctrl+Alt+R kayıt / rapor (§7) |
+| `recorder.py` | 532 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
 
 **Bölme notu (v0.15.2):**
@@ -188,6 +190,7 @@ RenderMixin, bpy.types.Operator)`.
 Diğer kısayollar:
 - **Araç geçişi:** Q son iki araç arasında geçiş yapar. Shift+Q düzlemi yeniden seçtirir.
 - **Düzlem:** X / Y / Z / V.
+- **Geçici zemin (U):** çizerken ızgaranın yönü ve yüksekliği değiştirilir (aşağıya bakın).
 - **Çizerken:**
   - C: başlangıca dönüp kapatır. F: kapalı çizgiden yüzey (Ctrl+F: yeni gövde).
   - Shift: 15° adım. Ctrl: yakalama kapalı. I: ızgara yakalaması aç / kapa.
@@ -216,6 +219,13 @@ Diğer kısayollar:
 - Pürüzsüz birleşimde karşı tutamaç hizalı kalır.
 - Tıklanan noktada **pivot** çıkar; oklarından sürükleyince o eksende taşınır.
 - Sürüklerken tam yakalama ve ızgara geçerlidir (`_drag_apply`, `_point_snap_excluding`).
+- **Sürüklerken ölçü yardımcısı** (`_draw_drag_input`, `_dim_anchor`, `_drag_typing`):
+  - Ölçü noktası: tutamaçta bağlı olduğu nokta, noktada çizgideki komşu nokta (önceki; yoksa
+    sonraki).
+  - Çizimdeki gibi uzunluk / açı etiketi ve imleç yanında ölçü kutusu gösterilir.
+  - Basılı tutarken yazılan değer kilitler: uzunluk (tutamaçta tutamaç boyu), Tab ile açı.
+    Eksen kilidinde (X/Y/Z) yazılan değer eksen boyunca kaydırmadır.
+  - Bırakınca ya da Enter ile uygulanır. Sürüklenen öğenin yüksekliği korunur.
 - Durum alanları: `sk_hover` / `sk_drag` / `sk_sel`.
 
 **Yakalama:**
@@ -227,8 +237,28 @@ Diğer kısayollar:
 - Izgara yakalaması da zayıftır. Görünürlüğü `minicad_grid_alpha` ile ayarlanır; yakalama yine
   çalışır.
 
-**Teğet yay:** ilk tıklamadan çalışır. Mevcut bir eğri ucundan `start_tan` alır; teğet yoksa 3
-noktalı yay gibi davranır.
+**Teğet yay:** ilk tıklamadan çalışır (Inventor gibi). Bir çizginin ucundan başlayınca ona teğet
+devam eder; boşlukta başlarsa 3 noktalı yay gibi davranır. `start_tan` iki kaynaktan alınır:
+- Kaydedilmiş eğri ucu: `_end_tangent_of(snap_id)`.
+- **Taslaktaki** (henüz Bitir'lenmemiş) açık çizginin ucu: `_sketch_end_tangent(nokta)`. Kimlik
+  `("@sketch", çizgi, segment, uç)` biçimindedir. Bitir'de `_auto_tangent` bunu yazılan spline'a
+  çevirir ve TEĞET kısıtını yazar. Taslakta birleşim ya da teğetlik bozulduysa kısıt yazılmaz.
+- v0.15.0–0.15.2'de ikinci kaynak yoktu. Sağ tıkla taslağa eklenen çizginin ucundan başlayan
+  teğet yay 3 noktalı yaya düşüyordu (v0.15.3'te düzeltildi).
+
+**Geçici zemin (U)** (`draw_plane`: `_temp_begin`, `_temp_end`, `_temp_cancel`):
+- Çizim fazında **U**: süren çizgi taslağa eklenir, iki aşamalı düzlem seçimi açılır.
+  - 1/2 yön: eksen düzlemi, yüz ya da X/Y/Z/V. **Sağ tık / Enter: mevcut yön**, sadece
+    yükseklik değişir. Esc: iptal, araç açık kalır.
+  - 2/2 yükseklik: fare, nokta (taslak noktaları dahil), **ana düzlem** yüksekliği ya da ızgara
+    yakalaması; değer de yazılabilir. Ölçü kutusunda yükseklik ve ana düzleme göre fark
+    gösterilir. Yakalanan noktadan taban düzlemine hiza çizgisi çizilir.
+- Onaylanınca `plane_mode = "LOCK"` olur ve `self.temp = {"saved", "plane", "label", "grid_o"}`
+  tutulur. Yükseklik bir noktadan alındıysa ızgara kökeni (`_grid_origin`) o noktaya taşınır.
+- Tekrar **U**'ya basılana kadar bütün yeni çizgiler bu zemine çizilir. U: asıl düzleme dönülür
+  (`saved`). **Shift+U:** başka bir geçici zemin seçilir, asıl düzlem korunur.
+- Açık düzlem seçimi (X/Y/Z/V, palet, Shift+Q) geçici zemini bitirir ve kalıcı olur.
+- Ekranın sol altında "Geçici zemin: ..." etiketi görünür; durum çubuğunda da yazar.
 
 **Sahne ayarları:** `minicad_grid_snap`, `minicad_grid_alpha`, `minicad_draw_target`,
 `minicad_look_at`, `minicad_pick_plane`, `minicad_auto_constraints`,
@@ -304,6 +334,7 @@ Betiğin yaptıkları:
 | t41 | Palet, araçlar, kısıtlar, düzlem, ızgara, seç, simge menüsü, Q |
 | t42 | Teğet senaryoları (arcslide dahil) |
 | t43 | Taslak, sürükleme, T izi, geri al / yinele, pivot, tutamaç yakalama, yeni hedef |
+| t44 | Taslak çizgisinin ucundan teğet yay, sürüklerken ölçü yardımcısı, geçici zemin (U) |
 
 **Test yazma kalıbı:**
 - t41–t43, `exec(open("t.py")...)` ile stub'ları yükler. Üstten ortografik görünüm
@@ -333,7 +364,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   final hesap yapılır.
 - Belirsiz gövde kenarı eşleşmesi **reddedilir**, tahmin edilmez.
 - Teğet arcslide: yay geometrisi korunur, doğru uyum sağlar.
-- Teğet yay ilk tıklamadan çalışır.
+- Teğet yay ilk tıklamadan çalışır; taslaktaki çizginin ucundan başlayınca da teğettir.
+- Geçici zemin: U ile girilir, U ile asıl düzleme dönülür. Seçilirken Esc aracı kapatmaz.
+- Taslak sürüklerken ölçü kutusu görünür. Yazılan değer kilitler, X/Y/Z hâlâ eksen kilididir.
 - Kısıt simgesine hover'da hiçbir şey açılmaz, menü yalnızca sağ tıkla açılır. Yakalama
   simgelere yapışmaz.
 - Esc iki aşamalıdır: önce Seç / duraklat, sonra kapat.
@@ -372,3 +405,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - **0.15.2:** yapısal bölme, davranış değişikliği yok:
   - `draw.py` → 7 modül, `constraints.py` → 4 modül;
   - DEVELOPMENT.md ve devkit (testler + koşucu + araçlar) eklendi.
+- **0.15.3:**
+  - Taslak noktası / tutamacı sürüklerken ölçü yardımcısı: uzunluk, açı, yazarak değer.
+  - Teğet yay, taslaktaki çizginin ucundan başlayınca yeniden teğet çalışıyor; Bitir'de TEĞET
+    kısıtı yazılıyor.
+  - Geçici zemin (U / Shift+U): ızgara yönü, yükseklik ve kökeni; yükseklikte nokta, ana düzlem
+    ve ızgara yakalamaları ile ölçü kutusu.
