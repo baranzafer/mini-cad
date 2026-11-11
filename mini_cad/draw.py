@@ -3,6 +3,8 @@
 Araçlar   Seç (W) · Doğru (L) · Teğet yay (A) · 3 noktalı yay (E) · Merkezli yay (M, D: yön) ·
           Daire (O) · Dikdörtgen (R) · Spline: kontrol noktalı (S) · noktalardan geçen (K) ·
           Kalem (P) · Q: son iki araç arasında geçiş · Shift+Q: düzlem seç
+Değiştir  Kırp (B, Shift: Uzat) · Uzat · Böl · Ötele · Köşe yuvarla · Pah (taslak üzerinde;
+          bkz. draw_modify.py)
 Düzlem    Oto · XY · XZ · YZ · Görünüş (X / Y / Z / V tuşları)
 Kısıtlar  Eksen · Paralel · Dik · Doğrusal · Eşit · Çakışık · Sabit · Teğet · Simetrik ·
           Uzunluk · Açı (pencereden seç, sonra kenar / noktalara tıkla)
@@ -67,10 +69,12 @@ from .draw_sketch import SketchMixin
 from .draw_edit import EditMixin
 from .draw_glyphs import ConstraintUIMixin
 from .draw_render import RenderMixin
+from .draw_modify import MOD_HELP, ModifyMixin
+from .draw_common import MODIFY_TOOLS
 
 
 class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintUIMixin, RenderMixin,
-                      bpy.types.Operator):
+                      ModifyMixin, bpy.types.Operator):
     bl_idname = "minicad.draw"
 
     bl_label = "Tel Kafes Çiz"
@@ -156,6 +160,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self.snap_src = None             # geçici zeminde izdüşürülen yakalamanın asıl noktası
         self.snap_src_id = None
         self.plane_snap = None           # düzlem seçerken yakalanan nokta (konum, tür)
+        self._mod_init()                 # değiştir araçları (draw_modify)
         self.phase = "PLANE" if getattr(sc, "minicad_pick_plane", True) else "DRAW"
         self.palette = palette.Palette(self.ui_scale)
         self.created = 0
@@ -191,7 +196,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         if self.tool.startswith("C_"):
             return "Kısıt: " + next((n for k, n in palette.CONSTRAINTS
                                      if k == self.tool[2:]), self.tool)
-        return next((n for k, n, _ in palette.DRAW_TOOLS if k == self.tool), self.tool)
+        return next((n for k, n, _ in palette.DRAW_TOOLS + palette.MODIFY_TOOLS
+                     if k == self.tool), self.tool)
 
     def _status(self, context, msg=None):
         if msg is not None:
@@ -248,7 +254,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             if tz is not None:
                 plane = f"GEÇİCİ ZEMİN {tz['label']} (U: normale dön, Shift+U: başka zemin)"
             txt = (f"{self._tool_name()} · düzlem: {plane}  |  Tık: nokta  |  Sağ tık/Enter: "
-                   "bitir  |  Yaz: ölçü, Tab: sonraki alan  |  W/L/A/E/M/O/R/S/K/P: araç  |  Q: önceki "
+                   "bitir  |  Yaz: ölçü, Tab: sonraki alan  |  W/L/A/E/M/O/R/S/K/P: araç  |  B: kırp  |  Q: önceki "
                    "araç  |  C: kapat  "
                    "|  F: yüzey  |  Ctrl+Z / Ctrl+Shift+Z: taslakta geri al / yinele  |  Shift+Q: düzlem seç  |  U: geçici zemin  |  X/Y/Z/V: düzlem  |  I: ızgara "
                    f"{'açık' if self.grid_on else 'kapalı'}  |  Shift: 15°  |  Ctrl: yakalama "
@@ -270,7 +276,11 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             self._finish_sketch(context)          # kısıtlar kaydedilmiş eğrilere uygulanır
         if tool == "SELECT" and self.segs:
             self._commit(context)
-        if tool.startswith("C_") or tool == "SELECT":
+        if tool in MODIFY_TOOLS and (self.segs or self.start is not None or self.stage):
+            self._commit(context)                 # değiştir araçları taslak üzerinde çalışır
+        self._mod_init()
+        self.mod, self.off_sel, self.mod_drag = None, None, False
+        if tool.startswith("C_") or tool == "SELECT" or tool in MODIFY_TOOLS:
             self.preview = []
             self.cursor = None
             self.info = None
@@ -281,6 +291,9 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         msg = ""
         if tool == "SELECT":
             msg = "Duraklatıldı: tıklamalar Blender'a gidiyor · çizmek için pencereden araç seç"
+        if tool in MODIFY_TOOLS:
+            msg = MOD_HELP[tool] if self.sketch else (MOD_HELP[tool] + " · taslakta çizgi yok "
+                                                      "(değiştir araçları taslakta çalışır)")
         if tool == "TARC" and not self.segs and self.start_tan is None:
             msg = ("Teğet yay: bir çizginin ucundan başlarsan ona teğet devam eder; boşlukta "
                    "başlarsan 3 noktalı yay gibi çizer")
@@ -464,7 +477,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                 return {"FINISHED"}
             return {"RUNNING_MODAL"}
 
-        if inside and self.phase == "DRAW" and self.sk_drag is None and self.track is None:
+        if inside and self.phase == "DRAW" and self.sk_drag is None and self.track is None and \
+                self.tool not in MODIFY_TOOLS:
             if self._sketch_event(context, event, mx, my, press):
                 return {"RUNNING_MODAL"}
         if self.sk_drag is not None:
@@ -508,6 +522,10 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             return self._modal_plane(context, event, mx, my, press)
         if self.phase == "OFFSET":
             return self._modal_offset(context, event, mx, my, press)
+        if self.tool in MODIFY_TOOLS:
+            r = self._mod_event(context, event, mx, my, press)
+            if r is not None:
+                return r
         if self.track is not None:
             r = self._track_event(context, event, mx, my, press)
             if r is not None:

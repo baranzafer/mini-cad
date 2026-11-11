@@ -24,6 +24,14 @@ DRAW_TOOLS = [
     ("FIT", "Spline: noktalardan geçen", "K"),
     ("PEN", "Kalem: tıkla-sürükle ile bezier tutamacı", "P"),
 ]
+MODIFY_TOOLS = [
+    ("TRIM", "Kırp: parçayı en yakın kesişimler arasında sil (sürükle: çoklu, Shift: Uzat)", "B"),
+    ("EXTEND", "Uzat: ucu en yakın sınıra uzat (Shift: Kırp)", ""),
+    ("SPLIT", "Böl: nesneyi kesişimde ikiye ayır", ""),
+    ("OFFSET", "Ötele: çizgiye tıkla, mesafe ver (Shift+tık: tek nesne)", ""),
+    ("FILLET2D", "Köşe yuvarla: yarıçap yaz, köşeye tıkla", ""),
+    ("CHAMFER2D", "Pah: mesafe yaz (Tab: 2. mesafe), köşeye tıkla", ""),
+]
 PLANES = [("PICK", "Seç", "Çizim düzlemini görünümde seç: eksen düzlemi ya da gövde yüzü "
                           "(Shift+Q)"),
           ("AUTO", "Oto", "Görüşe göre eksen düzlemi; gövde yüzüne tıklarsan yüz düzlemi"),
@@ -194,6 +202,34 @@ def icon_lines(name):
         return P([(0.0, -0.85), (-0.4, 0.05), (0.0, 0.3), (0.4, 0.05)], True) + \
             P([(0.0, -0.85), (0.0, -0.15)]) + P([(-0.85, 0.65), (0.85, 0.65)]) + \
             _dot(-0.85, 0.65) + _dot(0.85, 0.65)
+    if name == "TRIM":
+        dash = []
+        for k in range(3):
+            x = -0.85 + k * 0.22
+            dash += [(x, 0.0), (x + 0.12, 0.0)]
+        return P([(-0.15, 0.0), (0.85, 0.0)]) + P([(0.1, -0.8), (0.1, 0.8)]) + dash + \
+            P([(-0.55, 0.25), (-0.35, 0.45)]) + P([(-0.55, 0.45), (-0.35, 0.25)])
+    if name == "EXTEND":
+        dash = []
+        for k in range(3):
+            x = -0.05 + k * 0.25
+            dash += [(x, -0.2), (x + 0.14, -0.2)]
+        return P([(-0.85, -0.2), (-0.15, -0.2)]) + dash + P([(0.75, -0.8), (0.75, 0.8)]) + \
+            P([(0.5, 0.05), (0.7, -0.2), (0.5, -0.45)])
+    if name == "SPLIT":
+        return P([(-0.85, -0.3), (-0.12, -0.3)]) + P([(0.12, -0.3), (0.85, -0.3)]) + \
+            P([(0.0, -0.85), (0.0, 0.25)]) + _dot(-0.12, -0.3) + _dot(0.12, -0.3)
+    if name == "OFFSET":
+        return P(_arc(0.15, -0.15, 0.55, math.pi / 2, math.pi)) + \
+            P([(-0.4, -0.15), (-0.4, -0.85)]) + P([(0.15, 0.4), (0.85, 0.4)]) + \
+            P(_arc(0.15, -0.15, 0.9, math.pi / 2, math.pi)) + \
+            P([(-0.75, -0.15), (-0.75, -0.85)]) + P([(0.15, 0.75), (0.85, 0.75)])
+    if name == "FILLET2D":
+        return P([(-0.75, 0.8), (-0.75, -0.1)]) + P(_arc(-0.05, -0.1, 0.7, math.pi,
+                                                         1.5 * math.pi)) + \
+            P([(-0.05, -0.8), (0.85, -0.8)])
+    if name == "CHAMFER2D":
+        return P([(-0.75, 0.8), (-0.75, -0.2), (-0.15, -0.8), (0.85, -0.8)])
     if name == "AXIS":
         return P([(-0.8, 0.0), (0.8, 0.0)]) + P([(-0.8, -0.3), (-0.8, 0.3)]) + \
             P([(0.8, -0.3), (0.8, 0.3)]) + P([(0.0, -0.75), (0.0, -0.45)])
@@ -293,6 +329,8 @@ class Palette:
         strip("tgt", TARGETS)
         section("ÇİZ")
         grid("tool", DRAW_TOOLS)
+        section("DEĞİŞTİR")
+        grid("tool", MODIFY_TOOLS)
         section("DÜZLEM")
         strip("plane", PLANES)
         section("KISIT")
@@ -321,7 +359,7 @@ class Palette:
             return ""
         kind, ident = self.hover
         if kind == "tool":
-            for k, name, key in DRAW_TOOLS:
+            for k, name, key in DRAW_TOOLS + MODIFY_TOOLS:
                 if k == ident:
                     return name + (f"  [{key}]" if key else "")
         if kind == "plane":

@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.15.5)
+# Mini CAD — Geliştirme Notları (v0.16.0)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -8,7 +8,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-1. İki dosyayı yükle: `mini_cad_v0.15.5.zip` (eklenti) ve `mini_cad_devkit_v0.15.5.zip`
+1. İki dosyayı yükle: `mini_cad_v0.16.0.zip` (eklenti) ve `mini_cad_devkit_v0.16.0.zip`
    (testler + araçlar).
 2. Açılış mesajında şunu söyle: "Mini CAD projesine devam ediyoruz, önce DEVELOPMENT.md'yi oku."
    Ardından isteklerini yaz. Mümkünse birkaç isteği tek mesajda topla.
@@ -20,7 +20,7 @@ hangi dosyaya bakılacağını söyler.
    ```
    Beklenen sonuç: `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den beri
    bayat; "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
-4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t47.py` ...),
+4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t49.py` ...),
    sürümü artır ve paketle (§8).
 5. Kod GitHub'da da tutuluyor: `baranzafer/mini-cad` deposunda eklenti `mini_cad/`, testler ve
    araçlar `devkit/` klasöründe. Her sürüm ayrı bir commit olarak eklenir. Kurulum zip'leri
@@ -148,17 +148,19 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `constraints_refs.py` | 86 | Kısıt veri erişimi: referans noktaları, dünya konumu, `all_constraints` |
 | `constraints_tangent.py` | 355 | Teğet planlaması (§6) |
 | `constraints_glyphs.py` | 98 | Kısıt simgesi çizimi, `glyph_at` |
-| `draw.py` | 714 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
-| `draw_common.py` | 448 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
+| `draw.py` | 732 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
+| `draw_common.py` | 450 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
 | `draw_plane.py` | 537 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (U) |
-| `draw_snap.py` | 634 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
+| `draw_snap.py` | 638 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
 | `draw_sketch.py` | 611 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
-| `draw_edit.py` | 426 | EditMixin: taslak noktası / tutamaç sürükleme, pivot, sürüklerken yakalama, sürüklerken ölçü yardımcısı |
+| `draw_edit.py` | 427 | EditMixin: taslak noktası / tutamaç sürükleme, pivot, sürüklerken yakalama, sürüklerken ölçü yardımcısı |
 | `draw_glyphs.py` | 197 | ConstraintUIMixin: kısıt için kenar / nokta seçimi, simge sağ tık menüsü |
-| `draw_render.py` | 251 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
+| `draw_render.py` | 255 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
+| `sketchmath.py` | 1021 | bpy'siz taslak düzenleme matematiği: bezier bölme, varlıklar, kesişimler, Kırp / Uzat / Böl / Ötele / Köşe yuvarla / Pah |
+| `draw_modify.py` | 565 | ModifyMixin: Değiştir araçlarının seçimi, önizlemesi, olayları ve çizimi |
 | `drawmath.py` | 585 | bpy'siz çizim matematiği: düzlemler, doğru / yay / daire / dikdörtgen, B-spline→Bézier (Boehm), Catmull-Rom, kalem, kılavuz rafinesi |
 | `snapmath.py` | 410 | FORGE snap_math (GPL başlıklı kopya) |
-| `palette.py` | 424 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
+| `palette.py` | 462 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
 | `pick.py` | 579 | Kenar seçim modu (hover + tık), sarı gövde kenarları, B ile fillet |
 | `ui.py` | 590 | Operatörler, tercihler (`background`), `add_feature` (BODY ref) |
 | `panels.py` | 532 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
@@ -188,7 +190,9 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 ## 5. Çizim aracı (`MINICAD_OT_draw`, `minicad.draw`)
 
 **Sınıf:** `MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintUIMixin,
-RenderMixin, bpy.types.Operator)`.
+RenderMixin, ModifyMixin, bpy.types.Operator)`. Mixin'lerde **aynı adlı metot olmamalı** (v0.16'da
+`_offset_update` çakışması yakalandı). Kontrol:
+`grep -ho "^    def [a-zA-Z_0-9]*" draw_*.py draw.py | sort | uniq -d` boş dönmeli.
 
 **Fazlar** (`self.phase`):
 - `PLANE`: 1/2 yön seçimi. Eksen düzlemi ya da yüz seçilir; düzlem seçici gri ve silik çizilir.
@@ -211,6 +215,8 @@ RenderMixin, bpy.types.Operator)`.
 | CV spline | S |
 | Noktalardan geçen spline | K |
 | Kalem | P |
+| Kırp (Shift: Uzat) | B |
+| Uzat, Böl, Ötele, Köşe yuvarla, Pah | palet (DEĞİŞTİR) |
 
 Diğer kısayollar:
 - **Araç geçişi:** Q son iki araç arasında geçiş yapar. Shift+Q düzlemi yeniden seçtirir.
@@ -252,6 +258,39 @@ Diğer kısayollar:
     Eksen kilidinde (X/Y/Z) yazılan değer eksen boyunca kaydırmadır.
   - Bırakınca ya da Enter ile uygulanır. Sürüklenen öğenin yüksekliği korunur.
 - Durum alanları: `sk_hover` / `sk_drag` / `sk_sel`.
+
+**Değiştir araçları** (v0.16.0, Inventor 2D gibi; `draw_modify` + `sketchmath`):
+- **Yalnızca taslak** (Bitir'lenmemiş çizgiler) üzerinde çalışırlar. Araca geçince süren
+  çizgi taslağa eklenir. Kaydedilmiş eğriler dokunulmaz (spline sırası ve yüzey
+  referansları korunur). Tel kafes eğrileri Kırp / Uzat'ta yalnızca **sınır** olarak kullanılır.
+- **Varlık:** aynı `grp` değerli ardışık segmentler (tek doğru / yay / spline) ya da aynı
+  çembere ait gruplanmamış yaylar (daire). Değiştirilen parçalar yeni `grp` alır.
+- **Kırp (B):**
+  - İmlecin altındaki varlık, en yakın iki kesişim arasında silinir; kesişim yoksa tamamı
+    silinir.
+  - Kapalı varlıkta (daire) başlangıç noktası da kesişim sayılır.
+  - Basılı sürükleyince imlecin geçtiği her parça kırpılır (2×yakalama yarıçapı aralıkla).
+  - Shift ile Uzat'a geçilir.
+- **Uzat:** imlece yakın açık uç (ilk / son varlık) en yakın sınıra uzatılır. Doğru ışın
+  boyunca, yay çemberi boyunca uzar; spline uzamaz. Shift ile Kırp'a geçilir.
+- **Böl:** açık varlık imlece en yakın kesişimden ikiye ayrılır, çizgi bütün kalır. Kapalı
+  varlık imleci çevreleyen iki kesişimde yay parçalarına ayrılır.
+- **Ötele:**
+  - Seçim: tıklayınca bütün çizgi (döngü), Shift+tık ile tek varlık.
+  - Mesafe fareyle verilir ya da yazılır; tık / Enter uygular, sağ tık seçimi bırakır.
+  - Öteleme: doğrular kayar, yaylar merkezden ölçeklenir (tam), spline'lar uç teğetleri
+    korunarak uydurulur.
+  - Köşeler: doğru–doğru kesişime uzar; diğer köşelerde boşluk teğet uzantılarıyla kapanır,
+    örtüşme kesişimde kırpılır.
+- **Köşe yuvarla / Pah:**
+  - Teğet olmayan iç düğüm ya da iki ayrı çizginin çakışan uçları seçilir; ayrı çizgiler
+    birleştirilir.
+  - Yuvarlama yayı her eğri türünde iki ötelenmiş eğrinin kesişiminden (Newton) bulunur.
+  - Değer yazılır, son değer hatırlanır. Yazılmadıysa ilk değer kısa kenarın %20'si.
+  - Pah: 1. mesafe köşeden önceki parçaya, Tab ile 2. mesafe sonrakine (boşsa eşit).
+- Hepsi taslak geçmişine girer (Ctrl+Z / Ctrl+Shift+Z). Oto kısıt referansları (`chain`)
+  yeniden eşlenir, uzunluk kısıtı değişen parçada düşer.
+  `("@sketch", ...)` teğet referansları `fix_sketch_refs` ile konumdan yeniden bulunur.
 
 **Yakalama:**
 - Yakalanan noktalar: tel kafes ve CAD gövde kenarlarının ucu / ortası, çember ve yay merkezleri,
@@ -373,6 +412,8 @@ Betiğin yaptıkları:
 | t44 | Taslak çizgisinin ucundan teğet yay, sürüklerken ölçü yardımcısı, geçici zemin (U) |
 | t45 | Geçici zeminde eski çizime yapışınca zeminde kalma, seçim sırasında taslak görünürlüğü, noktadan zemin |
 | t46 | Yüzey birleşimi: gather → motor kurma sırası, gövde sırası, imza, eski dosya |
+| t47 | Değiştir araçları modal: Kırp (sürükleme, Shift), Uzat, Böl, Ötele, Köşe yuvarla, Pah, ayrı uçları birleştirme, Bitir, çizim |
+| t48 | sketchmath: kesişim, kırpma (daire dahil), uzatma, bölme, öteleme, yuvarlama, pah |
 | tools/occ_blend_check.py | GERÇEK OCC ile teğet birleşim ölçümü (test koşucusunda değil, OCP gerekir) |
 
 **Test yazma kalıbı:**
@@ -408,6 +449,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - Geçici zeminde her nokta zeminde kalır: eski çizimin noktalarına yapışılır ama izdüşürülür.
 - Düzlem / zemin seçilirken taslak görünür kalır.
 - Yüzey birleşimi varsayılanı Keskin'dir; mevcut modeller aynı hesaplanır.
+- Değiştir araçları kaydedilmiş eğrilere dokunmaz; yalnızca taslağı değiştirir.
 - Taslak sürüklerken ölçü kutusu görünür. Yazılan değer kilitler, X/Y/Z hâlâ eksen kilididir.
 - Kısıt simgesine hover'da hiçbir şey açılmaz, menü yalnızca sağ tıkla açılır. Yakalama
   simgelere yapışmaz.
@@ -432,6 +474,20 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   henüz incelenmedi.
 
 ---
+
+- **Inventor 2D çizim araçları yol haritası** (kullanıcı isteği; 3–4 aşama):
+  1. **(0.16.0, yapıldı)** Değiştir: Kırp, Uzat, Böl, Ötele; 2D Köşe yuvarla / Pah.
+  2. Taşı, Kopyala, Döndür, Ölçekle, Esnet; Desen: dikdörtgen, dairesel, Ayna.
+  3. Çiz eksikleri: dikdörtgen (3 nokta, merkezden), çokgen, kanal (slot), daire (teğet,
+     elips?), Nokta, Geometri yansıt (Project Geometry).
+  4. Kısıt / Ölçü: genel Ölçü aracı (tıklanan varlığa göre uzunluk / yarıçap / açı), Eş
+     merkezli, Pürüzsüz (G2), görünürlük.
+  - Ayrıca değerlendirilecek: Bitir'lenmiş eğriyi taslağa geri alma (Inventor "Edit
+    Sketch"). Spline sırası / yüzey referansları nedeniyle dikkatli tasarım gerekir.
+  - Autodesk yardım sayfaları bu ortamın ağ ayarlarında kapalıydı. Davranışlar Inventor
+    bilgisinden uygulandı.
+- 2D Köşe yuvarla / Pah henüz yalnızca birleşik köşelerde çalışıyor. Inventor'daki gibi
+  kesişen ya da ayrık iki nesneyi seçme yok. Eşit yarıçap kısıtı yok.
 
 ## 11. Sürüm geçmişi (kısa)
 
@@ -462,3 +518,6 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - Yüzeyler panelinde "Yüzey Birleşimi" (Keskin / Teğet G1) ve yüzey başına "Birleşim".
   - Teğette eğri yüzeyler komşularına kaynaşır, kenar çizgisi kaybolur.
   - devkit'e gerçek OCC ölçüm aracı eklendi.
+- **0.16.0:** Inventor 2D araçları, 1. aşama.
+  - DEĞİŞTİR paleti: Kırp (B, sürükleme, Shift: Uzat), Uzat, Böl, Ötele, Köşe yuvarla, Pah.
+  - Yeni modüller `sketchmath.py` ve `draw_modify.py`; testler t47, t48.

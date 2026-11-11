@@ -440,7 +440,9 @@ CHAIN_TOOLS = {"LINE", "TARC", "ARC3", "CARC", "CV", "FIT", "PEN"}
 SHAPE_TOOLS = {"CIRCLE", "RECT"}
 
 TOOL_KEYS = {"W": "SELECT", "L": "LINE", "E": "ARC3", "M": "CARC", "O": "CIRCLE",
-             "R": "RECT", "S": "CV", "K": "FIT", "P": "PEN"}
+             "R": "RECT", "S": "CV", "K": "FIT", "P": "PEN", "B": "TRIM"}
+
+MODIFY_TOOLS = {"TRIM", "EXTEND", "SPLIT", "OFFSET", "FILLET2D", "CHAMFER2D"}
 
 FIELDS = {"CIRCLE": ("Yarıçap", None), "RECT": ("Genişlik", "Yükseklik"),
           "ARC3": (None, None), "CARC": (None, None), "TARC": (None, None)}

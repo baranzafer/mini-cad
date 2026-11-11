@@ -11,7 +11,7 @@ from . import core
 from . import drawmath as dm
 from .draw_common import (
     COL_ACTIVE, COL_BOX, COL_DONE, COL_GUIDE, COL_REF, COL_RUBBER, COL_SNAP, COL_TEXT,
-    PLANE_COLS, _STATE, _axis_col, _dashed, _marker, _poly, _rect, _text,
+    MODIFY_TOOLS, PLANE_COLS, _STATE, _axis_col, _dashed, _marker, _poly, _rect, _text,
 )
 
 
@@ -36,6 +36,8 @@ class RenderMixin:
                 gpu.state.blend_set("NONE")
                 return
             self._draw_sketch3d(region)
+            if self.tool in MODIFY_TOOLS:
+                self._draw_modify3d(region)
             if self.grid_on and self.cursor is not None and not self.tool.startswith("C_"):
                 self._draw_grid(region)
             for s in self.segs:
@@ -58,7 +60,7 @@ class RenderMixin:
             pl = self._cur_plane() or self.tmp_plane
             c = self.cursor if self.cursor is not None else (pl.o if pl is not None else None)
             if pl is not None and c is not None and not self.tool.startswith("C_") and \
-                    self.tool != "SELECT":
+                    self.tool != "SELECT" and self.tool not in MODIFY_TOOLS:
                 o = self._lock_anchor() if self._lock_anchor() is not None else c
                 L = 30.0 * self.ui_scale * self._px_size(o)
                 _poly([tuple(o), tuple(o + pl.u * L)], _axis_col(pl.u), 1.8, region)
@@ -180,6 +182,8 @@ class RenderMixin:
                 self._draw_sketch2d(region)
                 self._draw_pivot(region)
                 self._draw_track2d(region)
+                if self.tool in MODIFY_TOOLS:
+                    self._draw_modify2d(region)
             if self.phase == "OFFSET":
                 self._draw_sketch2d(region)
                 self._draw_offset2d(region)

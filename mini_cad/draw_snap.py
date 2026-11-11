@@ -12,7 +12,8 @@ from . import constraints
 from . import core
 from . import drawmath as dm
 from .draw_common import (
-    COL_GUIDE, COL_SNAP, FIELDS, GRID_PX, GUIDE_PX, PRIORITY, REF_PX, SHAPE_TOOLS, _Refs,
+    COL_GUIDE, COL_SNAP, FIELDS, GRID_PX, GUIDE_PX, MODIFY_TOOLS, PRIORITY, REF_PX, SHAPE_TOOLS,
+    _Refs,
     _axis_col, _dashed, _marker, _project, _seg_px_dist, _text, parse_angle, parse_length,
 )
 
@@ -259,6 +260,9 @@ class SnapMixin:
             return
         if self.tool == "SELECT":
             self.cursor, self.preview, self.info, self.snap_kind = None, [], None, None
+            return
+        if self.tool in MODIFY_TOOLS:
+            self._mod_update(context, mx, my)
             return
         if self.track is not None:
             self._track_update(context, mx, my)

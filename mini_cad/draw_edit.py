@@ -8,7 +8,8 @@ import numpy as np
 
 from . import drawmath as dm
 from .draw_common import (
-    AXIS_COLS, COL_GUIDE, COL_RUBBER, COL_TEXT, GRID_PX, GUIDE_PX, MODIFIERS, PASS_KEYS,
+    AXIS_COLS, COL_GUIDE, COL_RUBBER, COL_TEXT, GRID_PX, GUIDE_PX, MODIFIERS, MODIFY_TOOLS,
+    PASS_KEYS,
     _dashed, _move_handle, _move_node, _poly, _project, _text, parse_angle, parse_length,
 )
 from . import core
@@ -56,7 +57,7 @@ class EditMixin:
     def _sketch_event(self, context, event, mx, my, press):
         """Taslak noktası / tutamacı üzerinde: üstüne gelince vurgula, basılı sürükleyince
         düzenle. Sürüklemeden bırakılırsa normal tık olarak çalışır."""
-        if not self.sketch or self.tool.startswith("C_"):
+        if not self.sketch or self.tool.startswith("C_") or self.tool in MODIFY_TOOLS:
             if self.sk_hover is not None:
                 self.sk_hover = None
             return False
