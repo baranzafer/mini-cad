@@ -128,11 +128,12 @@ def _cad_lines(context):
                    f"pürüzsüz={p.smooth_corners} ayna={p.use_mirror}"
                    f"({'X' if p.mirror_x else ''}{'Y' if p.mirror_y else ''}"
                    f"{'Z' if p.mirror_z else ''}) boolean={p.use_booleans} "
-                   f"fillet={p.use_bevels} tol={p.join_tol:g} sapma={p.lin_defl:g}")
+                   f"fillet={p.use_bevels} tol={p.join_tol:g} sapma={p.lin_defl:g} "
+                   f"birleşim={getattr(p, 'surface_blend', '?')}")
         for i, pt in enumerate(p.patches):
             src = sorted({r.obj.name for r in pt.segs if r.obj} |
                          {r.obj.name for r in pt.curves if r.obj})
-            out.append(f"    yüzey {i}: {pt.name} [{pt.method}] etkin={pt.enabled} "
+            out.append(f"    yüzey {i}: {pt.name} [{pt.method}/{getattr(pt, 'blend', '?')}] etkin={pt.enabled} "
                        f"{'OK' if pt.ok else 'HATA'} · {len(pt.segs)} segment "
                        f"{'+ ' + str(len(pt.curves)) + ' eğri objesi ' if len(pt.curves) else ''}"
                        f"· kaynak {src} · {_short(pt.info)}")

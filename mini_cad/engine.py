@@ -171,16 +171,22 @@ def _build(job, res, geometry):
 
     # 1) Ortak köşe/kenar kayıtlarıyla yüzleri üret
     builder = geometry.Builder(prev=_builders.get(name))
-    faces = []
-    for p in job["patches"]:
+    patches = list(job["patches"])
+    blended = any(p.get("blend", "SHARP") != "SHARP" for p in patches)
+    if blended and hasattr(geometry, "blend_order"):
+        patches = geometry.blend_order(patches)    # kaynaşacak yamalar komşularından sonra
+    built = {}
+    for p in patches:
         try:
-            face, label = builder.face(p["chain"], p["sides"], p["method"], preview)
+            kw = {"blend": p["blend"]} if p.get("blend", "SHARP") != "SHARP" else {}
+            face, label = builder.face(p["chain"], p["sides"], p["method"], preview, **kw)
             res["patches"][p["idx"]] = (True, f"{label} · {len(p['sides'])} kenar · "
                                               f"{len(p['chain'])} segment")
-            faces.append(face)
+            built[p["idx"]] = face
         except CadError as e:
             res["patches"][p["idx"]] = (False, str(e))
             errors.append(p["name"])
+    faces = [built[p["idx"]] for p in job["patches"] if p["idx"] in built]
     _builders[name] = builder
     if not faces:
         if errors:

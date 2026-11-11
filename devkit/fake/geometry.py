@@ -3,10 +3,12 @@ import numpy as np
 from .errors import CadError
 LAST_FAILED = 0
 CALLS = []
+BLENDS = []
 class Builder:
     def __init__(s, prev=None): s.face_keys = []
-    def face(s, chain, sides, method, preview):
+    def face(s, chain, sides, method, preview, blend="SHARP"):
         s.face_keys.append(len(chain))
+        BLENDS.append((len(chain), method, blend))
         if method == "BAD": raise CadError("kötü yüz")
         if method == "CRASH": os._exit(3)
         return ("face", len(chain)), "Düzlem"
@@ -47,3 +49,6 @@ def tessellate(shape, lin, ang):
 def shape_edge_polylines(shape): return [[(0, 0, 0), (1, 0, 0)]]
 def write_step(shape, path, scale):
     open(path, "w").write("STEP %s %s" % (shape, scale))
+def blend_order(patches):
+    return sorted(patches, key=lambda p: 0 if p.get("blend", "SHARP") == "SHARP" or
+                  p["method"] in ("PLANE", "COONS") else 1)

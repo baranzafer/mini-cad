@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.15.4)
+# Mini CAD — Geliştirme Notları (v0.15.5)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -8,7 +8,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-1. İki dosyayı yükle: `mini_cad_v0.15.4.zip` (eklenti) ve `mini_cad_devkit_v0.15.4.zip`
+1. İki dosyayı yükle: `mini_cad_v0.15.5.zip` (eklenti) ve `mini_cad_devkit_v0.15.5.zip`
    (testler + araçlar).
 2. Açılış mesajında şunu söyle: "Mini CAD projesine devam ediyoruz, önce DEVELOPMENT.md'yi oku."
    Ardından isteklerini yaz. Mümkünse birkaç isteği tek mesajda topla.
@@ -20,7 +20,7 @@ hangi dosyaya bakılacağını söyler.
    ```
    Beklenen sonuç: `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den beri
    bayat; "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
-4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t46.py` ...),
+4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t47.py` ...),
    sürümü artır ve paketle (§8).
 5. Kod GitHub'da da tutuluyor: `baranzafer/mini-cad` deposunda eklenti `mini_cad/`, testler ve
    araçlar `devkit/` klasöründe. Her sürüm ayrı bir commit olarak eklenir. Kurulum zip'leri
@@ -63,8 +63,15 @@ hangi dosyaya bakılacağını söyler.
 
   Manifest `copyright` satırında atıf var. Kullanıcı ileride Mini CAD'i Forge ile birlikte
   çalıştırmak istiyor.
-- Bu çalışma ortamında OCC **yok**. Gerçek geometri testi yapılamaz. Motor testleri sahte
-  geometriyle (`devkit/fake/geometry.py`) gerçek alt süreç üzerinden çalışır.
+- Motor testleri sahte geometriyle (`devkit/fake/geometry.py`) gerçek alt süreç üzerinden
+  çalışır.
+- OCC ortamda hazır değil ama **pip ile kurulabiliyor** (v0.15.5'te denendi). Gerçek geometri
+  denemesi için:
+  ```bash
+  python3 -m venv /tmp/occ && /tmp/occ/bin/pip install "cadquery-ocp-novtk>=7.9.3,<8" numpy
+  /tmp/occ/bin/python devkit/tools/occ_blend_check.py /home/claude/mini_cad
+  ```
+  `geometry.py` değişikliklerini bu yolla ölçmek mümkün (OCC bilgisi gereken her iş için önerilir).
 
 ---
 
@@ -105,6 +112,22 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
   sınıflandırıcıyla yapılır.
 - **Ortak topoloji ilkesi** (geometry.py): tel kafesteki her segment tek bir OCC kenarı, her
   köşe tek bir OCC köşesi olur. Yüzeyler aynı kenar nesnesini paylaşır.
+- **Yüzey birleşimi** (v0.15.5): gövde ayarı `surface_blend` (Keskin / Teğet), yüzey başına
+  `patch.blend` (Gövde ayarı / Keskin / Teğet).
+  - Keskin (varsayılan, önceki davranış): yüzler ortak kenarda yalnızca buluşur (G0).
+  - Teğet: kaynaşan yama `BRepOffsetAPI_MakeFilling` ile kurulur. Önceden kurulmuş komşusuyla
+    ortak her kenar `Add(edge, komşu yüz, GeomAbs_G1)` ile bağlanır.
+  - Kurma sırası `geometry.blend_order`'dan gelir. Önce sabit yamalar kurulur: keskin,
+    düzlemsel, açıkça Düzlem / Coons olanlar. Kaynaşanlar sonra kurulur ve komşularına uyar. Gövdeye
+    yine asıl sırayla eklenir.
+  - Komşu bilgisi `Builder.edge_owner`'da tutulur. Önbellek anahtarına birleşim ve komşu anahtarları
+    eklenir.
+  - Kurulamazsa keskine düşülür ve yüzey bilgisine "(teğet (G1) kurulamadı ...)" yazılır.
+  - Ölçüm (`occ_blend_check.py`): kare→daire modelinde kenar kırılması 34° → 0,45°. Tekil köşe
+    uçlarında birkaç derece kalır. Süre ~3 katı (önizleme ayarlarıyla ~aynı).
+  - Eğrilik (G2) yok: OCC 7.9 dolgu aracı kenar kısıtında G2'yi reddediyor ("continuity is
+    not G0 G1 or G2").
+  - Ayna dikişinde (simetri düzlemi) teğetlik henüz sağlanmıyor.
 
 ---
 
@@ -114,12 +137,12 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 |---|---:|---|
 | `__init__.py` | 32 | Kayıt sırası: recorder → kernel → core → constraints → ui → panels → pick → draw → wire → bool_overlay |
 | `kernel.py` | 150 | OCP kurulumu / yükleme |
-| `engine.py` | 376 | bpy'siz OCC motoru (komut işleyici, önbellekler) |
+| `engine.py` | 382 | bpy'siz OCC motoru (komut işleyici, önbellekler) |
 | `engine_host.py` | 52 | Alt süreç girişi; paketi sahte `minicad_engine` paketi olarak yükler |
 | `jobs.py` | 337 | Süreç istemcisi (ensure / submit / call / control / poll / stop / describe) |
 | `errors.py` | 2 | `CadError` |
-| `geometry.py` | 2057 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
-| `core.py` | 1586 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
+| `geometry.py` | 2123 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
+| `core.py` | 1610 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
 | `solver.py` | 155 | numpy kısıt çözücü: ağırlıklı Gauss-Newton, en az hareket; `residual`, `evaluate`, `solve`, `measure` |
 | `constraints.py` | 402 | Kısıt çözümünü çalıştırma (`solve_all`), ekleme / kontrol / silme, canlı tetikleme, operatörler, kayıt |
 | `constraints_refs.py` | 86 | Kısıt veri erişimi: referans noktaları, dünya konumu, `all_constraints` |
@@ -138,10 +161,10 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `palette.py` | 424 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
 | `pick.py` | 579 | Kenar seçim modu (hover + tık), sarı gövde kenarları, B ile fillet |
 | `ui.py` | 590 | Operatörler, tercihler (`background`), `add_feature` (BODY ref) |
-| `panels.py` | 530 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
+| `panels.py` | 532 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
 | `bool_overlay.py` | 177 | Boolean vurgusu, CAD kenarları, hayalet çizimi |
 | `wire.py` | 308 | Mesh kenarlarından bezier tel kafes |
-| `recorder.py` | 532 | Ctrl+Alt+R kayıt / rapor (§7) |
+| `recorder.py` | 533 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
 
 **Bölme notu (v0.15.2):**
@@ -349,6 +372,8 @@ Betiğin yaptıkları:
 | t43 | Taslak, sürükleme, T izi, geri al / yinele, pivot, tutamaç yakalama, yeni hedef |
 | t44 | Taslak çizgisinin ucundan teğet yay, sürüklerken ölçü yardımcısı, geçici zemin (U) |
 | t45 | Geçici zeminde eski çizime yapışınca zeminde kalma, seçim sırasında taslak görünürlüğü, noktadan zemin |
+| t46 | Yüzey birleşimi: gather → motor kurma sırası, gövde sırası, imza, eski dosya |
+| tools/occ_blend_check.py | GERÇEK OCC ile teğet birleşim ölçümü (test koşucusunda değil, OCP gerekir) |
 
 **Test yazma kalıbı:**
 - t41–t43, `exec(open("t.py")...)` ile stub'ları yükler. Üstten ortografik görünüm
@@ -382,6 +407,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - Geçici zemin: U ile girilir, U ile asıl düzleme dönülür. Seçilirken Esc aracı kapatmaz.
 - Geçici zeminde her nokta zeminde kalır: eski çizimin noktalarına yapışılır ama izdüşürülür.
 - Düzlem / zemin seçilirken taslak görünür kalır.
+- Yüzey birleşimi varsayılanı Keskin'dir; mevcut modeller aynı hesaplanır.
 - Taslak sürüklerken ölçü kutusu görünür. Yazılan değer kilitler, X/Y/Z hâlâ eksen kilididir.
 - Kısıt simgesine hover'da hiçbir şey açılmaz, menü yalnızca sağ tıkla açılır. Yakalama
   simgelere yapışmaz.
@@ -401,7 +427,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - GPU görselleri (palet, pivot, kılavuzlar, simgeler) yalnızca stub'larla test edildi.
   Görünüşe dair geri bildirim kullanıcıdan gelir.
 - t6 / t14 bayat testler; istenirse güncellenebilir.
-- `core.py` (1586) ve `geometry.py` (2057) hâlâ büyük; bölünmemesinin nedeni §4'te.
+- `core.py` (1610) ve `geometry.py` (2123) hâlâ büyük; bölünmemesinin nedeni §4'te.
 - Aşama 2 kısıtları çalışıyor. Simetrik / açı gibi kısıtların Inventor'daki tüm etkileşimleri
   henüz incelenmedi.
 
@@ -432,3 +458,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
     paralel izdüşürülür, hiza çizgisi gösterilir).
   - Zemin seçilirken taslak çizgileri kaybolmuyor. Yön seçerken noktalara yapışılıyor;
     noktaya tıklayınca o noktadan geçen zemin seçiliyor.
+- **0.15.5:** yüzey birleşimi.
+  - Yüzeyler panelinde "Yüzey Birleşimi" (Keskin / Teğet G1) ve yüzey başına "Birleşim".
+  - Teğette eğri yüzeyler komşularına kaynaşır, kenar çizgisi kaybolur.
+  - devkit'e gerçek OCC ölçüm aracı eklendi.

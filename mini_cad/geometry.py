@@ -181,6 +181,27 @@ def plane_of(chain):
 FILL_FINAL = dict(degree=3, nbpts=15, nbiter=2, maxdeg=8, maxseg=9)
 FILL_PREVIEW = dict(degree=3, nbpts=8, nbiter=1, maxdeg=6, maxseg=4)
 
+# Yüzey birleşimi: komşu yüzlerle ortak kenarda süreklilik (Keskin = G0, yalnızca konum)
+# (OCC 7.9 dolgu aracı kenar kısıtında G2'yi kabul etmiyor: yalnızca G1)
+BLEND_LABELS = {"TANGENT": "teğet (G1)"}
+
+
+def _blend_order(blend):
+    return {"TANGENT": _GeomAbs_G1}.get(blend)
+
+
+def _is_anchor(p):
+    """Kaynaşmada sabit kalan yama: keskin, düzlemsel ya da açıkça Düzlem / Coons."""
+    if p.get("blend", "SHARP") not in BLEND_LABELS or p["method"] in ("PLANE", "COONS"):
+        return True
+    return p["method"] == "AUTO" and plane_of(p["chain"]) is not None
+
+
+def blend_order(patches):
+    """Kurma sırası: önce sabit yamalar, sonra kaynaşacaklar (onlar komşularına uyar).
+    Aynı gruptaki sıra korunur."""
+    return sorted(patches, key=lambda p: 0 if _is_anchor(p) else 1)
+
 
 def coons_available():
     return None not in (_GeomFill_BSplineCurves, _GeomFill_CoonsStyle, _RealArray, _IntArray)
@@ -233,6 +254,7 @@ class Builder:
         self.prev = prev
         self.verts, self.edges, self.faces = {}, {}, {}
         self.face_keys = []
+        self.edge_owner = {}     # kenar anahtarı -> (bu turda o kenarı ilk kullanan yüz, anahtarı)
 
     def _get(self, table, key):
         v = getattr(self, table).get(key)
@@ -274,9 +296,24 @@ class Builder:
             raise CadError("Kenarlar kapalı bir tel oluşturmuyor")
         return mw.Wire()
 
-    def face(self, chain, sides, method, preview):
-        key = (tuple(_ekey(s["p"]) for s in chain), method,
-               preview if method == "FILL" else False)
+    def _own(self, ekeys, res, key):
+        for k in ekeys:
+            self.edge_owner.setdefault(k, (res[0], key))
+
+    def face(self, chain, sides, method, preview, blend="SHARP"):
+        ekeys = [_ekey(s["p"]) for s in chain]
+        key = (tuple(ekeys), method, preview if method == "FILL" else False)
+        nbrs = []                    # [(segment, (komşu yüz, anahtarı))] — kaynaşma kısıtları
+        if blend in BLEND_LABELS and method in ("AUTO", "FILL") and \
+                _blend_order(blend) is not None:
+            seen = set()
+            for s, k in zip(chain, ekeys):
+                own = self.edge_owner.get(k)
+                if own is not None and k not in seen:
+                    seen.add(k)
+                    nbrs.append((s, own))
+            if nbrs:
+                key = key + (blend, preview, tuple(hash(o[1]) for _, o in nbrs))
         self.face_keys.append(key)
         hit = self._get("faces", key)
         if hit is not None:
@@ -284,10 +321,12 @@ class Builder:
             for s in chain:
                 self.edge(s["p"])
             self.faces[key] = hit
+            self._own(ekeys, hit, key)
             return hit
         wire = self._wire(chain)
         res = None
         tried = []
+        blend_note = ""
         if method in ("AUTO", "PLANE"):
             res = self._planar(chain, wire)
             if res is not None and not face_usable(res[0]):
@@ -295,6 +334,16 @@ class Builder:
                 res = None
             if res is None and method == "PLANE":
                 raise CadError("Döngü düzlemsel değil")
+        if res is None and nbrs:
+            # Komşu yüzlere teğet / eğrilik sürekliliğiyle dolgu (ortak kenarda kaynaşır)
+            try:
+                res = self._filling(chain, preview, nbrs, blend)
+                if not face_usable(res[0]):
+                    res = None
+            except CadError:
+                res = None
+            if res is None:
+                blend_note = f" ({BLEND_LABELS[blend]} kurulamadı, keskin birleşim)"
         if res is None and (method == "COONS" or (method == "AUTO" and len(sides) == 4
                                                  and coons_available())):
             try:
@@ -314,7 +363,10 @@ class Builder:
                                " denendi). Döngüdeki eğrileri kontrol et")
             if tried:
                 res = (res[0], res[1] + f" ({'/'.join(tried)} geçersizdi)")
+        if blend_note:
+            res = (res[0], res[1] + blend_note)
         self.faces[key] = res
+        self._own(ekeys, res, key)
         return res
 
     def _planar(self, chain, wire):
@@ -346,13 +398,24 @@ class Builder:
             raise CadError("Coons yüzeyi oluşturulamadı")
         return _fix_face(mf.Face()), "Coons"
 
-    def _filling(self, chain, preview):
+    def _filling(self, chain, preview, nbrs=None, blend=None):
+        """Dolgu yüzeyi. nbrs verilirse o kenarlar komşu yüze teğet (G1) sürekliliğiyle
+        bağlanır; diğer kenarlar yalnızca konumdan (C0)."""
         prm = FILL_PREVIEW if preview else FILL_FINAL
         filler = BRepOffsetAPI_MakeFilling(prm["degree"], prm["nbpts"], prm["nbiter"], False,
                                            1e-5, 1e-4, 1e-2, 0.1, prm["maxdeg"], prm["maxseg"])
-        for s in chain:
-            filler.Add(self.edge(s["p"]), GeomAbs_C0, True)
+        sup = {id(s): own[0] for s, own in (nbrs or ())}
+        order = _blend_order(blend) if sup else None
+        n_cons = 0
         try:
+            for s in chain:
+                e = self.edge(s["p"])
+                f = sup.get(id(s))
+                if f is not None and order is not None:
+                    filler.Add(e, _FACE_CAST(f), order, True)
+                    n_cons += 1
+                else:
+                    filler.Add(e, GeomAbs_C0, True)
             filler.Build()
         except Exception as e:
             raise CadError(f"Dolgu yüzeyi hesaplanamadı: {e}")
@@ -361,7 +424,10 @@ class Builder:
         exp = TopExp_Explorer(filler.Shape(), TopAbs_FACE)
         if not exp.More():
             raise CadError("Dolgu yüz üretmedi")
-        return _FACE_CAST(exp.Current()), "Dolgu"
+        label = "Dolgu"
+        if n_cons:
+            label += f" · {n_cons} kenarda {BLEND_LABELS[blend]}"
+        return _FACE_CAST(exp.Current()), label
 
 
 # ================================================================ birleştirme

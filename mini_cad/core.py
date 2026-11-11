@@ -55,6 +55,14 @@ METHOD_ITEMS = [
 ]
 
 
+BLEND_ITEMS = [
+    ("SHARP", "Keskin (G0)", "Yüzeyler ortak kenarda sadece buluşur; kenar / köşe çizgisi "
+     "görünür (önceki davranış)"),
+    ("TANGENT", "Teğet (G1)", "Yüzey komşu yüzlere ortak kenar boyunca teğet bağlanır; kenar "
+     "çizgisi kaybolur, yüzeyler kaynaşır"),
+]
+
+
 class MINICAD_Patch(bpy.types.PropertyGroup):
     name: bpy.props.StringProperty(default="Yüzey")
     curves: bpy.props.CollectionProperty(type=MINICAD_CurveRef)  # obje modu: eğrinin tamamı
@@ -62,6 +70,12 @@ class MINICAD_Patch(bpy.types.PropertyGroup):
     method: bpy.props.EnumProperty(name="Yöntem", items=METHOD_ITEMS, default="AUTO",
                                    update=_on_setting_change)
     enabled: bpy.props.BoolProperty(name="Etkin", default=True, update=_on_setting_change)
+    blend: bpy.props.EnumProperty(
+        name="Birleşim", description="Bu yüzeyin komşu yüzlerle ortak kenarlarda birleşimi. "
+        "Kaynaşan yüzey Dolgu olarak komşularına uyar; düzlemsel yüzler, Düzlem ve Coons "
+        "sabit kalır",
+        items=[("BODY", "Gövde ayarı", "Gövdenin Yüzey Birleşimi ayarını kullan")] + BLEND_ITEMS,
+        default="BODY", update=_on_setting_change)
     info: bpy.props.StringProperty(default="")
     ok: bpy.props.BoolProperty(default=True)
 
@@ -267,6 +281,11 @@ class MINICAD_ObjectProps(bpy.types.PropertyGroup):
     make_solid: bpy.props.BoolProperty(
         name="Katı Gövde", description="Kapalı kabuğu içi dolu katıya çevir", default=True,
         update=_on_setting_change)
+    surface_blend: bpy.props.EnumProperty(
+        name="Yüzey Birleşimi", description="Yüzeylerin ortak kenarlarda nasıl birleşeceği. "
+        "Teğet: eğri yüzeyler komşularına kaynaşır (kenar çizgisi kaybolur); "
+        "düzlemsel yüzler sabit kalır. Yüzey başına ayrıca değiştirilebilir",
+        items=BLEND_ITEMS, default="SHARP", update=_on_setting_change)
 
     mirror_x: bpy.props.BoolProperty(name="X", default=False, update=_on_setting_change)
     mirror_y: bpy.props.BoolProperty(name="Y", default=False, update=_on_setting_change)
@@ -892,8 +911,11 @@ def gather(obj, preview, allow_ghost=True):
         pc = [_plain_seg(s) for s in chain]
         look = {id(s): pc[i] for i, s in enumerate(chain)}
         ps = [[look.get(id(s)) or _plain_seg(s) for s in side] for side in sides]
+        blend = getattr(patch, "blend", "BODY")
+        if blend == "BODY":
+            blend = getattr(props, "surface_blend", "SHARP")
         patches.append({"idx": idx, "name": patch.name, "chain": pc, "sides": ps,
-                        "method": patch.method})
+                        "method": patch.method, "blend": blend})
 
     # 2) Sıralı işlemler (art arda bevel'ler bir aşama, her boolean ayrı aşama)
     mirrors = _mirror_planes(props)
@@ -1373,7 +1395,8 @@ def _signature_parts(props):
             curve.append(sp.use_cyclic_u)
     struct, bev = [], []
     for p in props.patches:
-        struct.append(("P", p.enabled, p.method, len(p.segs), len(p.curves)))
+        struct.append(("P", p.enabled, p.method, len(p.segs), len(p.curves),
+                       getattr(p, "blend", "BODY")))
     for f in props.features:
         if f.op == "BOOLEAN":
             struct.append(("B", f.uid, f.enabled, f.bool_type,
@@ -1387,7 +1410,8 @@ def _signature_parts(props):
                    props.use_booleans, props.use_bevels, props.make_solid, props.corner_mode,
                    props.smooth_corners, round(props.transition_factor, 4),
                    round(props.lin_defl, 9), round(props.ang_defl, 6),
-                   round(props.join_tol, 9), props.preview_bevel, props.ghost_bevel))
+                   round(props.join_tol, 9), props.preview_bevel, props.ghost_bevel,
+                   getattr(props, "surface_blend", "SHARP")))
     return tuple(curve), tuple(struct), tuple(bev)
 
 

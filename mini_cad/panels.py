@@ -278,6 +278,8 @@ class MINICAD_PT_surfaces(_Sub, bpy.types.Panel):
             op.index = i
             op = row.operator("minicad.remove_patch", text="Sil", icon="TRASH")
             op.index = i
+            box.prop(patch, "blend")
+        layout.prop(p, "surface_blend")
         layout.prop(p, "make_solid")
 
 
