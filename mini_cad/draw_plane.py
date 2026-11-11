@@ -203,7 +203,19 @@ class PlaneMixin:
                 else {"PASS_THROUGH"}
         if event.type == "LEFTMOUSE":
             self._update(context, mx, my)
-            if self.hover_plane is not None:
+            ps = getattr(self, "plane_snap", None)
+            if ps is not None:                    # noktaya tık: yön + o noktanın yüksekliği
+                if self.hover_plane is not None:
+                    name, base = self.hover_plane[0], self.hover_plane[1]
+                else:
+                    base = self._base_plane()
+                    name = base.name
+                self._start_offset(context, name, base)
+                t = float(np.dot(ps[0] - base.o, base.n))
+                self.off.update(t=t, kind=ps[1] + " yüksekliği", snap=ps[0], snap_kind=ps[1])
+                self.plane_snap = None
+                self._accept_offset(context)
+            elif self.hover_plane is not None:
                 name, pl, _obj = self.hover_plane
                 self._start_offset(context, name, pl)
             self.area.tag_redraw()

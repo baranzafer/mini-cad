@@ -103,9 +103,12 @@ class SketchMixin:
                 return
             self.start = cur
             self.node_ids = {0: self.snap_id} if self.snap_id else {}
-            self.start_tan = self._end_tangent_of(self.snap_id) if self.snap_id else None
+            src = getattr(self, "snap_src", None)   # geçici zeminde: izdüşürülmeden önceki nokta
+            sid = self.snap_id or (getattr(self, "snap_src_id", None) if src is not None else None)
+            self.start_tan = self._end_tangent_of(sid) if sid else None
             if self.start_tan is None:            # taslaktaki (henüz kaydedilmemiş) çizginin ucu
-                self.start_tan = self._sketch_end_tangent(cur)
+                self.start_tan = self._sketch_end_tangent(src if src is not None else cur)
+            self.start_tan = self._temp_tangent(self.start_tan)
             if self.plane is None:
                 self.plane = (self.tmp_plane or self._make_plane(self.plane_mode, cur)).moved(cur)
             else:

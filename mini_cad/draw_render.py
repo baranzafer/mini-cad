@@ -25,6 +25,8 @@ class RenderMixin:
             region = bpy.context.region
             gpu.state.blend_set("ALPHA")
             gpu.state.depth_test_set("NONE")
+            if self.phase in ("PLANE", "OFFSET"):
+                self._draw_sketch3d(region)          # taslak seçim sırasında da görünür kalır
             if self.phase == "PLANE":
                 self._draw_plane_pick(region)
                 gpu.state.blend_set("NONE")
@@ -91,8 +93,17 @@ class RenderMixin:
                     p = self._px(pl.xyz((S * 0.42, S * 0.42)))
                     if p is not None:
                         _text(p[0], p[1], name, PLANE_COLS[name] + (0.55,), int(12 * self.ui_scale))
+                self._draw_sketch2d(region)
+                ps = getattr(self, "plane_snap", None)
+                if ps is not None:                   # noktaya tık: bu noktadan geçen düzlem
+                    p = self._px(ps[0])
+                    if p is not None:
+                        _marker(ps[1], p[0], p[1], s, region)
+                        _text(p[0] + 12 * self.ui_scale, p[1] + 10 * self.ui_scale,
+                              f"{ps[1]} · bu noktadan geçen düzlem", COL_SNAP,
+                              int(11 * self.ui_scale))
                 hov = self.hover_plane
-                if hov is not None:
+                if hov is not None and ps is None:
                     mx, my = self.mouse
                     _text(mx + 14 * self.ui_scale, my + 12 * self.ui_scale,
                           "Gövde yüzü" if hov[0] == "FACE" else dm.PLANE_LABELS[hov[0]],
@@ -132,6 +143,12 @@ class RenderMixin:
                             k = 90.0 * self.ui_scale / ln
                             _dashed(cur, (cur[0] + dx * k, cur[1] + dy * k), COL_GUIDE,
                                     region, dash=10, gap=6)
+            src = getattr(self, "snap_src", None)
+            if cur is not None and src is not None:   # geçici zemin: asıl nokta → izdüşümü
+                sp = self._px(src)
+                if sp is not None:
+                    _dashed(sp, cur, COL_GUIDE, region, dash=4, gap=3)
+                    _marker(self.snap_kind or "Uç", sp[0], sp[1], s * 0.7, region)
             if cur is not None and self.snap_kind is not None:
                 _marker(self.snap_kind, cur[0], cur[1], s, region)
             if cur is not None:
@@ -164,6 +181,7 @@ class RenderMixin:
                 self._draw_pivot(region)
                 self._draw_track2d(region)
             if self.phase == "OFFSET":
+                self._draw_sketch2d(region)
                 self._draw_offset2d(region)
             self._draw_gmenu(region)
             self.palette.draw(region, st)

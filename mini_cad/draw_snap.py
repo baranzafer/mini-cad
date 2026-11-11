@@ -72,6 +72,15 @@ class SnapMixin:
         t = dm.unit(t)
         return None if t is None else (t, (pid[0], pid[1], seg))
 
+    def _temp_tangent(self, st):
+        """Geçici zeminde başlangıç teğetini zemine izdüşürür; kısıt kaynağı olmaz."""
+        tp = self._temp_plane()
+        if st is None or tp is None or self.snap_src is None:
+            return st
+        t = np.asarray(st[0]) - tp.n * float(np.dot(st[0], tp.n))
+        t = dm.unit(t)
+        return None if t is None or float(np.linalg.norm(t)) < 1e-6 else (t, ("@proj", 0, 0, 0))
+
     def _sketch_end_tangent(self, p):
         """Taslaktaki açık bir çizginin ucundan dışarı doğru teğet (p o uçtaysa; en son
         çizilen öncelikli). (yön, ("@sketch", çizgi, uca bağlı segment, uç: 0 / 3))"""
@@ -239,6 +248,12 @@ class SnapMixin:
             self.dirty = False
         if self.phase == "PLANE":
             self._hover_plane(context, mx, my)
+            self.plane_snap = None                 # yön seçerken de noktalara yapışır
+            if not self.ctrl and self.snap_on and getattr(self, "temp_pick", None) is not None:
+                ro, rd = self._ray(mx, my)
+                sn = self._point_snap(mx, my, ro, rd)
+                if sn is not None and sn[1] != "Yakın":
+                    self.plane_snap = (np.asarray(sn[0], dtype=np.float64), sn[1])
             self.cursor = None
             self.preview = []
             return
@@ -326,8 +341,31 @@ class SnapMixin:
                             self.info["kind"] += " + Izgara"
             if locked:
                 p = self._apply_locks(plane, anchor, p, v0, v1)
-        self.cursor = np.asarray(p, dtype=np.float64)
+        self.cursor = self._on_temp(np.asarray(p, dtype=np.float64))
         self._make_preview(plane)
+
+    def _temp_plane(self):
+        """Geçici zemin açıksa o düzlem (çizim hep bu düzlemde kalır), değilse None."""
+        tmp = getattr(self, "temp", None)
+        if tmp is None or self.plane_mode != "LOCK" or self.locked is None:
+            return None
+        return self.locked
+
+    def _on_temp(self, p):
+        """Geçici zeminde: eski düzlemdeki bir noktaya yapışıldıysa nokta zemine paralel
+        izdüşürülür (çizim yeni yükseklikte başlar / sürer). Asıl nokta snap_src'de kalır."""
+        self.snap_src = self.snap_src_id = None
+        tp = self._temp_plane()
+        if tp is None or p is None:
+            return p
+        h = tp.dist(p)
+        if abs(h) <= 1e-9 * (1.0 + float(np.abs(p).max())):
+            return p
+        if self.snap_kind is not None:
+            self.snap_src = np.asarray(p, dtype=np.float64).copy()
+            self.snap_src_id = self.snap_id       # teğet kaynağı için saklanır
+            self.snap_id = None                   # farklı yükseklik: çakışık kısıtı yazılmaz
+        return p - tp.n * h
 
     def _arc_continue(self, plane, p, tol, guides=None):
         """İmleç bir tel kafes yayının çemberine yakınsa çember üzerine al (yayın devamı).
@@ -460,6 +498,7 @@ class SnapMixin:
             else:
                 p = plane.ray_hit(ro, rd)
                 self.cursor = p if p is not None else plane.o
+            self.snap_src = self.snap_src_id = None
             tr["axis"] = None
             self.preview = []
             return
@@ -499,7 +538,7 @@ class SnapMixin:
             if abs(g - t) <= GRID_PX * self.ui_scale * self._px_size(p):
                 t = g
         tr["axis"], tr["t"] = ax, t
-        self.cursor = base + ax * t
+        self.cursor = self._on_temp(base + ax * t)
         pl = self._cur_plane() or self.tmp_plane
         self._make_preview(pl.moved(self._lock_anchor()) if self._lock_anchor() is not None
                            else pl)

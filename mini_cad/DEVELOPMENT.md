@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.15.3)
+# Mini CAD — Geliştirme Notları (v0.15.4)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -8,7 +8,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-1. İki dosyayı yükle: `mini_cad_v0.15.3.zip` (eklenti) ve `mini_cad_devkit_v0.15.3.zip`
+1. İki dosyayı yükle: `mini_cad_v0.15.4.zip` (eklenti) ve `mini_cad_devkit_v0.15.4.zip`
    (testler + araçlar).
 2. Açılış mesajında şunu söyle: "Mini CAD projesine devam ediyoruz, önce DEVELOPMENT.md'yi oku."
    Ardından isteklerini yaz. Mümkünse birkaç isteği tek mesajda topla.
@@ -20,10 +20,12 @@ hangi dosyaya bakılacağını söyler.
    ```
    Beklenen sonuç: `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den beri
    bayat; "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
-4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t45.py` ...),
+4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t46.py` ...),
    sürümü artır ve paketle (§8).
 5. Kod GitHub'da da tutuluyor: `baranzafer/mini-cad` deposunda eklenti `mini_cad/`, testler ve
-   araçlar `devkit/` klasöründe. Her sürüm ayrı bir commit olarak eklenir.
+   araçlar `devkit/` klasöründe. Her sürüm ayrı bir commit olarak eklenir. Kurulum zip'leri
+   `dist/` klasörüne konur; kullanıcı onları GitHub'dan indirir (dal:
+   `claude/nice-albattani-hfscvj`).
 
 ---
 
@@ -123,14 +125,14 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `constraints_refs.py` | 86 | Kısıt veri erişimi: referans noktaları, dünya konumu, `all_constraints` |
 | `constraints_tangent.py` | 355 | Teğet planlaması (§6) |
 | `constraints_glyphs.py` | 98 | Kısıt simgesi çizimi, `glyph_at` |
-| `draw.py` | 711 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
+| `draw.py` | 714 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
 | `draw_common.py` | 448 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
-| `draw_plane.py` | 525 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (U) |
-| `draw_snap.py` | 595 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
-| `draw_sketch.py` | 608 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
+| `draw_plane.py` | 537 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (U) |
+| `draw_snap.py` | 634 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
+| `draw_sketch.py` | 611 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
 | `draw_edit.py` | 426 | EditMixin: taslak noktası / tutamaç sürükleme, pivot, sürüklerken yakalama, sürüklerken ölçü yardımcısı |
 | `draw_glyphs.py` | 197 | ConstraintUIMixin: kısıt için kenar / nokta seçimi, simge sağ tık menüsü |
-| `draw_render.py` | 233 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
+| `draw_render.py` | 251 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
 | `drawmath.py` | 585 | bpy'siz çizim matematiği: düzlemler, doğru / yay / daire / dikdörtgen, B-spline→Bézier (Boehm), Catmull-Rom, kalem, kılavuz rafinesi |
 | `snapmath.py` | 410 | FORGE snap_math (GPL başlıklı kopya) |
 | `palette.py` | 424 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
@@ -259,6 +261,17 @@ devam eder; boşlukta başlarsa 3 noktalı yay gibi davranır. `start_tan` iki k
   (`saved`). **Shift+U:** başka bir geçici zemin seçilir, asıl düzlem korunur.
 - Açık düzlem seçimi (X/Y/Z/V, palet, Shift+Q) geçici zemini bitirir ve kalıcı olur.
 - Ekranın sol altında "Geçici zemin: ..." etiketi görünür; durum çubuğunda da yazar.
+- **Zeminde kalma** (`_temp_plane`, `_on_temp`, `_temp_tangent`; v0.15.4):
+  - Geçici zemin açıkken eski çizimin bir noktasına yapışılırsa nokta zemine **paralel
+    izdüşürülür**. Çizgi yeni yükseklikte başlar ve sürer.
+  - Asıl nokta `snap_src`'de tutulur, ondan izdüşüme kesikli hiza çizgisi çizilir.
+  - Farklı yükseklikteki noktalar arasında çakışık / teğet kısıtı yazılmaz (`snap_id`
+    temizlenir, teğet kaynağı `("@proj", ...)`). Teğet yay için teğet zemine izdüşürülür.
+  - Geçici zemin yokken eski davranış sürer: 3D noktaya yapışınca düzlem o noktaya taşınır.
+- **Seçim sırasında görünürlük:** yön ve yükseklik seçilirken taslak çizgileri ve noktaları
+  çizilmeye devam eder. Yön seçerken noktalara yapışılır (`plane_snap`). **Noktaya tık:** o
+  noktadan geçen zemin tek adımda seçilir (yön: üzerindeki düzlem, yoksa mevcut yön). Bu kısayol
+  yalnızca geçici zeminde vardır; normal düzlem seçimi iki aşamalı kalır.
 
 **Sahne ayarları:** `minicad_grid_snap`, `minicad_grid_alpha`, `minicad_draw_target`,
 `minicad_look_at`, `minicad_pick_plane`, `minicad_auto_constraints`,
@@ -335,6 +348,7 @@ Betiğin yaptıkları:
 | t42 | Teğet senaryoları (arcslide dahil) |
 | t43 | Taslak, sürükleme, T izi, geri al / yinele, pivot, tutamaç yakalama, yeni hedef |
 | t44 | Taslak çizgisinin ucundan teğet yay, sürüklerken ölçü yardımcısı, geçici zemin (U) |
+| t45 | Geçici zeminde eski çizime yapışınca zeminde kalma, seçim sırasında taslak görünürlüğü, noktadan zemin |
 
 **Test yazma kalıbı:**
 - t41–t43, `exec(open("t.py")...)` ile stub'ları yükler. Üstten ortografik görünüm
@@ -366,6 +380,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - Teğet arcslide: yay geometrisi korunur, doğru uyum sağlar.
 - Teğet yay ilk tıklamadan çalışır; taslaktaki çizginin ucundan başlayınca da teğettir.
 - Geçici zemin: U ile girilir, U ile asıl düzleme dönülür. Seçilirken Esc aracı kapatmaz.
+- Geçici zeminde her nokta zeminde kalır: eski çizimin noktalarına yapışılır ama izdüşürülür.
+- Düzlem / zemin seçilirken taslak görünür kalır.
 - Taslak sürüklerken ölçü kutusu görünür. Yazılan değer kilitler, X/Y/Z hâlâ eksen kilididir.
 - Kısıt simgesine hover'da hiçbir şey açılmaz, menü yalnızca sağ tıkla açılır. Yakalama
   simgelere yapışmaz.
@@ -411,3 +427,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
     kısıtı yazılıyor.
   - Geçici zemin (U / Shift+U): ızgara yönü, yükseklik ve kökeni; yükseklikte nokta, ana düzlem
     ve ızgara yakalamaları ile ölçü kutusu.
+- **0.15.4:**
+  - Geçici zeminde eski çizimin noktalarına yapışınca çizgi zeminde kalıyor (nokta zemine
+    paralel izdüşürülür, hiza çizgisi gösterilir).
+  - Zemin seçilirken taslak çizgileri kaybolmuyor. Yön seçerken noktalara yapışılıyor;
+    noktaya tıklayınca o noktadan geçen zemin seçiliyor.

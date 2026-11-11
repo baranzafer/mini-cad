@@ -153,6 +153,9 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self.off = None
         self.temp = None                 # geçici zemin (U): {"saved", "plane", "label", "grid_o"}
         self.temp_pick = None            # geçici zemin seçiliyor: {"saved"}
+        self.snap_src = None             # geçici zeminde izdüşürülen yakalamanın asıl noktası
+        self.snap_src_id = None
+        self.plane_snap = None           # düzlem seçerken yakalanan nokta (konum, tür)
         self.phase = "PLANE" if getattr(sc, "minicad_pick_plane", True) else "DRAW"
         self.palette = palette.Palette(self.ui_scale)
         self.created = 0
@@ -207,8 +210,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             return
         if self.phase == "PLANE" and getattr(self, "temp_pick", None) is not None:
             txt = ("GEÇİCİ ZEMİN (1/2: yön): eksen düzlemine ya da gövde yüzüne tıkla  |  X/Y/Z/V: "
-                   "eksen / görünüş düzlemi  |  Sağ tık / Enter: mevcut yön, sadece yükseklik  |  "
-                   "Esc: iptal")
+                   "eksen / görünüş düzlemi  |  Noktaya tık: o noktadan geçen zemin  |  Sağ tık / Enter: "
+                   "mevcut yön, sadece yükseklik  |  Esc: iptal")
             try:
                 context.workspace.status_text_set(txt)
             except Exception:
