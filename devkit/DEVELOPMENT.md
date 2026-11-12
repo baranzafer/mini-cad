@@ -8,24 +8,52 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-1. İki dosyayı yükle: `mini_cad_v0.22.0.zip` (eklenti) ve `mini_cad_devkit_v0.22.0.zip`
-   (testler + araçlar).
-2. Açılış mesajında şunu söyle: "Mini CAD projesine devam ediyoruz, önce DEVELOPMENT.md'yi oku."
-   Ardından isteklerini yaz. Mümkünse birkaç isteği tek mesajda topla.
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/nice-albattani-hfscvj`** dalı.
+- Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
+- Kurulum zip'leri `dist/` klasöründe.
+- Her sürüm ayrı bir commit.
+
+**A) Claude Code (web) ile — önerilen, zip gerekmez**
+1. Yeni oturumu `baranzafer/mini-cad` deposuyla aç.
+2. Açılış mesajı: "Mini CAD projesine devam ediyoruz. Kod `claude/nice-albattani-hfscvj`
+   dalında; önce o dalı al ve DEVELOPMENT.md'yi oku." Ardından isteklerini yaz.
 3. Claude'un yapacağı kurulum:
+   - Yeni oturumun kendi çalışma dalı farklı adda olabilir. O dal bu dalın son commit'inden
+     başlatılır:
+     ```bash
+     git fetch origin claude/nice-albattani-hfscvj
+     git checkout -B <oturumun dalı> origin/claude/nice-albattani-hfscvj
+     ```
+   - Başlangıç durumu için testler çalıştırılır:
+     ```bash
+     bash devkit/run_tests.sh mini_cad
+     ```
+   - Gerçek OCC denemesi gerekirse:
+     ```bash
+     python3 -m venv /tmp/occ && /tmp/occ/bin/pip install "cadquery-ocp-novtk>=7.9.3,<8" numpy
+     ```
+   - Testler `/home/claude/...` yollarını bekler; koşucu kaynağı oraya kendisi kopyalar.
+4. Her sürümde:
+   - manifestte sürüm artırılır
+   - `dist/` zip'leri yenilenir
+   - commit ve push yapılır
+
+**B) Zip ile (Claude.ai sohbeti)**
+1. `dist/` klasöründeki iki zip'i yükle: `mini_cad_v0.X.zip` (eklenti) ve
+   `mini_cad_devkit_v0.X.zip` (testler + araçlar).
+2. Açılış mesajı: "Mini CAD projesine devam ediyoruz, önce DEVELOPMENT.md'yi oku."
+3. Kurulum:
    ```bash
    mkdir -p /home/claude/mini_cad && cd /home/claude/mini_cad && unzip -o <eklenti zip>
    mkdir -p /home/claude/devkit && cd /home/claude/devkit && unzip -o <devkit zip>
-   bash /home/claude/devkit/run_tests.sh /home/claude/mini_cad      # başlangıç durumu
+   bash /home/claude/devkit/run_tests.sh /home/claude/mini_cad
    ```
-   Beklenen sonuç: `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den beri
-   bayat; "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
-4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t59.py` ...),
-   sürümü artır ve paketle (§8).
-5. Kod GitHub'da da tutuluyor: `baranzafer/mini-cad` deposunda eklenti `mini_cad/`, testler ve
-   araçlar `devkit/` klasöründe. Her sürüm ayrı bir commit olarak eklenir. Kurulum zip'leri
-   `dist/` klasörüne konur; kullanıcı onları GitHub'dan indirir (dal:
-   `claude/nice-albattani-hfscvj`).
+
+**Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
+beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
+
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t59.py` ...),
+sürüm artırılır ve paketlenir (§8).
 
 ---
 
