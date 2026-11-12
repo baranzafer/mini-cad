@@ -431,27 +431,27 @@ class PlaneMixin:
         if pl is None:
             return
         c = self.cursor
+        sc = bpy.context.scene
+        a = float(getattr(sc, "minicad_grid_alpha", COL_GRID[3]))
+        if a <= 0.001:
+            return
         gs = self._grid_step(c)
         g0 = pl.uv(self._grid_origin())
         q = pl.uv(c)
-        cu = g0[0] + round((q[0] - g0[0]) / gs) * gs
-        cv = g0[1] + round((q[1] - g0[1]) / gs) * gs
-        N = 5
+        R = gs * float(getattr(sc, "minicad_grid_size", 6.0))
+        fade = float(getattr(sc, "minicad_grid_fade", 0.7))
         off = pl.n * pl.dist(c)
-        seg = []
-        for j in range(-N, N + 1):
-            for a0, a1 in (((cu - N * gs, cv + j * gs), (cu + N * gs, cv + j * gs)),
-                           ((cu + j * gs, cv - N * gs), (cu + j * gs, cv + N * gs))):
-                seg += [tuple(pl.xyz(a0) + off), tuple(pl.xyz(a1) + off)]
-        sh = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")
-        batch = batch_for_shader(sh, "LINES", {"pos": seg})
+        pos, col = [], []
+        for p0, p1, a0, a1 in dm.grid_segments(q, g0, gs, R, fade):
+            pos += [tuple(pl.xyz(p0) + off), tuple(pl.xyz(p1) + off)]
+            col += [COL_GRID[:3] + (a * a0,), COL_GRID[:3] + (a * a1,)]
+        if not pos:
+            return
+        sh = gpu.shader.from_builtin("POLYLINE_SMOOTH_COLOR")   # spot ışığı gibi geçiş
+        batch = batch_for_shader(sh, "LINES", {"pos": pos, "color": col})
         sh.bind()
         sh.uniform_float("viewportSize", (region.width, region.height))
         sh.uniform_float("lineWidth", 1.0)
-        a = float(getattr(bpy.context.scene, "minicad_grid_alpha", COL_GRID[3]))
-        if a <= 0.001:
-            return
-        sh.uniform_float("color", COL_GRID[:3] + (a,))
         batch.draw(sh)
 
     # ------------------------------------------------------------ geçici zemin (U)

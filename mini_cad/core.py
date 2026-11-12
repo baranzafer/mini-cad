@@ -639,6 +639,114 @@ def chain_loop(segs, tol):
     return chain
 
 
+def chain_loops(segs, tol):
+    """Segmentleri bir ya da daha çok kapalı döngüye ayırır (delikli yüzey: dış sınır +
+    delikler). Her döngü chain_loop ile aynı biçimde sıralanır ve uçları kaynaklanır."""
+    if len(segs) < 2:
+        raise CadError("Kapalı bir sınır için en az 2 kenar gerekli")
+    remaining = list(segs)
+    loops = []
+    while remaining:
+        chain = [remaining.pop(0)]
+        start = chain[0]["p"][0]
+        end = chain[0]["p"][-1]
+        while (end - start).length > tol:
+            found = None
+            for i, s_ in enumerate(remaining):
+                if (s_["p"][0] - end).length <= tol:
+                    found = (i, False)
+                    break
+                if (s_["p"][-1] - end).length <= tol:
+                    found = (i, True)
+                    break
+            if found is None:
+                raise CadError("Eğriler kapalı döngü oluşturmuyor. Uçları snap ile birleştir "
+                               f"(açık uç: {end.x:.4f}, {end.y:.4f}, {end.z:.4f})")
+            i, rev = found
+            s_ = remaining.pop(i)
+            if rev:
+                s_ = dict(s_, p=list(reversed(s_["p"])))
+            chain.append(s_)
+            end = s_["p"][-1]
+        if len(chain) < 2 and (chain[0]["p"][-1] - chain[0]["p"][0]).length > tol:
+            raise CadError("Kapalı bir sınır için en az 2 kenar gerekli")
+        n = len(chain)
+        for k in range(n):
+            a, b = chain[k]["p"], chain[(k + 1) % n]["p"]
+            m = (a[-1] + b[0]) * 0.5
+            a[-1] = m.copy()
+            b[0] = m.copy()
+        loops.append(chain)
+    return loops
+
+
+def _loop_poly(chain):
+    pts = []
+    for s_ in chain:
+        P = [np.array(tuple(v), dtype=np.float64) for v in s_["p"]]
+        if len(P) == 4:
+            for t in np.linspace(0.0, 1.0, 9)[:-1]:
+                u = 1.0 - t
+                pts.append(u ** 3 * P[0] + 3 * u * u * t * P[1] + 3 * u * t * t * P[2] +
+                           t ** 3 * P[3])
+        else:
+            pts.append(P[0])
+    return np.array(pts)
+
+
+def _inside(pt, poly):
+    x, y = pt
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            xc = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+            if xc > x:
+                inside = not inside
+    return inside
+
+
+def nest_loops(loops):
+    """Döngüleri iç içeliğe göre gruplar: [(dış döngü, [delikler])]. Çift derinlik dış
+    sınır, tek derinlik delik (deliğin içindeki döngü yeniden ayrı yüzey: adacık).
+    Birden çok döngü aynı düzlemde olmalı."""
+    if len(loops) == 1:
+        return [(loops[0], [])]
+    polys = [_loop_poly(c) for c in loops]
+    P = np.vstack(polys)
+    c = P.mean(axis=0)
+    size = float(np.linalg.norm(P.max(axis=0) - P.min(axis=0)))
+    _, sv, vt = np.linalg.svd(P - c)
+    n = vt[2]
+    if float(np.abs((P - c) @ n).max()) > 1e-5 * (1.0 + size):
+        raise CadError("Birden çok döngü seçili ama aynı düzlemde değiller (delikli yüzey "
+                       "düzlemsel olmalı). Döngüleri ayrı yüzey olarak ekle")
+    u, v = vt[0], vt[1]
+    flat = [np.c_[(q - c) @ u, (q - c) @ v] for q in polys]
+
+    def area(f):
+        x, y = f[:, 0], f[:, 1]
+        return 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+    areas = [area(f) for f in flat]
+    k = len(loops)
+    contains = [[j for j in range(k) if j != i and areas[j] > areas[i] and
+                 _inside(flat[i][0], flat[j])] for i in range(k)]
+    depth = [len(cs) for cs in contains]
+    groups = []
+    outer_of = {}
+    for i in sorted(range(k), key=lambda i: depth[i]):
+        if depth[i] % 2 == 0:
+            outer_of[i] = len(groups)
+            groups.append((loops[i], []))
+        else:
+            par = min(contains[i], key=lambda j: areas[j])
+            if par in outer_of:
+                groups[outer_of[par]][1].append(loops[i])
+    return groups
+
+
 def _dir(v):
     l = v.length
     return None if l < 1e-12 else (v[0] / l, v[1] / l, v[2] / l)
@@ -950,20 +1058,26 @@ def gather(obj, preview, allow_ghost=True):
     patches = []
     for idx, patch, segs in items:
         try:
-            chain = chain_loop(segs, props.join_tol)
-            sides = split_sides(chain)
+            groups = nest_loops(chain_loops(segs, props.join_tol))   # delikli yüzey (v0.22)
+            groups = [(chain, holes, split_sides(chain)) for chain, holes in groups]
         except CadError as e:
             patch.info, patch.ok = str(e), False
             errors.append(patch.name)
             continue
-        pc = [_plain_seg(s) for s in chain]
-        look = {id(s): pc[i] for i, s in enumerate(chain)}
-        ps = [[look.get(id(s)) or _plain_seg(s) for s in side] for side in sides]
         blend = getattr(patch, "blend", "BODY")
         if blend == "BODY":
             blend = getattr(props, "surface_blend", "SHARP")
-        patches.append({"idx": idx, "name": patch.name, "chain": pc, "sides": ps,
-                        "method": patch.method, "blend": blend})
+        for sub, (chain, holes, sides) in enumerate(groups):
+            pc = [_plain_seg(s) for s in chain]
+            look = {id(s): pc[i] for i, s in enumerate(chain)}
+            ps = [[look.get(id(s)) or _plain_seg(s) for s in side] for side in sides]
+            entry = {"idx": idx, "name": patch.name, "chain": pc, "sides": ps,
+                     "method": patch.method, "blend": blend}
+            if holes:
+                entry["holes"] = [[_plain_seg(s) for s in h] for h in holes]
+            if len(groups) > 1:
+                entry["sub"] = sub
+            patches.append(entry)
 
     # 2) Sıralı işlemler (art arda bevel'ler bir aşama, her boolean ayrı aşama)
     mirrors = _mirror_planes(props)

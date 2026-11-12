@@ -99,6 +99,8 @@ class ModifyMixin:
     def _set_sketch(self, context, new, msg):
         self.sketch = new
         self.dirty = True
+        if getattr(self, "skc", None):
+            self._sk_solve()                     # taslak kısıtları korunur
         self.mod = None
         self.sk_sel = self.sk_hover = None
         try:

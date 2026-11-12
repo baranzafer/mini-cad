@@ -4,11 +4,13 @@ from .errors import CadError
 LAST_FAILED = 0
 CALLS = []
 BLENDS = []
+HOLES = []
 class Builder:
     def __init__(s, prev=None): s.face_keys = []
-    def face(s, chain, sides, method, preview, blend="SHARP"):
+    def face(s, chain, sides, method, preview, blend="SHARP", holes=None):
         s.face_keys.append(len(chain))
         BLENDS.append((len(chain), method, blend))
+        HOLES.append((len(chain), [len(h) for h in (holes or ())]))
         if method == "BAD": raise CadError("kötü yüz")
         if method == "CRASH": os._exit(3)
         return ("face", len(chain)), "Düzlem"

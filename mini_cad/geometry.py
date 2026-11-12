@@ -300,9 +300,11 @@ class Builder:
         for k in ekeys:
             self.edge_owner.setdefault(k, (res[0], key))
 
-    def face(self, chain, sides, method, preview, blend="SHARP"):
+    def face(self, chain, sides, method, preview, blend="SHARP", holes=None):
         ekeys = [_ekey(s["p"]) for s in chain]
         key = (tuple(ekeys), method, preview if method == "FILL" else False)
+        if holes:
+            return self._holed(chain, holes, ekeys, key)
         nbrs = []                    # [(segment, (komşu yüz, anahtarı))] — kaynaşma kısıtları
         if blend in BLEND_LABELS and method in ("AUTO", "FILL") and \
                 _blend_order(blend) is not None:
@@ -365,6 +367,61 @@ class Builder:
                 res = (res[0], res[1] + f" ({'/'.join(tried)} geçersizdi)")
         if blend_note:
             res = (res[0], res[1] + blend_note)
+        self.faces[key] = res
+        self._own(ekeys, res, key)
+        return res
+
+    def _holed(self, chain, holes, ekeys, key):
+        """Delikli düzlemsel yüz: dış tel + delik telleri (kenarlar ortak topolojiden)."""
+        hkeys = tuple(tuple(_ekey(s["p"]) for s in h) for h in holes)
+        key = key + ("holes", hkeys)
+        self.face_keys.append(key)
+        hit = self._get("faces", key)
+        if hit is not None:
+            for s in chain:
+                self.edge(s["p"])
+            for h in holes:
+                for s in h:
+                    self.edge(s["p"])
+            self.faces[key] = hit
+            self._own(ekeys, hit, key)
+            return hit
+        pl = plane_of(chain + [s for h in holes for s in h])
+        if pl is None:
+            raise CadError("Delikli yüzey düzlemsel olmalı (döngüler aynı düzlemde değil)")
+        outer = self._wire(chain)
+        mf = BRepBuilderAPI_MakeFace(outer, True)
+        if not mf.IsDone():
+            c, n = pl
+            mf = BRepBuilderAPI_MakeFace(gp_Pln(_pnt(c), gp_Dir(*map(float, n))), outer, True)
+            if not mf.IsDone():
+                raise CadError("Dış sınırdan yüz oluşturulamadı")
+        c, n = pl
+        n = np.asarray(n, dtype=np.float64)
+
+        def signed_area(ch):
+            P = np.vstack([_np(x["p"]) for x in ch])
+            u = P[1] - P[0] if len(P) > 1 else np.array([1.0, 0, 0])
+            u = u - n * float(np.dot(u, n))
+            u = u / max(float(np.linalg.norm(u)), 1e-15)
+            v = np.cross(n, u)
+            x, y = (P - c) @ u, (P - c) @ v
+            return 0.5 * float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+        so = signed_area(chain)
+        for h in holes:
+            w = self._wire(h)
+            # delik teli dış telin tersi yönde dönmeli
+            if signed_area(h) * so > 0:
+                w = _static(TopoDS, "Wire")(w.Reversed())
+            mf.Add(w)
+        if not mf.IsDone():
+            raise CadError("Delikler yüze eklenemedi")
+        face = mf.Face()
+        if _BRepCheck_Analyzer is not None and not _BRepCheck_Analyzer(face).IsValid():
+            face = _fix_face(face)
+        if not face_usable(face):
+            raise CadError("Delikli yüz geçersiz çıktı (delikler dış sınırın içinde mi?)")
+        res = (face, f"Düzlem · {len(holes)} delik")
         self.faces[key] = res
         self._own(ekeys, res, key)
         return res

@@ -1079,6 +1079,8 @@ def xform_stroke(st, f, copy_=False):
     out = {"segs": segs, "cyclic": st["cyclic"], "node_ids": {}, "start_tan": None}
     if not copy_ and st.get("edit_src"):        # taslağa alınmış eğri: kaynağı korunur
         out["edit_src"] = st["edit_src"]
+    if not copy_ and st.get("uid") is not None:  # taslak kısıtlarının kimliği korunur
+        out["uid"] = st["uid"]
     return out
 
 

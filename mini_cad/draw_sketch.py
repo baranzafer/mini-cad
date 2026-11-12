@@ -402,6 +402,8 @@ class SketchMixin:
         strokes_main = [(i, st) for i, st in enumerate(strokes) if not st.get("edit_src")]
         if not strokes_main and not points:
             self._after_finish(context, None, {}, out)
+            self._skc_finish(context, self._written_uid(strokes, out))
+            constraints.solve_all(context.scene, force=True)
             return out
         try:
             if getattr(context.scene, "minicad_draw_target", "ACTIVE") == "NEW":
@@ -445,6 +447,7 @@ class SketchMixin:
         except Exception:
             traceback.print_exc()
         n_auto += self._after_finish(context, ob, sk_map, out, solve=False)
+        n_auto += self._skc_finish(context, self._written_uid(strokes, out))
         if n_auto or edited:
             constraints.solve_all(context.scene, force=True)
         try:
@@ -508,6 +511,15 @@ class SketchMixin:
         if solve and n:
             constraints.solve_all(context.scene, force=True)
         return n
+
+    def _written_uid(self, strokes, out):
+        res = {}
+        for i, (name, si, _n) in out.items():
+            uid = strokes[i].get("uid") if 0 <= i < len(strokes) else None
+            ob = bpy.data.objects.get(name)
+            if uid is not None and ob is not None:
+                res[uid] = (ob, si)
+        return res
 
     def _resolve_geo(self, context, r):
         """Konumla tanımlı referansı ("seg", A, B, orta) / ("pt", P) kaydedilmiş eğride bulur."""
@@ -658,17 +670,28 @@ class SketchMixin:
         if self.last_closed is None:
             self._status(context, "Önce kapalı bir çizgi ya da şekil çiz (C ile kapat)")
             return
+        group = None
         if self.last_closed[0] == "sketch":
-            self._finish_sketch(context)          # yüzey için taslak önce kaydedilir
+            group = self._nested_group(self.last_closed[1])   # delikler / dış sınır
+            out = self._finish_sketch(context)    # yüzey için taslak önce kaydedilir
             if self.last_closed is None or self.last_closed[0] == "sketch":
                 return
+        else:
+            out = {}
         name, si, n = self.last_closed
         ob = bpy.data.objects.get(name)
         if ob is None:
             return
+        items = [(ob, si, i) for i in range(n)]
+        for k in group or ():
+            got = out.get(k)
+            if got is None or (got[0], got[1]) == (name, si):
+                continue
+            o2 = bpy.data.objects.get(got[0])
+            if o2 is not None:
+                items += [(o2, got[1], i) for i in range(got[2])]
         from .ui import apply_surface
-        ok, msg = apply_surface(context, "segs", [(ob, si, i) for i in range(n)],
-                                new_body=new_body)
+        ok, msg = apply_surface(context, "segs", items, new_body=new_body)
         if ok:
             self.last_closed = None
             try:
@@ -677,6 +700,45 @@ class SketchMixin:
                 pass
         self.report({"INFO"} if ok else {"ERROR"}, msg)
         self._status(context, msg)
+
+    def _nested_group(self, k):
+        """k. kapalı çizgiyle iç içe olan (aynı düzlemdeki) bütün kapalı çizgiler: en dıştaki
+        kapsayan ve onun içindekiler (delikler, adacıklar). Taslak sıraları."""
+        from . import core as _c
+        from . import sketchmath as _sm
+
+        def poly(st):
+            return np.vstack([dm.sample(sg, 9)[:-1] for sg in st["segs"]])
+        try:
+            st0 = self.sketch[k]
+        except Exception:
+            return [k]
+        pl = _sm.fit_plane(_sm.stroke_points(st0))
+        if pl is None:
+            return [k]
+        c, n = pl
+        u = dm.unit(np.cross(n, [1.0, 0, 0]) if abs(n[0]) < 0.9 else np.cross(n, [0, 1.0, 0]))
+        v = np.cross(n, u)
+        cands = {}
+        for i, st in enumerate(self.sketch):
+            if not st["cyclic"] or not st["segs"]:
+                continue
+            P = poly(st)
+            if float(np.abs((P - c) @ n).max()) > 1e-6 * (1.0 + float(np.abs(P).max())):
+                continue
+            cands[i] = np.c_[(P - c) @ u, (P - c) @ v]
+        if k not in cands:
+            return [k]
+
+        def area(f):
+            return 0.5 * abs(float(np.dot(f[:, 0], np.roll(f[:, 1], -1)) -
+                                   np.dot(f[:, 1], np.roll(f[:, 0], -1))))
+        root = k
+        for i, f in cands.items():
+            if i != k and area(f) > area(cands[root]) and _c._inside(cands[k][0], f):
+                root = i
+        return [root] + [i for i, f in cands.items() if i != root and
+                         _c._inside(f[0], cands[root])]
 
     def _undo_last(self, context):
         if self.stage:
@@ -716,6 +778,10 @@ class SketchMixin:
             for q in sg["p"]:
                 vals.extend(q)
         vals.append(-4.0 - len(getattr(self, "sk_cons", None) or ()))
+        for e in getattr(self, "skc", None) or ():
+            vals.append(-5.0 - len(e["refs"]))
+            if isinstance(e.get("value"), (int, float)):
+                vals.append(float(e["value"]))
         vals.append(-3.0)
         for p in getattr(self, "sk_points", None) or ():
             vals.extend(p)
@@ -733,6 +799,7 @@ class SketchMixin:
             "out_h": self.out_h, "plane": self.plane, "shape_plane": self.shape_plane,
             "last_closed": self.last_closed, "sk_points": getattr(self, "sk_points", None) or [],
             "sk_cons": getattr(self, "sk_cons", None) or [],
+            "skc": getattr(self, "skc", None) or [],
             "sk_pats": getattr(self, "sk_pats", None) or {}})
 
     def _hist_sync(self):

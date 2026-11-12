@@ -200,6 +200,12 @@ class EditMixin:
                 self.cursor, self.info, self.snap_kind = None, None, None
             if d["moved"]:
                 self.dirty = True
+                if getattr(self, "skc", None):        # taslak kısıtları: sürüklenen yerinde
+                    k_ = d["key"]
+                    pref = None
+                    if k_[0] == "pt" and k_[1] < len(self.sketch):
+                        pref = {("@sk", self._uid(k_[1]), k_[2])}
+                    self._sk_solve(pref)
                 self._status(context, "Taslak düzenlendi · Bitir (Ctrl+Enter) ile kaydet")
             elif self.tool != "SELECT":
                 self.sk_sel = None

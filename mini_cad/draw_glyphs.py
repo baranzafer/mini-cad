@@ -9,6 +9,7 @@ import numpy as np
 from . import constraints
 from . import core
 from . import palette
+from . import sketchmath as sm
 from .draw_common import COL_TEXT, _bezier, _marker, _poly, _project, _rect, _seg_px_dist, _text
 
 
@@ -56,6 +57,13 @@ class ConstraintUIMixin:
             return
         self.c_refs.append(self.c_hover)
         self.c_hover = None
+        if kind not in ("DIM", "AUTODIM") and len(self.c_refs) >= n and \
+                any(r[1] == "@sk" for r in self.c_refs):
+            self._c_sketch(context, kind)            # taslak çizgilerine kısıt
+            return
+        if kind == "AUTODIM" and self.c_refs and self.c_refs[0][1] == "@sk":
+            self._c_sketch(context, kind)
+            return
         if kind == "AUTODIM":
             refs = self._refs_of(self.c_refs)
             self.c_refs = []
@@ -98,6 +106,54 @@ class ConstraintUIMixin:
         real = "AXIS" if kind in ("HORIZ", "VERT") else kind
         c = constraints.add(real, refs, value=value)
         self._c_done(context, c, real if kind not in ("HORIZ", "VERT") else kind)
+
+    def _c_sketch(self, context, kind):
+        """Seçimde taslak çizgisi var: kısıt taslağa eklenir (Bitir gerekmez)."""
+        refs = self._refs_of(self.c_refs)
+        self.c_refs = []
+        if refs is None:
+            return
+        name = constraints.NAMES.get(kind, kind)
+        if kind == "AUTODIM":
+            r = refs[0]
+            k = self._uid_map().get(r[2])
+            made = 0
+            if k is not None:
+                have = {(e["refs"][0][2], e["refs"][0][3]) for e in self.skc
+                        if e["kind"] in ("DISTANCE", "RADIUS") and e["refs"][0][0] == "seg"}
+                st = self.sketch[k]
+                done_ent = set()
+                for i, sg in enumerate(st["segs"]):
+                    ref = ("seg", "@sk", r[2], i)
+                    if (r[2], i) in have:
+                        continue
+                    info = self._seg_info(ref)
+                    if info[0] == "line":
+                        made += self._skc_add(context, "DISTANCE", [ref]) is not None
+                    elif info[0] == "arc":
+                        ent = sm.entity_of(st, i)
+                        if ent in done_ent:
+                            continue
+                        done_ent.add(ent)
+                        made += self._skc_add(context, "RADIUS", [ref]) is not None
+            self._status(context, f"Otomatik ölçü (taslak): {made} ölçü")
+            return
+        value = None
+        real = kind
+        if kind in ("HORIZ", "VERT"):
+            ax = self._plane_axes()
+            if ax is None:
+                self._status(context, "Yatay / Dikey: çizim düzlemi bir eksen düzlemi olmalı")
+                return
+            real, value = "AXIS", (ax[0] if kind == "HORIZ" else ax[1])
+        i = self._skc_add(context, real, refs, axis=value)
+        if i is None:
+            self._status(context, f"{name}: eklenemedi")
+            return
+        e = self.skc[i]
+        note = " (Bitir'de uygulanır)" if "Bitir" in e.get("info", "") else ""
+        self._status(context, f"{name} taslağa eklendi{note}" if e.get("ok", True) else
+                     f"{name} eklendi ama sağlanamadı: {e.get('info')}")
 
     def _glyph_menu_open(self, mx, my):
         """Kısıt simgesine SAĞ tıklanınca: iki küçük simge (dondur / sil)."""

@@ -42,12 +42,14 @@ class DimMixin:
     def _c_pick(self, mx, my):
         want = self._c_want()
         if want == "any":
-            p = self._pick_entity(mx, my, True)
-            if p is not None and not self._smooth_node(p):
+            p = self._pick_any(mx, my, True)
+            smooth = p is not None and (self._sk_smooth_node(p) if p[1] == "@sk" else
+                                        self._smooth_node(p))
+            if p is not None and not smooth:
                 return p                        # köşe / uç noktası
-            q = self._pick_entity(mx, my, False)
+            q = self._pick_any(mx, my, False)
             return q if q is not None else p
-        return self._pick_entity(mx, my, want == "pt")
+        return self._pick_any(mx, my, want == "pt")
 
     def _smooth_node(self, p):
         """Yay / daire / spline ortasındaki pürüzsüz ara düğüm mü (ölçüde kenar sayılır)."""
@@ -114,6 +116,9 @@ class DimMixin:
     def _refs_of(self, picks):
         out = []
         for r in picks:
+            if r[1] == "@sk":                  # taslak çizgisi
+                out.append((r[0], "@sk", r[2], r[3]))
+                continue
             ob = bpy.data.objects.get(r[1])
             if ob is None:
                 return None
@@ -124,6 +129,13 @@ class DimMixin:
         """("line", a, b) ya da ("arc", grup) ya da ("curve",)"""
         from .constraints_arcs import arc_group, seg_bez
         ob, si, i = r[1], r[2], r[3]
+        if ob == "@sk":
+            P = self._skc_seg_bez(r)
+            if P is None:
+                return ("curve",)
+            if dm.is_straight_poly(np.array(P)):
+                return ("line", P[0], P[3])
+            return ("arc", None) if dm.arc_of_bezier(P) is not None else ("curve",)
         try:
             P = seg_bez(ob, si, i)
         except Exception:
@@ -180,6 +192,15 @@ class DimMixin:
             else:
                 kind, use = "PTLINE", [pt, sg]
         if kind is None:
+            return
+        if any(x[1] == "@sk" for x in use):    # taslak ölçüsü: taslakta çözülür
+            i = self._skc_add(context, kind, use)
+            if i is None:
+                self._status(context, "Ölçü eklenemedi")
+                return
+            self.dim_edit = ("@sk", i)
+            self.typed, self.field = ["", ""], 0
+            self._status(context, self._c_status_text())
             return
         c = constraints.add(kind, use, solve=False)
         if c is not None:
@@ -248,7 +269,7 @@ class DimMixin:
             self._status(context, f"{name} eklendi ama sağlanamadı: {c.info}")
 
     def _dim_constraint(self):
-        if self.dim_edit is None:
+        if self.dim_edit is None or self.dim_edit[0] == "@sk":
             return None
         ob = bpy.data.objects.get(self.dim_edit[0])
         if ob is None or self.dim_edit[1] >= len(ob.cad.constraints):
@@ -257,6 +278,12 @@ class DimMixin:
         return ob.cad.constraints[self.dim_edit[1]]
 
     def _dim_apply(self, context):
+        if self.dim_edit is not None and self.dim_edit[0] == "@sk":
+            i, txt = self.dim_edit[1], self.typed[0]
+            self.typed, self.field = ["", ""], 0
+            self.dim_edit = None
+            self._skc_apply_value(context, i, txt)
+            return
         c = self._dim_constraint()
         txt = self.typed[0]
         self.typed, self.field = ["", ""], 0
@@ -325,6 +352,14 @@ class DimMixin:
         if self.tool != "C_DIM":
             return None
         if et == "LEFTMOUSE" and press and not self.c_refs:
+            i = self._skc_at(mx, my)
+            if i is not None and self.skc[i]["value"] is not None and \
+                    self.skc[i]["kind"] != "AXIS":
+                self.dim_edit = ("@sk", i)           # taslak ölçüsünü düzenle
+                self.typed, self.field = ["", ""], 0
+                self._status(context, self._c_status_text())
+                self.area.tag_redraw()
+                return {"RUNNING_MODAL"}
             g = constraints.glyph_at(mx, my)
             if g is not None:
                 ob = bpy.data.objects.get(g[0])
@@ -343,6 +378,22 @@ class DimMixin:
 
     def _dim_draw2d(self, region):
         self._dim_init()
+        if self.dim_edit is not None and self.dim_edit[0] == "@sk":
+            i = self.dim_edit[1]
+            if 0 <= i < len(getattr(self, "skc", ())):
+                from . import core
+                e = self.skc[i]
+                if e["kind"] == "ANGLE":
+                    live, name = f"{e['value']:.1f}°", "Açı"
+                elif e["kind"] == "RADIUS":
+                    dia = e.get("axis") == 1
+                    live = core.fmt_len(e["value"] * (2 if dia else 1))
+                    name = "Çap" if dia else "Yarıçap"
+                else:
+                    live, name = core.fmt_len(e["value"]), "Uzunluk"
+                val = self.typed[0] + "_" if self.typed[0] else live
+                self._draw_rows(self.mouse, [(name, val, True)])
+            return
         c = self._dim_constraint()
         if c is None:
             return

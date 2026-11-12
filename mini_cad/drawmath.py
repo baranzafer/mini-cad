@@ -583,3 +583,45 @@ def pen_seg(a, a_out, b, b_in):
     h1 = a + a_out if a_out is not None else a + (b - a) / 3.0
     h2 = b - b_in if b_in is not None else b - (b - a) / 3.0
     return {"kind": "curve", "p": (a, h1, h2, b)}
+
+
+# ---------------------------------------------------------------- ızgara (spot ışığı)
+
+def grid_falloff(d, R, fade):
+    """Merkeze uzaklık d için saydamlık çarpanı: iç yarıçap R(1−fade) içinde 1, R'de 0
+    (yumuşak geçiş, smoothstep)."""
+    r0 = R * (1.0 - min(max(fade, 0.0), 1.0))
+    if d <= r0:
+        return 1.0
+    if d >= R:
+        return 0.0
+    t = (d - r0) / max(R - r0, 1e-12)
+    return 1.0 - t * t * (3.0 - 2.0 * t)
+
+
+def grid_segments(q, g0, gs, R, fade, k=6):
+    """İmleç (q, düzlem uv) çevresinde dairesel ızgara: ızgara çizgileri (g0 kökenli, gs
+    aralıklı) R yarıçaplı daireyle kırpılır, kısa parçalara bölünür. [(uv0, uv1, a0, a1)]"""
+    out = []
+    n = int(math.ceil(R / gs)) + 1
+    for axis in (0, 1):
+        o = 1 - axis
+        base = g0[axis] + round((q[axis] - g0[axis]) / gs) * gs
+        for j in range(-n, n + 1):
+            c = base + j * gs
+            h = c - q[axis]
+            if abs(h) >= R:
+                continue
+            half = math.sqrt(R * R - h * h)
+            lo, hi = q[o] - half, q[o] + half
+            m = max(2, int(math.ceil((hi - lo) / gs * k)))
+            ts = np.linspace(lo, hi, m + 1)
+            prev = None
+            for t in ts:
+                p = [0.0, 0.0]
+                p[axis], p[o] = c, float(t)
+                a = grid_falloff(math.hypot(p[0] - q[0], p[1] - q[1]), R, fade)
+                if prev is not None and (a > 1e-4 or prev[1] > 1e-4):
+                    out.append((prev[0], tuple(p), prev[1], a))
+                prev = (tuple(p), a)
+    return out

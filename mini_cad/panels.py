@@ -182,6 +182,9 @@ class MINICAD_PT_select(_Sub, bpy.types.Panel):
             box.label(text="O daire · R dikdörtgen · S/K spline · P kalem · Q önceki araç")
             box.label(text="Shift+Q düzlem seç · X/Y/Z/V düzlem · I ızgara · Shift 15°")
             box.prop(context.scene, "minicad_grid_alpha", slider=True)
+            if hasattr(context.scene, "minicad_grid_fade"):
+                box.prop(context.scene, "minicad_grid_fade", slider=True)
+                box.prop(context.scene, "minicad_grid_size")
 
         box = layout.box()
         row = box.row(align=True)
@@ -503,6 +506,9 @@ class MINICAD_PT_settings(_Sub, bpy.types.Panel):
         col.prop(p, "ghost_bevel")
         if hasattr(context.scene, "minicad_grid_alpha"):
             col.prop(context.scene, "minicad_grid_alpha", slider=True)
+            if hasattr(context.scene, "minicad_grid_fade"):
+                col.prop(context.scene, "minicad_grid_fade", slider=True)
+                col.prop(context.scene, "minicad_grid_size")
         col = layout.column(align=True)
         col.prop(p, "lin_defl")
         col.prop(p, "ang_defl")

@@ -182,6 +182,7 @@ class RenderMixin:
                 _text(17 * sc, 17 * sc, txt, COL_SNAP, int(12 * sc))
             if self.phase == "DRAW":
                 self._draw_points2d(region)
+                self._skc_draw2d(region)
                 self._txt_draw2d(region)
                 self._draw_sketch2d(region)
                 self._draw_pivot(region)

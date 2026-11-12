@@ -79,12 +79,13 @@ from .draw_xform import TransformMixin
 from .draw_shapes import PICK_HELP, SHAPE_NAMES, STEPS, ShapeMixin
 from .draw_dims import DimMixin
 from .draw_text import TextMixin
+from .draw_skcons import SketchConsMixin
 from .draw_common import CLICK_SHAPES, MODIFY_TOOLS, PICK_TOOLS, TOOL_CYCLES, XFORM_TOOLS
 
 
 class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintUIMixin, RenderMixin,
                       ModifyMixin, TransformMixin, ShapeMixin, DimMixin, TextMixin,
-                      bpy.types.Operator):
+                      SketchConsMixin, bpy.types.Operator):
     bl_idname = "minicad.draw"
 
     bl_label = "Tel Kafes Çiz"
@@ -175,6 +176,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self._sh_init()                  # şekiller, nokta, teğet daire, yansıt (draw_shapes)
         self._dim_init()                 # ölçü değeri düzenleme (draw_dims)
         self._txt_init()                 # metin (draw_text)
+        self._skc_init()                 # taslak kısıtları (draw_skcons)
         self.sk_cons, self.sk_pats = [], {}   # Bitir'de yazılacak kısıtlar / desen ilişkileri
         self.fillet_eq = None
         self.phase = "PLANE" if getattr(sc, "minicad_pick_plane", True) else "DRAW"
@@ -286,8 +288,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         if tool != self.tool:
             self.prev_tool = self.tool
         self._finalize_stage()
-        if tool.startswith("C_") and (self.segs or self.sketch):
-            self._finish_sketch(context)          # kısıtlar kaydedilmiş eğrilere uygulanır
+        if tool.startswith("C_") and (self.segs or self.start is not None or self.stage):
+            self._commit(context)                 # süren çizgi taslağa; taslak kaydedilmez
         if tool == "SELECT" and self.segs:
             self._commit(context)
         if tool in MODIFY_TOOLS and (self.segs or self.start is not None or self.stage):
@@ -543,6 +545,10 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                     self.area.tag_redraw()
                 return {"RUNNING_MODAL"}
             elif event.type == "RIGHTMOUSE":
+                si_ = self._skc_at(mx, my) if press else None
+                if si_ is not None:                  # taslak kısıtı simgesi: sil
+                    self._skc_delete(context, si_)
+                    return {"RUNNING_MODAL"}
                 if press and self._glyph_menu_open(mx, my):
                     self.area.tag_redraw()
                     return {"RUNNING_MODAL"}
@@ -773,6 +779,13 @@ def register():
         name="Izgara Görünürlüğü", description="Çizerken imleç çevresindeki ızgara çizgilerinin "
         "belirginliği (0 = gizli; yakalama yine çalışır)", default=0.22, min=0.0, max=1.0,
         subtype="FACTOR")
+    bpy.types.Scene.minicad_grid_fade = bpy.props.FloatProperty(
+        name="Izgara Yumuşaklığı", description="Izgaranın kenara doğru silikleşmesi (spot ışığı "
+        "gibi): 0 = keskin kenarlı daire, 1 = merkezden başlayan yumuşak geçiş",
+        default=0.7, min=0.0, max=1.0, subtype="FACTOR")
+    bpy.types.Scene.minicad_grid_size = bpy.props.FloatProperty(
+        name="Izgara Yarıçapı", description="İmleç çevresindeki ızgara alanının yarıçapı "
+        "(ızgara aralığı cinsinden)", default=6.0, min=2.0, max=30.0)
     bpy.types.Scene.minicad_look_at = bpy.props.BoolProperty(
         name="Düzleme Bak", description="Çizim düzlemi seçilince görünümü düzleme çevir",
         default=True)
@@ -786,7 +799,8 @@ def unregister():
     cleanup_all()
     if _on_load_pre in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.remove(_on_load_pre)
-    for name in ("minicad_grid_snap", "minicad_grid_alpha", "minicad_draw_target",
+    for name in ("minicad_grid_snap", "minicad_grid_alpha", "minicad_grid_fade",
+                 "minicad_grid_size", "minicad_draw_target",
                  "minicad_look_at",
                  "minicad_pick_plane"):
         try:

@@ -179,14 +179,23 @@ def _build(job, res, geometry):
     for p in patches:
         try:
             kw = {"blend": p["blend"]} if p.get("blend", "SHARP") != "SHARP" else {}
+            if p.get("holes"):
+                kw["holes"] = p["holes"]
             face, label = builder.face(p["chain"], p["sides"], p["method"], preview, **kw)
-            res["patches"][p["idx"]] = (True, f"{label} · {len(p['sides'])} kenar · "
-                                              f"{len(p['chain'])} segment")
-            built[p["idx"]] = face
+            info = f"{label} · {len(p['sides'])} kenar · {len(p['chain'])} segment"
+            if p.get("holes"):
+                info += f" · {len(p['holes'])} delik"
+            if p.get("sub"):
+                prev = res["patches"].get(p["idx"])
+                if prev and prev[0]:
+                    info = prev[1] + " | " + info
+            res["patches"][p["idx"]] = (True, info)
+            built[(p["idx"], p.get("sub", 0))] = face
         except CadError as e:
             res["patches"][p["idx"]] = (False, str(e))
             errors.append(p["name"])
-    faces = [built[p["idx"]] for p in job["patches"] if p["idx"] in built]
+    faces = [built[(p["idx"], p.get("sub", 0))] for p in job["patches"]
+             if (p["idx"], p.get("sub", 0)) in built]
     _builders[name] = builder
     if not faces:
         if errors:
