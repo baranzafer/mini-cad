@@ -18,11 +18,23 @@ DRAW_TOOLS = [
     ("TARC", "Teğet yay: çizgi ucundan teğet devam eder", "A"),
     ("ARC3", "3 noktalı yay: başlangıç, bitiş, eğrilik", "E"),
     ("CARC", "Merkezli yay: merkez, başlangıç, bitiş (D: yön)", "M"),
-    ("CIRCLE", "Daire: merkez, yarıçap", "O"),
-    ("RECT", "Dikdörtgen: iki köşe", "R"),
+    ("CIRCLE", "Daire: merkez, yarıçap (O'ya tekrar bas: teğet daire, elips)", "O"),
+    ("CIRCT", "Teğet daire: üç doğruya tıkla", "O ×2"),
+    ("ELLIPSE", "Elips: merkez, 1. eksen ucu, 2. yarı eksen", "O ×3"),
+    ("RECT", "Dikdörtgen: iki köşe (R'ye tekrar bas: diğer türler)", "R"),
+    ("RECT3", "Dikdörtgen: 3 nokta (kenar, genişlik)", "R ×2"),
+    ("RECTC", "Dikdörtgen: merkezden (merkez, köşe)", "R ×3"),
+    ("RECT3C", "Dikdörtgen: 3 nokta merkezden (merkez, kenar ortası, köşe)", "R ×4"),
+    ("POLYGON", "Çokgen: merkez, köşe (Kenar sayısı yaz, D: iç / dış teğet)", ""),
+    ("SLOTCC", "Kanal: merkezden merkeze (iki yay merkezi, genişlik)", ""),
+    ("SLOTO", "Kanal: toplam boy (iki uç, genişlik)", ""),
+    ("SLOTC", "Kanal: merkez noktalı (merkez, yay merkezi, genişlik)", ""),
+    ("ARCSLOT", "Yay kanal: 3 nokta (başlangıç, bitiş, yay noktası, genişlik)", ""),
     ("CV", "Spline: kontrol noktalı (CV)", "S"),
     ("FIT", "Spline: noktalardan geçen", "K"),
     ("PEN", "Kalem: tıkla-sürükle ile bezier tutamacı", "P"),
+    ("POINT", "Nokta: tıklanan yere (yakalanır, Bitir'de kaydedilir)", ""),
+    ("PROJECT", "Geometri yansıt: gövde kenarı / tel kafes eğrisini çizim düzlemine izdüşür", ""),
 ]
 MODIFY_TOOLS = [
     ("TRIM", "Kırp: parçayı en yakın kesişimler arasında sil (sürükle: çoklu, Shift: Uzat)", "B"),
@@ -214,6 +226,48 @@ def icon_lines(name):
         return P([(0.0, -0.85), (-0.4, 0.05), (0.0, 0.3), (0.4, 0.05)], True) + \
             P([(0.0, -0.85), (0.0, -0.15)]) + P([(-0.85, 0.65), (0.85, 0.65)]) + \
             _dot(-0.85, 0.65) + _dot(0.85, 0.65)
+    if name == "CIRCT":
+        return P(_arc(0.0, -0.1, 0.45, 0, 2 * math.pi, 18)) + P([(-0.9, -0.55), (0.9, -0.55)]) + \
+            P([(-0.85, -0.85), (0.15, 0.95)]) + P([(0.85, -0.85), (-0.15, 0.95)])
+    if name == "ELLIPSE":
+        return P([(0.85 * math.cos(a), 0.5 * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 25)]) \
+            + _dot(0, 0, 0.06)
+    if name == "RECT3":
+        return P([(-0.8, -0.2), (0.3, -0.75), (0.75, 0.15), (-0.35, 0.7)], True) + \
+            _dot(-0.8, -0.2) + _dot(0.3, -0.75) + _dot(0.75, 0.15)
+    if name == "RECTC":
+        return P([(-0.75, -0.55), (0.75, -0.55), (0.75, 0.55), (-0.75, 0.55)], True) + \
+            _dot(0, 0, 0.08) + _dot(0.75, 0.55)
+    if name == "RECT3C":
+        return P([(-0.75, -0.55), (0.75, -0.55), (0.75, 0.55), (-0.75, 0.55)], True) + \
+            _dot(0, 0, 0.08) + _dot(0.75, 0.0) + _dot(0.75, 0.55)
+    if name == "POLYGON":
+        return P([(0.8 * math.cos(a), 0.8 * math.sin(a)) for a in
+                  np.linspace(0, 2 * math.pi, 7)[:-1]], True) + _dot(0, 0, 0.06)
+    if name in ("SLOTCC", "SLOTO", "SLOTC"):
+        out = P([(-0.45, -0.35), (0.45, -0.35)]) + P([(-0.45, 0.35), (0.45, 0.35)]) + \
+            P(_arc(0.45, 0.0, 0.35, -math.pi / 2, math.pi / 2)) + \
+            P(_arc(-0.45, 0.0, 0.35, math.pi / 2, 1.5 * math.pi))
+        if name == "SLOTCC":
+            out += _dot(-0.45, 0.0, 0.07) + _dot(0.45, 0.0, 0.07)
+        elif name == "SLOTO":
+            out += _dot(-0.8, 0.0, 0.07) + _dot(0.8, 0.0, 0.07)
+        else:
+            out += _dot(0.0, 0.0, 0.07) + _dot(0.45, 0.0, 0.07)
+        return out
+    if name == "ARCSLOT":
+        return P(_arc(0.0, -0.9, 1.25, 0.6, math.pi - 0.6, 12)) + \
+            P(_arc(0.0, -0.9, 0.75, 0.6, math.pi - 0.6, 12)) + \
+            P(_arc(1.0 * math.cos(0.6), -0.9 + 1.0 * math.sin(0.6), 0.25, 0.6 + math.pi, 0.6, 6)) + \
+            P(_arc(-1.0 * math.cos(0.6), -0.9 + 1.0 * math.sin(0.6), 0.25, math.pi - 0.6,
+                   2 * math.pi - 0.6, 6))
+    if name == "POINT":
+        return P([(-0.6, 0.0), (0.6, 0.0)]) + P([(0.0, -0.6), (0.0, 0.6)]) + \
+            P(_arc(0, 0, 0.3, 0, 2 * math.pi, 12))
+    if name == "PROJECT":
+        return P([(-0.85, 0.1), (-0.1, 0.55), (0.85, 0.1), (0.1, -0.35)], True) + \
+            P([(-0.85, -0.6), (0.85, -0.6)]) + P([(-0.1, 0.55), (-0.1, -0.6)]) + \
+            P([(-0.3, -0.35), (-0.1, -0.6), (0.1, -0.35)])
     if name == "TRIM":
         dash = []
         for k in range(3):

@@ -501,7 +501,7 @@ class PlaneMixin:
         saved = tmp["saved"] if tmp is not None else (self.plane_mode, self.locked)
         self.temp_pick = {"saved": saved}
         try:
-            self.refs = _Refs(context, self.sketch)    # taslak noktalarına da yapışsın
+            self.refs = _Refs(context, self.sketch, getattr(self, "sk_points", None) or ())
             self.dirty = False
         except Exception:
             pass

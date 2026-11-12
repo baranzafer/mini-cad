@@ -12,7 +12,8 @@ from . import constraints
 from . import core
 from . import drawmath as dm
 from .draw_common import (
-    COL_GUIDE, COL_SNAP, FIELDS, GRID_PX, GUIDE_PX, MODIFY_TOOLS, PRIORITY, REF_PX, SHAPE_TOOLS,
+    CLICK_SHAPES, COL_GUIDE, COL_SNAP, FIELDS, GRID_PX, GUIDE_PX, MODIFY_TOOLS, PRIORITY, REF_PX,
+    SHAPE_TOOLS,
     _Refs,
     _axis_col, _dashed, _marker, _project, _seg_px_dist, _text, parse_angle, parse_length,
 )
@@ -106,6 +107,8 @@ class SnapMixin:
 
     def _lock_anchor(self):
         """Yazılan değerlerin ve kılavuzların ölçüldüğü nokta."""
+        if self.tool in CLICK_SHAPES and self.stage:
+            return self.stage[-1]
         if self.tool in SHAPE_TOOLS and self.stage:
             return self.stage[0]
         if self.tool in ("CV", "FIT") and self.stage:
@@ -243,7 +246,7 @@ class SnapMixin:
         self.mouse = (mx, my)
         if self.dirty:
             try:
-                self.refs = _Refs(context, self.sketch)
+                self.refs = _Refs(context, self.sketch, getattr(self, "sk_points", None) or ())
             except Exception:
                 pass
             self.dirty = False
@@ -426,6 +429,9 @@ class SnapMixin:
         anchor = self._anchor()
         cur = self.cursor
         t = self.tool
+        if t in CLICK_SHAPES:
+            self._shape_preview(plane)
+            return
         if t in SHAPE_TOOLS:
             if not self.stage:
                 return

@@ -179,6 +179,7 @@ class RenderMixin:
                 _rect(10 * sc, 10 * sc, 10 * sc + 7.2 * sc * len(txt) + 14 * sc, 34 * sc, COL_BOX)
                 _text(17 * sc, 17 * sc, txt, COL_SNAP, int(12 * sc))
             if self.phase == "DRAW":
+                self._draw_points2d(region)
                 self._draw_sketch2d(region)
                 self._draw_pivot(region)
                 self._draw_track2d(region)
@@ -217,6 +218,13 @@ class RenderMixin:
         elif t == "CIRCLE":
             R = arc["radius"] if arc else L
             names = (("Yarıçap", core.fmt_len(R)),)
+        elif t in ("RECT3", "RECTC", "RECT3C", "POLYGON", "SLOTCC", "SLOTO", "SLOTC",
+                   "ARCSLOT", "ELLIPSE"):
+            rows = list(getattr(self, "shape_rows", None) or [])
+            names = ()
+            if rows:
+                self._draw_rows(cur, rows)
+            return
         elif t == "RECT":
             a, q = pl.uv(anchor), pl.uv(self.cursor)
             names = (("Genişlik", core.fmt_len(abs(q[0] - a[0]))),

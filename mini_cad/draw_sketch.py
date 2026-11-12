@@ -13,7 +13,7 @@ from mathutils import Vector
 from . import constraints
 from . import core
 from . import drawmath as dm
-from .draw_common import AXIS_OF, SHAPE_TOOLS, _LAST, parse_length
+from .draw_common import AXIS_OF, CLICK_SHAPES, SHAPE_TOOLS, _LAST, parse_length
 
 
 class SketchMixin:
@@ -67,12 +67,21 @@ class SketchMixin:
                                 f"kılavuz={(self.info or {}).get('kind')} · yazılan={self.typed}")
         except Exception:
             pass
+        if t == "POINT":
+            self._sh_point(context, cur)
+            return
         if t in SHAPE_TOOLS:
             if not self.stage:
                 self.stage = [cur]
                 base = self.plane or self.tmp_plane or self._make_plane(self.plane_mode, cur)
                 self.shape_plane = base.moved(cur)
                 self.typed, self.field = ["", ""], 0
+                if t in CLICK_SHAPES:
+                    from .draw_shapes import SHAPE_NAMES, STEPS
+                    self._status(context, f"{SHAPE_NAMES[t]}: {STEPS[t][1]}")
+                return
+            if t in CLICK_SHAPES:
+                self._sh_place(context, cur)
                 return
             if not self.preview:
                 return
@@ -363,8 +372,9 @@ class SketchMixin:
         if self.segs:
             self._commit(context)
         strokes, self.sketch = self.sketch, []
+        points = list(getattr(self, "sk_points", None) or ())
         self.sk_hover = self.sk_drag = None
-        if not strokes:
+        if not strokes and not points:
             return {}
         try:
             if getattr(context.scene, "minicad_draw_target", "ACTIVE") == "NEW":
@@ -375,9 +385,16 @@ class SketchMixin:
             self.report({"ERROR"}, f"Eğri objesi bulunamadı: {e}")
             self.sketch = strokes
             return {}
+        self.sk_points = []
+        for p in points:                          # Nokta: tek noktalı spline
+            try:
+                self._write_point(ob, p)
+            except Exception as e:
+                self.report({"ERROR"}, f"Nokta yazılamadı: {e}")
         out, n_auto = {}, 0
         written = []
-        sk_map = {}                              # taslak indeksi -> (çizgi, spline)
+        sk_map = {}
+        msg_pts = f" · {len(points)} nokta" if points else ""                              # taslak indeksi -> (çizgi, spline)
         for i, st in enumerate(strokes):
             try:
                 si = self._write_spline(context, ob, st["segs"], st["cyclic"])
@@ -407,7 +424,7 @@ class SketchMixin:
         except Exception:
             pass
         self.dirty = True
-        msg = f"Bitti: '{ob.name}' içine {len(written)} çizgi kaydedildi"
+        msg = f"Bitti: '{ob.name}' içine {len(written)} çizgi kaydedildi{msg_pts}"
         if n_auto:
             msg += f" · {n_auto} kısıt"
         try:
@@ -421,6 +438,22 @@ class SketchMixin:
         self.sk_sel = None
         self._hist_reset()                       # kaydedildi: geri alma artık Blender'da
         return out
+
+    def _write_point(self, ob, p):
+        cu = ob.data
+        if cu.dimensions != "3D":
+            cu.dimensions = "3D"
+        q = ob.matrix_world.inverted() @ Vector(tuple(float(x) for x in p))
+        sp = cu.splines.new("BEZIER")
+        b = sp.bezier_points[0]
+        b.handle_left_type = b.handle_right_type = "FREE"
+        b.co = q
+        b.handle_left = q
+        b.handle_right = q
+        b.handle_left_type = b.handle_right_type = "VECTOR"
+        sp.use_cyclic_u = False
+        cu.update_tag()
+        return len(cu.splines) - 1
 
     def _auto_tangent(self, context, ob, si, st, sk_map=None):
         start_tan = st.get("start_tan")
@@ -551,6 +584,9 @@ class SketchMixin:
         for sg in self.segs:
             for q in sg["p"]:
                 vals.extend(q)
+        vals.append(-3.0)
+        for p in getattr(self, "sk_points", None) or ():
+            vals.extend(p)
         vals.append(-2.0)
         if self.start is not None:
             vals.extend(self.start)
@@ -563,7 +599,7 @@ class SketchMixin:
             "sketch": self.sketch, "segs": self.segs, "start": self.start,
             "node_ids": self.node_ids, "start_tan": self.start_tan, "stage": self.stage,
             "out_h": self.out_h, "plane": self.plane, "shape_plane": self.shape_plane,
-            "last_closed": self.last_closed})
+            "last_closed": self.last_closed, "sk_points": getattr(self, "sk_points", None) or []})
 
     def _hist_sync(self):
         """Durum değiştiyse önceki durumu geçmişe ekler (fare hareketlerinde çağrılmaz)."""

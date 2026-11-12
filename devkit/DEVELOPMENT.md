@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.17.0)
+# Mini CAD — Geliştirme Notları (v0.18.0)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -8,7 +8,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-1. İki dosyayı yükle: `mini_cad_v0.17.0.zip` (eklenti) ve `mini_cad_devkit_v0.17.0.zip`
+1. İki dosyayı yükle: `mini_cad_v0.18.0.zip` (eklenti) ve `mini_cad_devkit_v0.18.0.zip`
    (testler + araçlar).
 2. Açılış mesajında şunu söyle: "Mini CAD projesine devam ediyoruz, önce DEVELOPMENT.md'yi oku."
    Ardından isteklerini yaz. Mümkünse birkaç isteği tek mesajda topla.
@@ -20,7 +20,7 @@ hangi dosyaya bakılacağını söyler.
    ```
    Beklenen sonuç: `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den beri
    bayat; "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
-4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t51.py` ...),
+4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t53.py` ...),
    sürümü artır ve paketle (§8).
 5. Kod GitHub'da da tutuluyor: `baranzafer/mini-cad` deposunda eklenti `mini_cad/`, testler ve
    araçlar `devkit/` klasöründe. Her sürüm ayrı bir commit olarak eklenir. Kurulum zip'leri
@@ -148,20 +148,22 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `constraints_refs.py` | 86 | Kısıt veri erişimi: referans noktaları, dünya konumu, `all_constraints` |
 | `constraints_tangent.py` | 355 | Teğet planlaması (§6) |
 | `constraints_glyphs.py` | 98 | Kısıt simgesi çizimi, `glyph_at` |
-| `draw.py` | 744 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
-| `draw_common.py` | 453 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
+| `draw.py` | 765 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
+| `draw_common.py` | 481 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
 | `draw_plane.py` | 537 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (U) |
-| `draw_snap.py` | 638 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
-| `draw_sketch.py` | 611 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
+| `draw_snap.py` | 644 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
+| `draw_sketch.py` | 647 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
 | `draw_edit.py` | 427 | EditMixin: taslak noktası / tutamaç sürükleme, pivot, sürüklerken yakalama, sürüklerken ölçü yardımcısı |
 | `draw_glyphs.py` | 197 | ConstraintUIMixin: kısıt için kenar / nokta seçimi, simge sağ tık menüsü |
-| `draw_render.py` | 255 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
+| `draw_render.py` | 263 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
 | `sketchmath.py` | 1178 | bpy'siz taslak düzenleme matematiği: bezier bölme, varlıklar, kesişimler, Kırp / Uzat / Böl / Ötele / Köşe yuvarla / Pah |
-| `draw_modify.py` | 576 | ModifyMixin: Değiştir araçlarının seçimi, önizlemesi, olayları ve çizimi |
+| `draw_modify.py` | 587 | ModifyMixin: Değiştir araçlarının seçimi, önizlemesi, olayları ve çizimi |
 | `draw_xform.py` | 540 | TransformMixin: Düzenle / Desen araçları (seçim, temel nokta, hedef, önizleme, ölçü kutusu) |
+| `shapemath.py` | 325 | bpy'siz şekil matematiği: dikdörtgen çeşitleri, çokgen, kanallar, yay kanal, elips, 3 doğruya teğet daire, düzleme izdüşüm |
+| `draw_shapes.py` | 447 | ShapeMixin: çok tıklamalı şekiller, Nokta, Teğet daire, Geometri yansıt |
 | `drawmath.py` | 585 | bpy'siz çizim matematiği: düzlemler, doğru / yay / daire / dikdörtgen, B-spline→Bézier (Boehm), Catmull-Rom, kalem, kılavuz rafinesi |
 | `snapmath.py` | 410 | FORGE snap_math (GPL başlıklı kopya) |
-| `palette.py` | 516 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
+| `palette.py` | 570 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
 | `pick.py` | 579 | Kenar seçim modu (hover + tık), sarı gövde kenarları, B ile fillet |
 | `ui.py` | 590 | Operatörler, tercihler (`background`), `add_feature` (BODY ref) |
 | `panels.py` | 532 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
@@ -191,7 +193,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 ## 5. Çizim aracı (`MINICAD_OT_draw`, `minicad.draw`)
 
 **Sınıf:** `MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintUIMixin,
-RenderMixin, ModifyMixin, TransformMixin, bpy.types.Operator)`. Mixin'lerde **aynı adlı metot olmamalı** (v0.16'da
+RenderMixin, ModifyMixin, TransformMixin, ShapeMixin, bpy.types.Operator)`. Mixin'lerde **aynı adlı metot olmamalı** (v0.16'da
 `_offset_update` çakışması yakalandı). Kontrol:
 `grep -ho "^    def [a-zA-Z_0-9]*" draw_*.py draw.py | sort | uniq -d` boş dönmeli.
 
@@ -212,7 +214,9 @@ RenderMixin, ModifyMixin, TransformMixin, bpy.types.Operator)`. Mixin'lerde **ay
 | 3 noktalı yay | E |
 | Merkezli yay | M (D: yön) |
 | Daire | O |
-| Dikdörtgen | R |
+| Dikdörtgen (R'ye tekrar bas: 3 nokta → merkezden → 3 nokta merkezden) | R |
+| Daire (O'ya tekrar bas: Teğet daire → Elips) | O |
+| Çokgen (D: iç / dış teğet), Kanallar, Yay kanal, Nokta, Geometri yansıt | palet (ÇİZ) |
 | CV spline | S |
 | Noktalardan geçen spline | K |
 | Kalem | P |
@@ -260,6 +264,38 @@ Diğer kısayollar:
     Eksen kilidinde (X/Y/Z) yazılan değer eksen boyunca kaydırmadır.
   - Bırakınca ya da Enter ile uygulanır. Sürüklenen öğenin yüksekliği korunur.
 - Durum alanları: `sk_hover` / `sk_drag` / `sk_sel`.
+
+**Oluştur araçları** (v0.18.0; `draw_shapes` + `shapemath`):
+- **Çok tıklamalı şekiller** `CLICK_SHAPES` ⊂ `SHAPE_TOOLS` (RECT3, RECTC, RECT3C, POLYGON,
+  SLOTCC, SLOTO, SLOTC, ARCSLOT, ELLIPSE).
+  - Normal çizim akışını kullanırlar: her tıkta bütün yakalamalar geçerli.
+  - Akış: `_place` önce `stage`'e ekler (`_sh_place`, `NEEDED` tık sayısı), son tıkta
+    `_write_shape` çağrılır. Önizleme `_make_preview` → `_shape_preview`. Ölçü kutusu
+    `shape_rows`'tan gelir.
+  - `FIELDS` bu şekiller için `(None, None)`: genel kilit yok, yazılanı şekil kendisi uygular
+    (2. tıkta uzunluk / açı, son tıkta genişlik vb.). İmleç kilitli konuma alınır, Enter
+    yazılan değerle tıklar.
+  - `_lock_anchor` bu şekillerde `stage[-1]`'dir (kılavuzlar son noktaya göre).
+  - Dikdörtgenler eksene hizalıysa yatay / dikey, değilse dik / paralel oto kısıt alır. Elips
+    tek nesnedir (aynı `grp`).
+- **Çokgen:** varsayılan 6 kenar (Kenar alanı, Tab; hatırlanır). D ile iç / dış teğet
+  (yalnızca bu araçta; diğerlerinde D merkezli yayın yönü).
+- **Teğet daire** (`CIRCT`, `PICK_TOOLS`): `refs.chords`'tan üç doğru seçilir (taslak, tel
+  kafes, gövde kenarı). Doğruların üçgeninin iç teğet dairesi hesaplanır; Backspace son seçimi,
+  sağ tık hepsini bırakır.
+- **Nokta** (`POINT`):
+  - `self.sk_points` listesinde tutulur, taslak geçmişine dahildir.
+  - `_Refs`'e "Nokta" türünde yakalama noktası olarak eklenir.
+  - Bitir'de tek noktalı bezier spline olarak yazılır (`_write_point`). `_Refs` tek noktalı
+    spline'ı yine "Nokta" olarak tanır. Bütün spline döngüleri `_seg_count` kullandığı için
+    (0 segment) güvenli.
+- **Yansıt** (`PROJECT`, `PICK_TOOLS`): CAD gövde kenarı (`core._display` edges) ya da tel
+  kafes segmenti düzleme dik izdüşürülür.
+  - Tel kafes segmentinin bezier'i tam izdüşer (afin).
+  - Gövde kenarı çoklu çizgisinden doğru / daire / yay tanınır, değilse spline uydurulur.
+  - Sonuç taslağa normal çizgi olarak eklenir (Inventor'daki gibi ilişkisel, sarı referans
+    değil).
+- **Tuş döngüleri** `TOOL_CYCLES`: aynı araç tuşuna tekrar basınca türler arasında geçilir.
 
 **Değiştir araçları** (v0.16.0, Inventor 2D gibi; `draw_modify` + `sketchmath`):
 - **Yalnızca taslak** (Bitir'lenmemiş çizgiler) üzerinde çalışırlar. Araca geçince süren
@@ -450,6 +486,8 @@ Betiğin yaptıkları:
 | t48 | sketchmath: kesişim, kırpma (daire dahil), uzatma, bölme, öteleme, yuvarlama, pah |
 | t49 | Düzenle / Desen modal: seçim (tık, pencere / kesişen kutu), Taşı, Kopyala, Döndür (+kopya), Ölçekle, Esnet, desenler, Ayna, seçim koruma, Bitir, çizim |
 | t50 | sketchmath dönüşümleri: yay korunumu, kopya grupları, desen açıları, esnetme |
+| t51 | shapemath: dikdörtgenler, çokgen, kanallar, yay kanal, elips, teğet daire, yansıtma |
+| t52 | Oluştur modal: R / O döngüleri, yazarak şekiller, çokgen D, kanallar, teğet daire, Nokta (yakalama, geri al, Bitir), Yansıt, Bitir |
 | tools/occ_blend_check.py | GERÇEK OCC ile teğet birleşim ölçümü (test koşucusunda değil, OCP gerekir) |
 
 **Test yazma kalıbı:**
@@ -516,8 +554,15 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   2. **(0.17.0, yapıldı)** Taşı, Kopyala, Döndür, Ölçekle, Esnet; Desen: dikdörtgen,
      dairesel, Ayna. Eksikler: Ayna için simetri kısıtı (çizgiye göre), desenin ilişkisel
      (düzenlenebilir) olması, Inventor'daki "Hassas giriş" penceresi (x / y yazma).
-  3. Çiz eksikleri: dikdörtgen (3 nokta, merkezden), çokgen, kanal (slot), daire (teğet,
-     elips?), Nokta, Geometri yansıt (Project Geometry).
+  3. **(0.18.0, yapıldı)** Dikdörtgen: 3 nokta, merkezden, 3 nokta merkezden; Çokgen;
+     Kanal: merkezden merkeze, toplam boy, merkez noktalı, 3 noktalı yay; Elips; Teğet daire
+     (3 doğru); Nokta; Geometri yansıt.
+     Eksikler:
+     - Metin (Text) yok.
+     - Merkez noktalı yay kanal yok.
+     - Yansıtılan geometri ilişkisel değil (kaynak değişince güncellenmez).
+     - Teğet daire yalnızca iç teğeti üretir.
+     - Noktalar Düzenle / Değiştir araçlarına girmez (taşınmaz).
   4. Kısıt / Ölçü: genel Ölçü aracı (tıklanan varlığa göre uzunluk / yarıçap / açı), Eş
      merkezli, Pürüzsüz (G2), görünürlük.
   - Ayrıca değerlendirilecek: Bitir'lenmiş eğriyi taslağa geri alma (Inventor "Edit
@@ -565,3 +610,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - Ortak seçim: tık ve pencere / kesişen kutu. Nokta girişinde çizimin bütün yakalamaları
     geçerli.
   - Yeni modül `draw_xform.py`; testler t49, t50.
+- **0.18.0:** Inventor 2D araçları, 3. aşama.
+  - Dikdörtgen çeşitleri (R döngüsü), Çokgen, dört kanal türü, Elips, Teğet daire (O döngüsü),
+    Nokta, Geometri yansıt.
+  - Yeni modüller `shapemath.py` ve `draw_shapes.py`; testler t51, t52.

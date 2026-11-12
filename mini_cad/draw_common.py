@@ -57,7 +57,8 @@ GRID_PX = 6          # ızgara mıknatısı (piksel): bilerek zayıf
 
 GRID_MIN_PX = 18     # ekranda ızgara aralığı en az bu kadar piksel
 
-PRIORITY = {"Başlangıç": -1, "Uç": 0, "Merkez": 0, "Orta": 1, "Kesişim": 2, "Yakın": 3}
+PRIORITY = {"Başlangıç": -1, "Uç": 0, "Merkez": 0, "Nokta": 0, "Orta": 1, "Kesişim": 2,
+            "Yakın": 3}
 
 PASS_KEYS = {
     "MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE", "TRACKPADPAN", "TRACKPADZOOM",
@@ -125,7 +126,7 @@ class _Refs:
     """Görünür tel kafes ve CAD gövdelerinden yakalama noktaları, doğru parçaları ve kısıt
     seçimi için kimlikli tel kafes segmentleri / noktaları."""
 
-    def __init__(self, context, strokes=()):
+    def __init__(self, context, strokes=(), points=()):
         pts, kinds, ids, chords, chord_ids, polys = [], [], [], [], [], []
         seen = {}
         self.wsegs = []          # [(obje adı, spline, segment, örnekler)]
@@ -154,6 +155,12 @@ class _Refs:
                     if sp.type not in ("BEZIER", "POLY"):
                         continue
                     npt = len(sp.bezier_points) if sp.type == "BEZIER" else len(sp.points)
+                    if npt == 1 and not sp.use_cyclic_u:      # tek noktalı spline: Nokta
+                        q = sp.bezier_points[0].co if sp.type == "BEZIER" else sp.points[0].co.xyz
+                        P0 = np.array(tuple(mw @ q), dtype=np.float64)
+                        add_pt(P0, "Nokta", (ob.name, si, 0))
+                        self.wpts.append(((ob.name, si, 0), P0))
+                        continue
                     for i in range(core._seg_count(sp)):
                         try:
                             s = core._spline_segment(ob, si, sp, i, mw)
@@ -211,6 +218,8 @@ class _Refs:
                         chords.append((P[0], P[-1]))
                         chord_ids.append(None)
                     polys.append(P)
+        for p in points:                         # taslak noktaları
+            add_pt(np.asarray(p, dtype=np.float64), "Nokta")
         for st in strokes:                       # hafızadaki taslak çizgiler
             for sg in st["segs"]:
                 P = list(sg["p"])
@@ -356,6 +365,12 @@ def _marker(kind, x, y, s, region):
         pts = [(x + s * math.cos(a), y + s * math.sin(a))
                for a in np.linspace(0, 2 * math.pi, 17)[:-1]]
         _poly(pts, COL_SNAP, 2.0, region, closed=True)
+    elif kind == "Nokta":
+        _poly([(x - s, y), (x + s, y)], COL_SNAP, 2.0, region)
+        _poly([(x, y - s), (x, y + s)], COL_SNAP, 2.0, region)
+        pts = [(x + s * 0.6 * math.cos(a), y + s * 0.6 * math.sin(a))
+               for a in np.linspace(0, 2 * math.pi, 9)[:-1]]
+        _poly(pts, COL_SNAP, 1.5, region, closed=True)
     elif kind == "Kesişim":
         _poly([(x - s, y - s), (x + s, y + s)], COL_SNAP, 2.0, region)
         _poly([(x - s, y + s), (x + s, y - s)], COL_SNAP, 2.0, region)
@@ -437,7 +452,17 @@ def _move_handle(segs, k, w, new, cyclic, orig):
 
 CHAIN_TOOLS = {"LINE", "TARC", "ARC3", "CARC", "CV", "FIT", "PEN"}
 
-SHAPE_TOOLS = {"CIRCLE", "RECT"}
+# Çok tıklamalı şekiller (draw_shapes): her tıkta çizimin yakalamaları geçerli
+CLICK_SHAPES = {"RECT3", "RECTC", "RECT3C", "POLYGON", "SLOTCC", "SLOTO", "SLOTC", "ARCSLOT",
+                "ELLIPSE"}
+
+SHAPE_TOOLS = {"CIRCLE", "RECT"} | CLICK_SHAPES
+
+# Tıklayarak nesne seçen oluşturma araçları (taslakta çalışır, draw_shapes._pk_*)
+PICK_TOOLS = {"CIRCT", "PROJECT"}
+
+# Aynı tuşa tekrar basınca türler arasında geçiş (Inventor açılır menüsü gibi)
+TOOL_CYCLES = {"R": ["RECT", "RECT3", "RECTC", "RECT3C"], "O": ["CIRCLE", "CIRCT", "ELLIPSE"]}
 
 TOOL_KEYS = {"W": "SELECT", "L": "LINE", "E": "ARC3", "M": "CARC", "O": "CIRCLE",
              "R": "RECT", "S": "CV", "K": "FIT", "P": "PEN", "B": "TRIM"}
@@ -445,9 +470,12 @@ TOOL_KEYS = {"W": "SELECT", "L": "LINE", "E": "ARC3", "M": "CARC", "O": "CIRCLE"
 XFORM_TOOLS = {"MOVE", "COPY", "ROTATE", "SCALE", "STRETCH", "RPAT", "CPAT", "MIRROR"}
 
 # Taslak üzerinde çalışan bütün araçlar (Değiştir + Düzenle / Desen)
-MODIFY_TOOLS = {"TRIM", "EXTEND", "SPLIT", "OFFSET", "FILLET2D", "CHAMFER2D"} | XFORM_TOOLS
+MODIFY_TOOLS = {"TRIM", "EXTEND", "SPLIT", "OFFSET", "FILLET2D", "CHAMFER2D"} | XFORM_TOOLS | \
+    {"CIRCT", "PROJECT"}
 
 FIELDS = {"CIRCLE": ("Yarıçap", None), "RECT": ("Genişlik", "Yükseklik"),
-          "ARC3": (None, None), "CARC": (None, None), "TARC": (None, None)}
+          "ARC3": (None, None), "CARC": (None, None), "TARC": (None, None),
+          "POINT": (None, None)}
+FIELDS.update({t: (None, None) for t in CLICK_SHAPES})   # yazılanı şeklin kendisi uygular
 
 AXIS_OF = {"Yatay": {"XY": 0, "XZ": 0, "YZ": 1}, "Dikey": {"XY": 1, "XZ": 2, "YZ": 2}}

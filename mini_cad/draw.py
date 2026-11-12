@@ -3,6 +3,9 @@
 Araçlar   Seç (W) · Doğru (L) · Teğet yay (A) · 3 noktalı yay (E) · Merkezli yay (M, D: yön) ·
           Daire (O) · Dikdörtgen (R) · Spline: kontrol noktalı (S) · noktalardan geçen (K) ·
           Kalem (P) · Q: son iki araç arasında geçiş · Shift+Q: düzlem seç
+Oluştur+  Dikdörtgen: 3 nokta / merkezden / 3 nokta merkezden (R'ye tekrar bas) · Çokgen ·
+          Kanal: merkezden merkeze / toplam boy / merkez noktalı / 3 noktalı yay · Elips ·
+          Teğet daire (O'ya tekrar bas) · Nokta · Yansıt (bkz. draw_shapes.py)
 Değiştir  Kırp (B, Shift: Uzat) · Uzat · Böl · Ötele · Köşe yuvarla · Pah (taslak üzerinde;
           bkz. draw_modify.py)
 Düzenle   Taşı · Kopyala · Döndür · Ölçekle · Esnet · Desen: dikdörtgen, dairesel · Ayna
@@ -73,11 +76,12 @@ from .draw_glyphs import ConstraintUIMixin
 from .draw_render import RenderMixin
 from .draw_modify import MOD_HELP, ModifyMixin
 from .draw_xform import TransformMixin
-from .draw_common import MODIFY_TOOLS, XFORM_TOOLS
+from .draw_shapes import PICK_HELP, SHAPE_NAMES, STEPS, ShapeMixin
+from .draw_common import CLICK_SHAPES, MODIFY_TOOLS, PICK_TOOLS, TOOL_CYCLES, XFORM_TOOLS
 
 
 class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintUIMixin, RenderMixin,
-                      ModifyMixin, TransformMixin, bpy.types.Operator):
+                      ModifyMixin, TransformMixin, ShapeMixin, bpy.types.Operator):
     bl_idname = "minicad.draw"
 
     bl_label = "Tel Kafes Çiz"
@@ -165,6 +169,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self.plane_snap = None           # düzlem seçerken yakalanan nokta (konum, tür)
         self._mod_init()                 # değiştir araçları (draw_modify)
         self._xf_init()                  # düzenle / desen araçları (draw_xform)
+        self._sh_init()                  # şekiller, nokta, teğet daire, yansıt (draw_shapes)
         self.phase = "PLANE" if getattr(sc, "minicad_pick_plane", True) else "DRAW"
         self.palette = palette.Palette(self.ui_scale)
         self.created = 0
@@ -200,7 +205,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         if self.tool.startswith("C_"):
             return "Kısıt: " + next((n for k, n in palette.CONSTRAINTS
                                      if k == self.tool[2:]), self.tool)
-        return next((n for k, n, _ in palette.DRAW_TOOLS + palette.MODIFY_TOOLS +
+        return next((n.split(":")[0] for k, n, _ in palette.DRAW_TOOLS + palette.MODIFY_TOOLS +
                      palette.XFORM_TOOLS + palette.PATTERN_TOOLS if k == self.tool), self.tool)
 
     def _status(self, context, msg=None):
@@ -299,9 +304,17 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             msg = self._xf_begin(context, tool, keep=self.prev_tool in XFORM_TOOLS)
             if not self.sketch:
                 msg += " · taslakta çizgi yok (bu araçlar taslakta çalışır)"
-        elif tool in MODIFY_TOOLS:
+        elif tool in MODIFY_TOOLS and tool in MOD_HELP:
             msg = MOD_HELP[tool] if self.sketch else (MOD_HELP[tool] + " · taslakta çizgi yok "
                                                       "(değiştir araçları taslakta çalışır)")
+        if tool in PICK_TOOLS:
+            msg = PICK_HELP[tool]
+        elif tool in CLICK_SHAPES:
+            msg = f"{SHAPE_NAMES[tool]}: {STEPS[tool][0]}"
+        elif tool == "POINT":
+            msg = PICK_HELP["POINT"]
+        self._sh_init()
+        self.ct_lines, self.pk = [], None
         if tool not in XFORM_TOOLS:
             self.xf, self.xprev = None, []
             if tool not in MODIFY_TOOLS:
@@ -639,7 +652,11 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                 self._refresh(context)
                 return {"RUNNING_MODAL"}
             if event.type in TOOL_KEYS:
-                self._set_tool(context, TOOL_KEYS[event.type])
+                tool = TOOL_KEYS[event.type]
+                cyc = TOOL_CYCLES.get(event.type)
+                if cyc and self.tool in cyc:          # tekrar basınca türler arasında geç
+                    tool = cyc[(cyc.index(self.tool) + 1) % len(cyc)]
+                self._set_tool(context, tool)
                 self._refresh(context)
                 return {"RUNNING_MODAL"}
             if event.type in {"X", "Y", "Z", "V"}:
@@ -677,6 +694,10 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                 except Exception:
                     pass
                 self._status(context, f"Izgara yakalama {'açık' if self.grid_on else 'kapalı'}")
+                self._refresh(context)
+                return {"RUNNING_MODAL"}
+            if event.type == "D" and self.tool == "POLYGON":
+                self.poly_inner = not self.poly_inner     # iç / dış teğet çokgen
                 self._refresh(context)
                 return {"RUNNING_MODAL"}
             if event.type == "D":

@@ -109,6 +109,9 @@ class ModifyMixin:
     # ------------------------------------------------------------ hover
 
     def _mod_update(self, context, mx, my):
+        if self.tool in ("CIRCT", "PROJECT"):
+            self._pk_update(context, mx, my)
+            return
         if self.tool in XFORM_TOOLS:
             self._xf_update(context, mx, my)
             return
@@ -407,6 +410,8 @@ class ModifyMixin:
         """Değiştir araçlarının olayları; işlenmediyse None (genel işleyiciye gider)."""
         if self.tool in XFORM_TOOLS:
             return self._xf_event(context, event, mx, my, press)
+        if self.tool in ("CIRCT", "PROJECT"):
+            return self._pk_event(context, event, mx, my, press)
         self._mod_init()
         et = event.type
         if et in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE"}:
@@ -479,6 +484,9 @@ class ModifyMixin:
     # ------------------------------------------------------------ çizim
 
     def _draw_modify3d(self, region):
+        if self.tool in ("CIRCT", "PROJECT"):
+            self._pk_draw3d(region)
+            return
         if self.tool in XFORM_TOOLS:
             self._xf_draw3d(region)
             return
@@ -518,6 +526,9 @@ class ModifyMixin:
                       COL_RUBBER, 2.5, region)
 
     def _draw_modify2d(self, region):
+        if self.tool in ("CIRCT", "PROJECT"):
+            self._pk_draw2d(region)
+            return
         if self.tool in XFORM_TOOLS:
             self._xf_draw2d(region)
             return
