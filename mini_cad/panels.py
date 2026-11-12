@@ -253,6 +253,30 @@ class MINICAD_PT_constraints(_Sub, bpy.types.Panel):
             op.obj, op.index = ob.name, i
         if len(items) > 60:
             col.label(text=f"… {len(items) - 60} kısıt daha")
+        lks = [(ob, i, lk) for ob in context.scene.objects if ob.type == "CURVE"
+               for i, lk in enumerate(ob.cad.links)]
+        if lks:                                    # ilişkisel desen / yansıtma (v0.21)
+            box = layout.box()
+            box.label(text=f"İlişkiler ({len(lks)})", icon="LINKED")
+            for ob, i, lk in lks[:30]:
+                r = box.row(align=True)
+                r.prop(lk, "enabled", text="")
+                name = {"RPAT": "Dikdörtgen desen", "CPAT": "Dairesel desen",
+                        "PROJ": "Yansıtma"}[lk.kind]
+                r.label(text=f"{ob.name}: {name}", icon="ERROR" if lk.info else "NONE")
+                if lk.kind == "RPAT":
+                    r.prop(lk, "n1", text="")
+                    r.prop(lk, "s1", text="")
+                    if lk.n2 > 1:
+                        r.prop(lk, "n2", text="")
+                        r.prop(lk, "s2", text="")
+                elif lk.kind == "CPAT":
+                    r.prop(lk, "n1", text="")
+                    r.prop(lk, "angle", text="")
+                op = r.operator("minicad.link_remove", text="", icon="X")
+                op.obj, op.index = ob.name, i
+                if lk.info:
+                    box.label(text=lk.info, icon="ERROR")
 
 
 # ================================================================ yüzeyler

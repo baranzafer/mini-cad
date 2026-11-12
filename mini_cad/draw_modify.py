@@ -111,7 +111,7 @@ class ModifyMixin:
     # ------------------------------------------------------------ hover
 
     def _mod_update(self, context, mx, my):
-        if self.tool in ("CIRCT", "PROJECT"):
+        if self.tool in ("CIRCT", "PROJECT", "EDITSK"):
             self._pk_update(context, mx, my)
             return
         if self.tool in XFORM_TOOLS:
@@ -393,6 +393,17 @@ class ModifyMixin:
         self.fl_sel = None
         from . import core
         if self.tool == "FILLET2D":
+            # Inventor gibi: aynı oturumda aynı yarıçapla yapılanlar ilkine "eşit" bağlanır
+            g = res["mids"][0]["p"]
+            desc = ("seg", g[0], g[3], 0.125 * (np.asarray(g[0]) + 3 * np.asarray(g[1]) +
+                                                3 * np.asarray(g[2]) + np.asarray(g[3])))
+            eq = getattr(self, "fillet_eq", None)
+            if eq and abs(eq[0] - used) <= 1e-12 * (1.0 + used):
+                if not hasattr(self, "sk_cons") or self.sk_cons is None:
+                    self.sk_cons = []
+                self.sk_cons.append({"kind": "EQUAL", "refs": [eq[1], desc]})
+            elif not eq or abs(eq[0] - used) > 1e-12 * (1.0 + used):
+                self.fillet_eq = (used, desc)
             self.fillet_r = used
             msg = f"Köşe yuvarlandı: R {core.fmt_len(used)} (aynı yarıçapla devam edebilirsin)"
         else:
@@ -442,7 +453,7 @@ class ModifyMixin:
         """Değiştir araçlarının olayları; işlenmediyse None (genel işleyiciye gider)."""
         if self.tool in XFORM_TOOLS:
             return self._xf_event(context, event, mx, my, press)
-        if self.tool in ("CIRCT", "PROJECT"):
+        if self.tool in ("CIRCT", "PROJECT", "EDITSK"):
             return self._pk_event(context, event, mx, my, press)
         self._mod_init()
         et = event.type
@@ -517,7 +528,7 @@ class ModifyMixin:
     # ------------------------------------------------------------ çizim
 
     def _draw_modify3d(self, region):
-        if self.tool in ("CIRCT", "PROJECT"):
+        if self.tool in ("CIRCT", "PROJECT", "EDITSK"):
             self._pk_draw3d(region)
             return
         if self.tool in XFORM_TOOLS:
@@ -566,7 +577,7 @@ class ModifyMixin:
                       COL_RUBBER, 2.5, region)
 
     def _draw_modify2d(self, region):
-        if self.tool in ("CIRCT", "PROJECT"):
+        if self.tool in ("CIRCT", "PROJECT", "EDITSK"):
             self._pk_draw2d(region)
             return
         if self.tool in XFORM_TOOLS:

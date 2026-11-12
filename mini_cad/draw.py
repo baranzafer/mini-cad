@@ -78,11 +78,13 @@ from .draw_modify import MOD_HELP, ModifyMixin
 from .draw_xform import TransformMixin
 from .draw_shapes import PICK_HELP, SHAPE_NAMES, STEPS, ShapeMixin
 from .draw_dims import DimMixin
+from .draw_text import TextMixin
 from .draw_common import CLICK_SHAPES, MODIFY_TOOLS, PICK_TOOLS, TOOL_CYCLES, XFORM_TOOLS
 
 
 class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintUIMixin, RenderMixin,
-                      ModifyMixin, TransformMixin, ShapeMixin, DimMixin, bpy.types.Operator):
+                      ModifyMixin, TransformMixin, ShapeMixin, DimMixin, TextMixin,
+                      bpy.types.Operator):
     bl_idname = "minicad.draw"
 
     bl_label = "Tel Kafes Çiz"
@@ -172,6 +174,9 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self._xf_init()                  # düzenle / desen araçları (draw_xform)
         self._sh_init()                  # şekiller, nokta, teğet daire, yansıt (draw_shapes)
         self._dim_init()                 # ölçü değeri düzenleme (draw_dims)
+        self._txt_init()                 # metin (draw_text)
+        self.sk_cons, self.sk_pats = [], {}   # Bitir'de yazılacak kısıtlar / desen ilişkileri
+        self.fillet_eq = None
         self.phase = "PLANE" if getattr(sc, "minicad_pick_plane", True) else "DRAW"
         self.palette = palette.Palette(self.ui_scale)
         self.created = 0
@@ -317,6 +322,10 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self.ct_lines, self.pk = [], None
         self.dim_edit = None
         self.fl_sel = None
+        self.fillet_eq = None
+        self.txt = None
+        if tool == "TEXT":
+            msg = PICK_HELP["TEXT"]
         if tool not in XFORM_TOOLS:
             self.xf, self.xprev = None, []
             if tool not in MODIFY_TOOLS:
@@ -454,6 +463,10 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         press = event.value == "PRESS"
         self.shift, self.ctrl = event.shift, event.ctrl
 
+        if getattr(self, "txt", None) is not None and self.phase == "DRAW":
+            r = self._txt_event(context, event)             # metin yazılıyor
+            if r is not None:
+                return r
         if getattr(self, "dim_edit", None) is not None and self.tool.startswith("C_") and \
                 event.type not in self.MOVE_EVENTS:
             r = self._c_event(context, event, mx, my, press)     # ölçü değeri yazılıyor

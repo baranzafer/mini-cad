@@ -224,8 +224,46 @@ class MINICAD_Constraint(bpy.types.PropertyGroup):
     info: bpy.props.StringProperty(default="")
 
 
+def _on_link_change(self, context):
+    try:
+        from . import links
+        links.request(force=True)
+    except Exception:
+        pass
+
+
+class MINICAD_Link(bpy.types.PropertyGroup):
+    """Tel kafes eğrisindeki ilişkisel geometri (Inventor gibi düzenlenebilir):
+      RPAT / CPAT  desen: kaynak spline'lar (src) ve kopyalar (dst, örnek sırasıyla)
+      PROJ         yansıtma: kaynak segment (src_obj, src = "spline:segment") → dst spline
+    Kaynak değişince ya da değerler düzenlenince kopyalar yeniden üretilir (links.py)."""
+    kind: bpy.props.EnumProperty(items=[("RPAT", "Dikdörtgen desen", ""),
+                                        ("CPAT", "Dairesel desen", ""),
+                                        ("PROJ", "Yansıtma", "")], default="RPAT")
+    enabled: bpy.props.BoolProperty(name="Etkin", default=True, update=_on_link_change)
+    src: bpy.props.StringProperty()          # "3,4" ya da PROJ: "spline:segment"
+    src_obj: bpy.props.PointerProperty(type=bpy.types.Object, poll=_poll_curve)
+    dst: bpy.props.StringProperty()          # "7,8,9,10"
+    n1: bpy.props.IntProperty(name="Adet", default=3, min=1, max=200, update=_on_link_change)
+    n2: bpy.props.IntProperty(name="Adet 2", default=1, min=1, max=200, update=_on_link_change)
+    s1: bpy.props.FloatProperty(name="Aralık", default=1.0, unit="LENGTH",
+                                update=_on_link_change)
+    s2: bpy.props.FloatProperty(name="Aralık 2", default=1.0, unit="LENGTH",
+                                update=_on_link_change)
+    dir1: bpy.props.FloatVectorProperty(size=3)
+    dir2: bpy.props.FloatVectorProperty(size=3)
+    center: bpy.props.FloatVectorProperty(size=3)
+    axis: bpy.props.FloatVectorProperty(size=3, default=(0.0, 0.0, 1.0))
+    angle: bpy.props.FloatProperty(name="Açı", default=math.radians(360.0), subtype="ANGLE",
+                                   update=_on_link_change)
+    plane_o: bpy.props.FloatVectorProperty(size=3)
+    plane_n: bpy.props.FloatVectorProperty(size=3, default=(0.0, 0.0, 1.0))
+    info: bpy.props.StringProperty(default="")
+
+
 class MINICAD_ObjectProps(bpy.types.PropertyGroup):
     is_cad: bpy.props.BoolProperty(default=False)
+    links: bpy.props.CollectionProperty(type=MINICAD_Link)   # tel kafes eğrilerinde
     constraints: bpy.props.CollectionProperty(type=MINICAD_Constraint)  # tel kafes eğrilerinde
     curves: bpy.props.CollectionProperty(type=MINICAD_CurveRef)  # v0.1 uyumluluğu
     patches: bpy.props.CollectionProperty(type=MINICAD_Patch)
@@ -1513,7 +1551,90 @@ def on_load(_dummy):
 
 
 classes = (MINICAD_CurveRef, MINICAD_SegRef, MINICAD_Patch, MINICAD_GeoEdge, MINICAD_Feature,
-           MINICAD_BevelEdge, MINICAD_CRef, MINICAD_Constraint, MINICAD_ObjectProps)
+           MINICAD_BevelEdge, MINICAD_CRef, MINICAD_Constraint, MINICAD_Link,
+           MINICAD_ObjectProps)
+
+
+def _int_list(txt):
+    out = []
+    for x in (txt or "").split(","):
+        x = x.strip()
+        if x:
+            try:
+                out.append(int(x))
+            except ValueError:
+                pass
+    return out
+
+
+def remap_splines(curve_ob, fn, seg_count=None):
+    """Bir eğri objesinin spline sırası değişince (silme / sona taşıma) ona bağlı bütün
+    referansları günceller: yüzey ve özellik segmentleri, eski bevel kenarları, kısıtlar,
+    ilişkiler. fn(eski sıra) -> yeni sıra ya da None (silindi: referans geçersiz olur, -1).
+    seg_count: {yeni sıra: segment sayısı} — sayının dışında kalan segment referansları
+    geçersizleşir. Değişen referans sayısı."""
+    n = 0
+
+    def m(si):
+        r = fn(si)
+        return -1 if r is None else r
+
+    def fix_seg(ref, attr):
+        nonlocal n
+        if ref.obj != curve_ob:
+            return
+        new = m(ref.spline)
+        if new != ref.spline:
+            ref.spline = new
+            n += 1
+        if seg_count is not None and new in seg_count and getattr(ref, attr) >= \
+                seg_count[new]:
+            ref.spline = -1
+            n += 1
+
+    for ob in bpy.data.objects:
+        try:
+            props = ob.cad
+        except Exception:
+            continue
+        for p in getattr(props, "patches", ()):
+            for r in getattr(p, "segs", ()):
+                fix_seg(r, "seg")
+        for f in getattr(props, "features", ()):
+            for r in getattr(f, "segs", ()):
+                fix_seg(r, "seg")
+        for r in getattr(props, "bevels", ()):
+            fix_seg(r, "seg")
+        for c in getattr(props, "constraints", ()):
+            for r in c.refs:
+                if r.obj == curve_ob:
+                    new = m(r.spline)
+                    if new != r.spline:
+                        r.spline = new
+                        n += 1
+        for lk in getattr(props, "links", ()):
+            if ob == curve_ob:
+                for attr in ("src", "dst"):
+                    if lk.kind == "PROJ" and attr == "src":
+                        continue
+                    old = _int_list(getattr(lk, attr))
+                    new = [m(x) for x in old]
+                    if new != old:
+                        setattr(lk, attr, ",".join(str(x) for x in new))
+                        n += 1
+            if lk.kind == "PROJ" and lk.src_obj == curve_ob and ":" in lk.src:
+                si, sg = lk.src.split(":")[:2]
+                new = m(int(si))
+                if new != int(si):
+                    lk.src = f"{new}:{sg}"
+                    n += 1
+    try:
+        from . import constraints
+        for k in [k for k in constraints._last_pos if k[0] == curve_ob.name]:
+            del constraints._last_pos[k]
+    except Exception:
+        pass
+    return n
 
 
 def register():

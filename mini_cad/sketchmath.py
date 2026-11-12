@@ -390,6 +390,8 @@ def _carry(old, new_strokes):
                 else:
                     autos.append(a)
             sg["auto"] = autos
+    if old.get("edit_src") and len(new_strokes) == 1:
+        new_strokes[0]["edit_src"] = old["edit_src"]   # taslağa alınmış eğri geri yazılsın
     for st in new_strokes:
         for sg in st["segs"]:
             sg.pop("_oid", None)
@@ -1074,7 +1076,10 @@ def xform_stroke(st, f, copy_=False):
             g = sg.get("grp")
             new["grp"] = gmap.setdefault(g, new_grp()) if g is not None else None
         segs.append(new)
-    return {"segs": segs, "cyclic": st["cyclic"], "node_ids": {}, "start_tan": None}
+    out = {"segs": segs, "cyclic": st["cyclic"], "node_ids": {}, "start_tan": None}
+    if not copy_ and st.get("edit_src"):        # taslağa alınmış eğri: kaynağı korunur
+        out["edit_src"] = st["edit_src"]
+    return out
 
 
 def apply_xform(sketch, ks, f, copy_=False):

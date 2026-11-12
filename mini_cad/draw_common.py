@@ -459,7 +459,7 @@ CLICK_SHAPES = {"RECT3", "RECTC", "RECT3C", "POLYGON", "SLOTCC", "SLOTO", "SLOTC
 SHAPE_TOOLS = {"CIRCLE", "RECT"} | CLICK_SHAPES
 
 # Tıklayarak nesne seçen oluşturma araçları (taslakta çalışır, draw_shapes._pk_*)
-PICK_TOOLS = {"CIRCT", "PROJECT"}
+PICK_TOOLS = {"CIRCT", "PROJECT", "EDITSK"}
 
 # Aynı tuşa tekrar basınca türler arasında geçiş (Inventor açılır menüsü gibi)
 TOOL_CYCLES = {"R": ["RECT", "RECT3", "RECTC", "RECT3C"], "O": ["CIRCLE", "CIRCT", "ELLIPSE"]}
@@ -471,11 +471,11 @@ XFORM_TOOLS = {"MOVE", "COPY", "ROTATE", "SCALE", "STRETCH", "RPAT", "CPAT", "MI
 
 # Taslak üzerinde çalışan bütün araçlar (Değiştir + Düzenle / Desen)
 MODIFY_TOOLS = {"TRIM", "EXTEND", "SPLIT", "OFFSET", "FILLET2D", "CHAMFER2D"} | XFORM_TOOLS | \
-    {"CIRCT", "PROJECT"}
+    {"CIRCT", "PROJECT", "EDITSK"}
 
 FIELDS = {"CIRCLE": ("Yarıçap", None), "RECT": ("Genişlik", "Yükseklik"),
           "ARC3": (None, None), "CARC": (None, None), "TARC": (None, None),
-          "POINT": (None, None)}
+          "POINT": (None, None), "TEXT": (None, None)}
 FIELDS.update({t: (None, None) for t in CLICK_SHAPES})   # yazılanı şeklin kendisi uygular
 
 AXIS_OF = {"Yatay": {"XY": 0, "XZ": 0, "YZ": 1}, "Dikey": {"XY": 1, "XZ": 2, "YZ": 2}}

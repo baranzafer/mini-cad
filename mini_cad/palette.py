@@ -35,6 +35,8 @@ DRAW_TOOLS = [
     ("FIT", "Spline: noktalardan geçen", "K"),
     ("PEN", "Kalem: tıkla-sürükle ile bezier tutamacı", "P"),
     ("POINT", "Nokta: tıklanan yere (yakalanır, Bitir'de kaydedilir)", ""),
+    ("TEXT", "Metin: tıkla, yaz (Tab: yükseklik), Enter: harf çizgileri taslağa", ""),
+    ("EDITSK", "Taslağa al: kaydedilmiş eğriyi taslakta düzenle (Bitir: geri yazılır)", ""),
     ("PROJECT", "Geometri yansıt: gövde kenarı / tel kafes eğrisini çizim düzlemine izdüşür", ""),
 ]
 MODIFY_TOOLS = [
@@ -276,6 +278,12 @@ def icon_lines(name):
     if name == "POINT":
         return P([(-0.6, 0.0), (0.6, 0.0)]) + P([(0.0, -0.6), (0.0, 0.6)]) + \
             P(_arc(0, 0, 0.3, 0, 2 * math.pi, 12))
+    if name == "TEXT":
+        return P([(-0.7, 0.75), (0.7, 0.75)]) + P([(0.0, 0.75), (0.0, -0.8)]) + \
+            P([(-0.25, -0.8), (0.25, -0.8)])
+    if name == "EDITSK":
+        return P([(-0.85, -0.6), (-0.3, 0.3), (0.3, -0.2), (0.85, 0.5)]) + \
+            P([(0.2, 0.8), (0.85, 0.15), (0.65, -0.05), (0.0, 0.6)], True)
     if name == "PROJECT":
         return P([(-0.85, 0.1), (-0.1, 0.55), (0.85, 0.1), (0.1, -0.35)], True) + \
             P([(-0.85, -0.6), (0.85, -0.6)]) + P([(-0.1, 0.55), (-0.1, -0.6)]) + \

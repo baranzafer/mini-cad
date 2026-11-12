@@ -36,6 +36,7 @@ class RenderMixin:
                 gpu.state.blend_set("NONE")
                 return
             self._draw_sketch3d(region)
+            self._txt_draw3d(region)
             if self.tool in MODIFY_TOOLS:
                 self._draw_modify3d(region)
             if self.grid_on and self.cursor is not None and not self.tool.startswith("C_"):
@@ -181,6 +182,7 @@ class RenderMixin:
                 _text(17 * sc, 17 * sc, txt, COL_SNAP, int(12 * sc))
             if self.phase == "DRAW":
                 self._draw_points2d(region)
+                self._txt_draw2d(region)
                 self._draw_sketch2d(region)
                 self._draw_pivot(region)
                 self._draw_track2d(region)

@@ -54,6 +54,8 @@ PICK_HELP = {
     "PROJECT": "Yansıt: CAD gövde kenarına ya da tel kafes eğrisine tıkla; çizim düzlemine "
                "izdüşümü taslağa eklenir",
     "POINT": "Nokta: tıkla (uç / orta / merkez / ızgara yakalaması geçerli)",
+    "EDITSK": "Taslağa al: kaydedilmiş eğriye tıkla, taslakta düzenle, Bitir ile geri yaz",
+    "TEXT": "Metin: yazının sol alt köşesine tıkla, yaz (Tab: yükseklik), Enter",
 }
 
 
@@ -310,7 +312,7 @@ class ShapeMixin:
                     for E in core._display.get(ob.name, {}).get("edges") or ():
                         P = np.asarray(E, dtype=np.float64)
                         if len(P) >= 2:
-                            out.append((P, None, False))
+                            out.append((P, None, False, None))
         except Exception:
             pass
         for name, si, i, S in getattr(self.refs, "wsegs", ()):
@@ -325,7 +327,7 @@ class ShapeMixin:
                     P = [np.array(tuple(v), dtype=np.float64) for v in g["p"]]
             except Exception:
                 P = None
-            out.append((np.asarray(S, dtype=np.float64), P, False))
+            out.append((np.asarray(S, dtype=np.float64), P, False, (name, si, i)))
         return out
 
     def _pk_update(self, context, mx, my):
@@ -351,21 +353,24 @@ class ShapeMixin:
                                               u_hint=self._pk_plane().u)
                     self.pk["circle"] = (c, R, dm.circle(c, R, pl))
             return
+        if t == "EDITSK":
+            self.pk = {"edit": self._pick_entity(mx, my, False) if self.refs.wsegs else None}
+            return
         if t == "PROJECT":
             M = np.array(self.rv3d.perspective_matrix, dtype=np.float64)
             m = np.array([mx, my], dtype=np.float64)
             best = None
-            for P, B, closed in self._pk_edges():
+            for P, B, closed, sid in self._pk_edges():
                 px, ok, _ = _project(P, M, self.region)
                 if not ok.all():
                     continue
                 d, _ = _seg_px_dist(px[:-1], px[1:], m)
                 j = float(d.min())
                 if j <= self.radius and (best is None or j < best[0]):
-                    best = (j, P, B)
+                    best = (j, P, B, sid)
             if best is None:
                 return
-            _, P, B = best
+            _, P, B, sid = best
             pl = self._pk_plane()
             if B is not None:
                 Q = shm.project_bezier(B, pl)
@@ -381,7 +386,7 @@ class ShapeMixin:
                 if len(segs) > 1 and segs[0]["kind"] != "line":
                     for sg in segs:
                         sg["grp"] = g
-                self.pk = {"segs": segs, "closed": closed, "src": P}
+                self.pk = {"segs": segs, "closed": closed, "src": P, "sid": sid}
 
     def _pk_event(self, context, event, mx, my, press):
         self._sh_init()
@@ -414,9 +419,18 @@ class ShapeMixin:
                         self._status(context, "Teğet daire: bu üç doğruya teğet daire yok "
                                               "(paralel doğrular?)")
                     self.ct_lines = []
+            elif self.tool == "EDITSK" and pk.get("edit") is not None:
+                e = pk["edit"]
+                self._edit_load(context, e[1], e[2])
+                self.dirty = True
             elif self.tool == "PROJECT" and pk.get("segs"):
                 st = {"segs": [dict(s) for s in pk["segs"]], "cyclic": pk["closed"],
                       "node_ids": {}, "start_tan": None}
+                sid = pk.get("sid")
+                if sid is not None and len(st["segs"]) == 1:   # ilişkisel: kaynak izlenir
+                    pl = self._pk_plane()
+                    st["proj"] = {"obj": sid[0], "si": sid[1], "seg": sid[2],
+                                  "o": tuple(pl.o), "n": tuple(pl.n)}
                 self._set_sketch(context, self.sketch + [st],
                                  "Yansıtıldı: çizim düzlemine izdüşüm taslağa eklendi")
             self._pk_update(context, mx, my)
@@ -451,6 +465,8 @@ class ShapeMixin:
         if pk.get("circle") is not None:
             for sg in pk["circle"][2]:
                 _poly([tuple(p) for p in dm.sample(sg, 20)], COL_RUBBER, 2.2, region)
+        if pk.get("edit") is not None:
+            _poly([tuple(p) for p in pk["edit"][4]], COL_RUBBER, 3.5, region)
         if pk.get("segs"):
             _poly([tuple(p) for p in pk["src"]], COL_GUIDE, 3.0, region)
             for sg in pk["segs"]:
@@ -466,6 +482,9 @@ class ShapeMixin:
                 "Teğet daire: yerine götür, tıkla"
         elif self.tool == "PROJECT":
             label = "Yansıt" if (self.pk or {}).get("segs") else "Yansıt: kenara gel"
+        elif self.tool == "EDITSK":
+            label = "Taslağa al" if (self.pk or {}).get("edit") is not None else \
+                "Taslağa al: kaydedilmiş eğriye gel"
         _text(mx + 14 * s, my + 12 * s, label, COL_SNAP, int(11 * s))
 
     def _draw_points2d(self, region):

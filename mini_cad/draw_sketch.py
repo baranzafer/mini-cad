@@ -70,6 +70,9 @@ class SketchMixin:
         if t == "POINT":
             self._sh_point(context, cur)
             return
+        if t == "TEXT":
+            self._txt_start(context, cur)
+            return
         if t in SHAPE_TOOLS:
             if not self.stage:
                 self.stage = [cur]
@@ -377,6 +380,29 @@ class SketchMixin:
         self.sk_hover = self.sk_drag = None
         if not strokes and not points:
             return {}
+        out = {}
+        # Taslağa alınmış (Edit Sketch) çizgiler kendi objelerine geri yazılır; referanslar
+        # geçici işaretten yeni spline sırasına eşlenir
+        edited = [(i, st) for i, st in enumerate(strokes) if st.get("edit_src")]
+        for i, st in edited:
+            src = st["edit_src"]
+            ob2 = bpy.data.objects.get(src["obj"])
+            if ob2 is None:
+                continue
+            try:
+                si2 = self._write_spline(context, ob2, st["segs"], st["cyclic"])
+            except Exception as e:
+                self.report({"ERROR"}, f"Çizgi yazılamadı: {e}")
+                continue
+            tok = src["token"]
+            core.remap_splines(ob2, lambda s_, t=tok, n=si2: n if s_ == t else s_,
+                               seg_count={si2: len(st["segs"]) if st["cyclic"] else
+                                          len(st["segs"])})
+            out[i] = (ob2.name, si2, len(st["segs"]))
+        strokes_main = [(i, st) for i, st in enumerate(strokes) if not st.get("edit_src")]
+        if not strokes_main and not points:
+            self._after_finish(context, None, {}, out)
+            return out
         try:
             if getattr(context.scene, "minicad_draw_target", "ACTIVE") == "NEW":
                 ob = self._new_curve(context)
@@ -392,11 +418,11 @@ class SketchMixin:
                 self._write_point(ob, p)
             except Exception as e:
                 self.report({"ERROR"}, f"Nokta yazılamadı: {e}")
-        out, n_auto = {}, 0
+        n_auto = 0
         written = []
-        sk_map = {}
-        msg_pts = f" · {len(points)} nokta" if points else ""                              # taslak indeksi -> (çizgi, spline)
-        for i, st in enumerate(strokes):
+        sk_map = {}                              # taslak indeksi -> (çizgi, spline)
+        msg_pts = f" · {len(points)} nokta" if points else ""
+        for i, st in strokes_main:
             try:
                 si = self._write_spline(context, ob, st["segs"], st["cyclic"])
             except Exception as e:
@@ -418,7 +444,8 @@ class SketchMixin:
             n_auto += self._auto_joints(context, ob, written)
         except Exception:
             traceback.print_exc()
-        if n_auto:
+        n_auto += self._after_finish(context, ob, sk_map, out, solve=False)
+        if n_auto or edited:
             constraints.solve_all(context.scene, force=True)
         try:
             bpy.ops.ed.undo_push(message="Mini CAD: Çizimi Bitir")
@@ -439,6 +466,109 @@ class SketchMixin:
         self.sk_sel = None
         self._hist_reset()                       # kaydedildi: geri alma artık Blender'da
         return out
+
+    # ------------------------------------------------------------ Bitir sonrası (v0.21)
+
+    def _after_finish(self, context, ob, sk_map, out, solve=True):
+        """Bitir'den sonra: desen / yansıtma ilişkileri ve taslakta bekleyen kısıtlar
+        (ayna simetrisi, eşit yarıçap). Eklenen kısıt sayısı."""
+        n = 0
+        pats = getattr(self, "sk_pats", None) or {}
+        if ob is not None and pats:
+            try:
+                self._make_pattern_links(ob, sk_map, pats)
+            except Exception:
+                traceback.print_exc()
+        if ob is not None:
+            for i, (st, si) in sk_map.items():
+                pj = st.get("proj")
+                if not pj or len(st["segs"]) != 1:
+                    continue
+                so = bpy.data.objects.get(pj["obj"])
+                if so is None:
+                    continue
+                lk = ob.cad.links.add()
+                lk.kind, lk.src_obj = "PROJ", so
+                lk.src, lk.dst = f"{pj['si']}:{pj['seg']}", str(si)
+                lk.plane_o, lk.plane_n = tuple(pj["o"]), tuple(pj["n"])
+        pend = getattr(self, "sk_cons", None) or []
+        for pc in pend:
+            refs = [self._resolve_geo(context, r) for r in pc["refs"]]
+            if any(r is None for r in refs):
+                continue
+            c = constraints.add(pc["kind"], refs, auto=True, value=pc.get("value"),
+                                solve=False)
+            if c is None:
+                continue
+            if not constraints.satisfied(c):
+                constraints.remove_last(c)
+                continue
+            n += 1
+        self.sk_cons, self.sk_pats = [], {}
+        if solve and n:
+            constraints.solve_all(context.scene, force=True)
+        return n
+
+    def _resolve_geo(self, context, r):
+        """Konumla tanımlı referansı ("seg", A, B, orta) / ("pt", P) kaydedilmiş eğride bulur."""
+        tol_of = lambda p: 1e-6 * (1.0 + float(np.abs(np.asarray(p)).max()))
+        for ob in context.scene.objects:
+            if ob.type != "CURVE":
+                continue
+            mw = ob.matrix_world
+            for si, sp in enumerate(ob.data.splines):
+                if sp.type != "BEZIER":
+                    continue
+                if r[0] == "pt":
+                    P = np.asarray(r[1], dtype=np.float64)
+                    for k, b in enumerate(sp.bezier_points):
+                        if np.linalg.norm(np.array(mw @ b.co) - P) <= tol_of(P):
+                            return ("pt", ob, si, k)
+                    continue
+                A, B = np.asarray(r[1], dtype=np.float64), np.asarray(r[2], dtype=np.float64)
+                M = None if len(r) < 4 or r[3] is None else np.asarray(r[3], dtype=np.float64)
+                for i in range(core._seg_count(sp)):
+                    g = core._spline_segment(ob, si, sp, i, mw)
+                    if g is None:
+                        continue
+                    P = [np.array(tuple(v), dtype=np.float64) for v in g["p"]]
+                    t = tol_of(A)
+                    ok = (np.linalg.norm(P[0] - A) <= t and np.linalg.norm(P[-1] - B) <= t) or \
+                        (np.linalg.norm(P[0] - B) <= t and np.linalg.norm(P[-1] - A) <= t)
+                    if ok and M is not None and len(P) == 4:
+                        mid = 0.125 * (P[0] + 3 * P[1] + 3 * P[2] + P[3])
+                        ok = np.linalg.norm(mid - M) <= 1e-4 * (1.0 + float(np.abs(M).max()))
+                    if ok:
+                        return ("seg", ob, si, i)
+        return None
+
+    def _make_pattern_links(self, ob, sk_map, pats):
+        """Desen etiketli çizgilerden ilişki kaydı: kaynaklar ve kopyalar eksiksiz ve aynı
+        objeye yazıldıysa (taslakta düzenlenen kopya etiketini kaybeder → ilişki kurulmaz)."""
+        by = {}
+        for i, (st, si) in sk_map.items():
+            tag = st.get("pat")
+            if tag:
+                by.setdefault(tag[0], []).append((tag, si))
+        for pid, items in by.items():
+            P = pats.get(pid)
+            if P is None:
+                continue
+            src = sorted((t[3], si) for t, si in items if t[1] == "src")
+            cop = sorted((t[2], t[3], si) for t, si in items if t[1] == "copy")
+            nsrc, ninst = P["nsrc"], P["ninst"]
+            if len(src) != nsrc or len(cop) != nsrc * ninst:
+                continue
+            lk = ob.cad.links.add()
+            lk.kind = P["kind"]
+            lk.src = ",".join(str(si) for _, si in src)
+            lk.dst = ",".join(str(si) for _, _, si in cop)
+            if P["kind"] == "RPAT":
+                lk.dir1, lk.dir2 = tuple(P["dir1"]), tuple(P["dir2"])
+                lk.s1, lk.s2, lk.n1, lk.n2 = P["s1"], P["s2"], P["n1"], P["n2"]
+            else:
+                lk.center, lk.axis = tuple(P["center"]), tuple(P["axis"])
+                lk.n1, lk.angle = P["n1"], math.radians(P["angle"])
 
     def _write_point(self, ob, p):
         cu = ob.data
@@ -585,6 +715,7 @@ class SketchMixin:
         for sg in self.segs:
             for q in sg["p"]:
                 vals.extend(q)
+        vals.append(-4.0 - len(getattr(self, "sk_cons", None) or ()))
         vals.append(-3.0)
         for p in getattr(self, "sk_points", None) or ():
             vals.extend(p)
@@ -600,7 +731,9 @@ class SketchMixin:
             "sketch": self.sketch, "segs": self.segs, "start": self.start,
             "node_ids": self.node_ids, "start_tan": self.start_tan, "stage": self.stage,
             "out_h": self.out_h, "plane": self.plane, "shape_plane": self.shape_plane,
-            "last_closed": self.last_closed, "sk_points": getattr(self, "sk_points", None) or []})
+            "last_closed": self.last_closed, "sk_points": getattr(self, "sk_points", None) or [],
+            "sk_cons": getattr(self, "sk_cons", None) or [],
+            "sk_pats": getattr(self, "sk_pats", None) or {}})
 
     def _hist_sync(self):
         """Durum değiştiyse önceki durumu geçmişe ekler (fare hareketlerinde çağrılmaz)."""

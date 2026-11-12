@@ -203,6 +203,8 @@ class TransformMixin:
             cnt = self._xf_count(self.typed[0], 6)
             ang = parse_angle(self.typed[1]) if self.typed[1] else 360.0
             p = self._xf_point(context, mx, my, base)
+            xf["pdef"] = {"kind": "CPAT", "center": base, "axis": xf["n"], "n1": cnt,
+                          "angle": ang}
             return sm.circ_pattern(base, xf["n"], cnt, ang), {"p": p, "n": cnt, "ang": ang}
         p = self._xf_point(context, mx, my, base)
         if p is None or np.linalg.norm(p - base) < 1e-12:
@@ -217,7 +219,43 @@ class TransformMixin:
             cnt = self._xf_count(self.typed[0], 3)
             return sm.rect_pattern(d, cnt), {"p": p, "n": cnt, "L": L, "d": d}
         cnt = self._xf_count(self.typed[0], 2)
+        xf["pdef"] = self._rpat_def(xf["d1"], xf["n1"], d, cnt)
         return sm.rect_pattern(xf["d1"], xf["n1"], d, cnt), {"p": p, "n": cnt, "L": L, "d": d}
+
+    def _rpat_def(self, d1, n1, d2=None, n2=1):
+        d1 = np.asarray(d1, dtype=np.float64)
+        L1 = float(np.linalg.norm(d1))
+        if d2 is None or n2 <= 1:
+            d2, n2 = np.zeros(3), 1
+        d2 = np.asarray(d2, dtype=np.float64)
+        L2 = float(np.linalg.norm(d2))
+        return {"kind": "RPAT", "dir1": d1 / L1 if L1 > 1e-15 else d1, "s1": L1, "n1": int(n1),
+                "dir2": d2 / L2 if L2 > 1e-15 else d2, "s2": L2, "n2": int(n2)}
+
+    def _tag_pattern(self, n_before, ks, fns):
+        """Desen kaynaklarını ve kopyalarını ilişki için etiketler (Bitir'de kayda dönüşür)."""
+        pdef = (self.xf or {}).get("pdef")
+        if pdef is None or not ks:
+            return
+        if not hasattr(self, "sk_pats") or self.sk_pats is None:
+            self.sk_pats = {}
+        pid = max(self.sk_pats.keys(), default=0) + 1
+        self.sk_pats[pid] = dict(pdef, nsrc=len(ks), ninst=len(fns))
+        for j, k in enumerate(ks):
+            self.sketch[k]["pat"] = (pid, "src", 0, j)
+        for m in range(len(fns) * len(ks)):
+            st = self.sketch[n_before + m]
+            st["pat"] = (pid, "copy", m // len(ks) + 1, m % len(ks))
+
+    def _mirror_line(self, a, b):
+        """Ayna noktaları gerçek bir doğrunun iki ucuysa o doğru (simetri kısıtı için)."""
+        tol = 1e-7 * (1.0 + float(max(np.abs(a).max(), np.abs(b).max())))
+        for A, B in self.refs.chords:
+            A, B = np.asarray(A), np.asarray(B)
+            if (np.linalg.norm(A - a) <= tol and np.linalg.norm(B - b) <= tol) or \
+                    (np.linalg.norm(A - b) <= tol and np.linalg.norm(B - a) <= tol):
+                return A, B
+        return None
 
     def _xf_update(self, context, mx, my):
         self._xf_init()
@@ -331,6 +369,7 @@ class TransformMixin:
             new = sm.apply_many(self.sketch, ks, fns)
             new_pts = list(pts) + [f(p) for f in fns for p in P]
             msg = f"{name}: {len(fns)} kopya eklendi"
+            n_before = len(self.sketch)
         else:
             f = xf.get("fn")
             if f is None:
@@ -343,6 +382,27 @@ class TransformMixin:
                 new = sm.apply_xform(self.sketch, ks, f, copy_=True)
                 msg = f"Ayna: {len(ks)} çizgi kopyalandı"
                 cp = True
+                line = self._mirror_line(xf["base"], (xf.get("info") or {}).get("p"))
+                if line is not None:              # Inventor gibi: simetri kısıtları
+                    if not hasattr(self, "sk_cons") or self.sk_cons is None:
+                        self.sk_cons = []
+                    A, B = line
+                    n0 = len(self.sk_cons)
+                    srcs = [q for k in ks for q in sm.stroke_nodes(self.sketch[k])] + list(P)
+                    seen = []
+                    for q in srcs:
+                        q = np.asarray(q, dtype=np.float64)
+                        r = f(q)
+                        tol = 1e-7 * (1.0 + float(np.abs(q).max()))
+                        if np.linalg.norm(r - q) <= tol or any(np.linalg.norm(q - z) <= tol
+                                                               for z in seen):
+                            continue              # ayna çizgisi üzerindeki / tekrar eden
+                        seen.append(q)
+                        self.sk_cons.append({"kind": "SYMLINE", "refs": [
+                            ("pt", q), ("pt", r), ("seg", A, B, None)]})
+                    msg += f" · {len(self.sk_cons) - n0} simetri kısıtı Bitir'de yazılır"
+                else:
+                    msg += " · simetri kısıtı için ayna çizgisi olarak bir doğrunun uçlarını seç"
             else:
                 cp = t == "COPY" or (t in ("ROTATE", "SCALE") and xf["copy"])
                 new = sm.apply_xform(self.sketch, ks, f, copy_=cp)
@@ -357,6 +417,8 @@ class TransformMixin:
             if P:
                 msg += f" · {len(P)} nokta"
         self._set_sketch(context, new, msg)
+        if t in ("RPAT", "CPAT"):
+            self._tag_pattern(n_before, ks, fns)
         xf.update(step="BASE", fn=None, fns=None)
         self.xprev = []
         self.typed, self.field = ["", ""], 0
@@ -454,6 +516,7 @@ class TransformMixin:
             elif step == "DIR2":
                 if et == "RIGHTMOUSE":
                     xf["fns"] = sm.rect_pattern(xf["d1"], xf["n1"])
+                    xf["pdef"] = self._rpat_def(xf["d1"], xf["n1"])
                 else:
                     self._xf_update(context, mx, my)
                 self._xf_apply(context)
