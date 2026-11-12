@@ -208,6 +208,90 @@ class TextMixin:
                               "(Ctrl+Enter) ile geri yazılır")
         return True
 
+    def _edit_load_all(self, context, name):
+        """v0.23.0: bir eğri objesinin (çizimin) bütün bezier spline'larını taslağa alır
+        (Outliner'dan "Çizimi Düzenle"). Spline sırası korunur: Bitir'de aynı sırayla geri
+        yazılır. Tek noktalı (Nokta) ve bezier olmayan spline'lar objede kalır. Çizim
+        düzlemselse çizim düzlemi o düzleme kilitlenir. Alınan çizgi sayısı."""
+        ob = bpy.data.objects.get(name)
+        if ob is None or ob.type != "CURVE":
+            self._status(context, "Çizimi düzenle: eğri objesi değil")
+            return 0
+        sps = ob.data.splines
+        idx = [i for i, sp in enumerate(sps)
+               if sp.type == "BEZIER" and len(sp.bezier_points) >= 2]
+        if not idx:
+            self._status(context, f"Çizimi düzenle: '{ob.name}' içinde düzenlenecek çizgi yok")
+            return 0
+        mw = ob.matrix_world
+        loaded = []                                      # (spline, segs, kapalı)
+        for i in idx:
+            sp = sps[i]
+            pts = [tuple(np.array(mw @ v, dtype=np.float64) for v in (b.co, b.handle_left,
+                                                                      b.handle_right))
+                   for b in sp.bezier_points]
+            cyc = bool(sp.use_cyclic_u)
+            segs = segs_from_bezier(pts, cyc)
+            if segs:
+                loaded.append((i, segs, cyc))
+        if not loaded:
+            return 0
+        toks = {i: _token() for i, _s, _c in loaded}
+        gone = sorted(toks)
+
+        def fn(s_, toks=toks, gone=gone):
+            if s_ in toks:
+                return toks[s_]
+            return s_ - sum(1 for g in gone if g < s_)
+        core.remap_splines(ob, fn)
+        for i in reversed(gone):
+            sps.remove(sps[i])
+        try:
+            ob.data.update_tag()
+        except Exception:
+            pass
+        for i, segs, cyc in loaded:
+            self.sketch.append({"segs": segs, "cyclic": cyc, "node_ids": {}, "start_tan": None,
+                                "edit_src": {"obj": ob.name, "token": toks[i]}})
+        self.edit_obj = ob.name                          # yeni çizgiler de bu çizime yazılır
+        self.dirty = True
+        self._hist_reset()               # spline'lar objeden çıktı: öncesine taslakta dönülmez
+        pl = self._edit_plane(loaded)
+        if pl is not None:
+            self._lock_plane(context, pl.name, pl)
+        msg = (f"Çizim düzenleniyor: '{ob.name}' · {len(loaded)} çizgi taslakta · Bitir "
+               "(Ctrl+Enter) ile geri yazılır")
+        self._status(context, msg)
+        try:
+            from . import recorder
+            recorder.log("çiz", msg)
+        except Exception:
+            pass
+        return len(loaded)
+
+    @staticmethod
+    def _edit_plane(loaded):
+        """Taslağa alınan çizgilerin ortak düzlemi (eksen düzlemiyse o), yoksa None."""
+        P = np.array([p for _i, segs, _c in loaded for sg in segs for p in sg["p"]],
+                     dtype=np.float64)
+        if len(P) < 3:
+            return None
+        o = P.mean(axis=0)
+        ext = float(np.ptp(P, axis=0).max())
+        if ext < 1e-9:
+            return None
+        _u, s, vt = np.linalg.svd(P - o)
+        if s[1] < 1e-9 * max(ext, 1.0) * len(P) ** 0.5:
+            return None                                   # tek doğru: düzlem belirsiz
+        n = vt[2]
+        if float(np.abs((P - o) @ n).max()) > 1e-6 * max(ext, 1.0):
+            return None                                   # düzlemsel değil
+        for name in ("XY", "XZ", "YZ"):
+            ax = dm.Plane.axis(name, o)
+            if abs(float(np.dot(ax.n, n))) > 1.0 - 1e-9:
+                return ax
+        return dm.Plane.from_normal(o, n, "FACE")
+
     # ------------------------------------------------------------ çizim
 
     def _txt_draw3d(self, region):

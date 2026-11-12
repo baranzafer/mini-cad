@@ -95,6 +95,10 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
 
     bl_options = {"REGISTER", "UNDO"}
 
+    # v0.23.0: açılışta bu eğri objesinin (çizimin) tamamı taslağa alınır (minicad.edit_sketch)
+    edit_curve: bpy.props.StringProperty(name="Düzenlenecek çizim", default="",
+                                         options={"HIDDEN", "SKIP_SAVE"})
+
     @classmethod
     def poll(cls, context):
         return context.area is not None and context.area.type == "VIEW_3D"
@@ -178,6 +182,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self._txt_init()                 # metin (draw_text)
         self._skc_init()                 # taslak kısıtları (draw_skcons)
         self.sk_cons, self.sk_pats = [], {}   # Bitir'de yazılacak kısıtlar / desen ilişkileri
+        self.edit_obj = None             # tamamı taslağa alınmış çizim (Bitir'de ona yazılır)
         self.fillet_eq = None
         self.phase = "PLANE" if getattr(sc, "minicad_pick_plane", True) else "DRAW"
         self.palette = palette.Palette(self.ui_scale)
@@ -191,6 +196,12 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         _STATE["active"] = self
         context.window_manager.modal_handler_add(self)
         self._status(context)
+        name = getattr(self, "edit_curve", "") or ""
+        if isinstance(name, str) and name:
+            try:
+                self._edit_load_all(context, name)
+            except Exception:
+                traceback.print_exc()
         self.area.tag_redraw()
         return {"RUNNING_MODAL"}
 
@@ -443,6 +454,12 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                 return {"RUNNING_MODAL"}
             if not event.shift and self.hist:
                 self._hist_step(context, self.hist, self.redo, "Geri alındı")
+                return {"RUNNING_MODAL"}
+            if any(st.get("edit_src") for st in self.sketch):
+                # taslağa alınmış çizgiler objeden çıktı: Blender'ın geri alması onları
+                # objeye geri getirir, Bitir'de çift olurlar
+                self._status(context, "Taslakta düzenlenen çizim var: önce Bitir (Ctrl+Enter), "
+                                      "sonra geri al")
                 return {"RUNNING_MODAL"}
         r = self._modal_inner(context, event)
         if event.type not in self.MOVE_EVENTS and _STATE["active"] is self:
@@ -756,7 +773,114 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         return {"PASS_THROUGH"}
 
 
-classes = (MINICAD_OT_draw,)
+def edit_target(context, name=""):
+    """Düzenlenecek çizim: verilen ad, Outliner seçimi ya da aktif obje (eğri olmalı)."""
+    if name:
+        ob = bpy.data.objects.get(name)
+        return ob if ob is not None and ob.type == "CURVE" else None
+    act = getattr(context, "active_object", None)
+    ids = [i for i in (getattr(context, "selected_ids", None) or ())   # Outliner seçimi
+           if getattr(i, "type", None) == "CURVE" and hasattr(i, "matrix_world")]
+    if ids:
+        return act if act in ids else ids[0]
+    if act is not None and act.type == "CURVE":
+        return act
+    sel = [o for o in (getattr(context, "selected_objects", None) or ()) if o.type == "CURVE"]
+    return sel[0] if sel else None
+
+
+def _view3d(context):
+    """Çizim aracının açılacağı 3D görünüm: (pencere, alan, bölge) ya da None."""
+    win = getattr(context, "window", None)
+    area = getattr(context, "area", None)
+    if area is not None and area.type == "VIEW_3D" and win is not None:
+        cands = [(win, area)]
+    else:
+        cands = []
+        for w in getattr(context.window_manager, "windows", ()):
+            for a in w.screen.areas:
+                if a.type == "VIEW_3D":
+                    cands.append((w, a))
+        cands.sort(key=lambda wa: (wa[0] is not win, -wa[1].width * wa[1].height))
+    for w, a in cands:
+        r = next((r for r in a.regions if r.type == "WINDOW"), None)
+        if r is not None:
+            return w, a, r
+    return None
+
+
+class MINICAD_OT_edit_sketch(bpy.types.Operator):
+    """Inventor "Edit Sketch": kaydedilmiş (Bitir'lenmiş) çizimi yeniden taslağa alır."""
+    bl_idname = "minicad.edit_sketch"
+    bl_label = "Çizimi Düzenle"
+    bl_description = ("Seçili çizimi (eğri objesi) yeniden taslağa alır: bütün çizim, değiştir "
+                      "ve kısıt araçlarıyla düzenlenir, Bitir (Ctrl+Enter) ile aynı objeye aynı "
+                      "spline sırasıyla geri yazılır. Ona bağlı yüzey ve kısıtlar korunur "
+                      "(Inventor 'Edit Sketch')")
+    bl_options = {"REGISTER"}
+
+    name: bpy.props.StringProperty(name="Çizim", default="", options={"HIDDEN", "SKIP_SAVE"})
+
+    @classmethod
+    def poll(cls, context):
+        try:
+            return edit_target(context) is not None
+        except Exception:
+            return False
+
+    def execute(self, context):
+        name = getattr(self, "name", "") or ""
+        ob = edit_target(context, name if isinstance(name, str) else "")
+        if ob is None:
+            self.report({"WARNING"}, "Düzenlenecek çizim (eğri objesi) seçili değil")
+            return {"CANCELLED"}
+        if getattr(ob, "mode", "OBJECT") != "OBJECT":
+            try:
+                bpy.ops.object.mode_set(mode="OBJECT")
+            except Exception:
+                pass
+        # Taslağa alınmadan önceki hâl geri alma adımı olsun: Bitir'den sonra Ctrl+Z buraya döner
+        try:
+            bpy.ops.ed.undo_push(message="Mini CAD: Çizimi Düzenle")
+        except Exception:
+            pass
+        op = _STATE["active"]
+        if op is not None:                       # çizim aracı açık: taslağa eklenir
+            if op.sketch and any(st.get("edit_src", {}).get("obj") == ob.name
+                                 for st in op.sketch):
+                self.report({"INFO"}, f"'{ob.name}' zaten taslakta düzenleniyor")
+                return {"CANCELLED"}
+            n = op._edit_load_all(context, ob.name)
+            op._refresh(context)
+            return {"FINISHED"} if n else {"CANCELLED"}
+        v = _view3d(context)
+        if v is None:
+            self.report({"ERROR"}, "Çizim için 3D görünüm bulunamadı")
+            return {"CANCELLED"}
+        w, a, r = v
+        try:
+            with context.temp_override(window=w, area=a, region=r):
+                bpy.ops.minicad.draw("INVOKE_DEFAULT", edit_curve=ob.name)
+        except Exception as e:
+            self.report({"ERROR"}, f"Çizim açılamadı: {e}")
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+def _menu_edit_sketch(self, context):
+    try:
+        if edit_target(context) is None:
+            return
+    except Exception:
+        return
+    self.layout.separator()
+    self.layout.operator("minicad.edit_sketch", text="Mini CAD: Çizimi Düzenle",
+                         icon="CURVE_BEZCURVE")
+
+
+_MENUS = ("OUTLINER_MT_object", "VIEW3D_MT_object_context_menu")
+
+classes = (MINICAD_OT_draw, MINICAD_OT_edit_sketch)
 
 
 @bpy.app.handlers.persistent
@@ -793,10 +917,21 @@ def register():
         name="Önce Düzlem Seç", description="Çizim açılınca önce çizim düzlemini seçtir "
         "(Inventor gibi)", default=True)
     bpy.app.handlers.load_pre.append(_on_load_pre)
+    for m in _MENUS:
+        mt = getattr(bpy.types, m, None)
+        if mt is not None and hasattr(mt, "append"):
+            mt.append(_menu_edit_sketch)
 
 
 def unregister():
     cleanup_all()
+    for m in _MENUS:
+        mt = getattr(bpy.types, m, None)
+        if mt is not None and hasattr(mt, "remove"):
+            try:
+                mt.remove(_menu_edit_sketch)
+            except Exception:
+                pass
     if _on_load_pre in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.remove(_on_load_pre)
     for name in ("minicad_grid_snap", "minicad_grid_alpha", "minicad_grid_fade",

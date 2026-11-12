@@ -54,7 +54,7 @@ PICK_HELP = {
     "PROJECT": "Yansıt: CAD gövde kenarına ya da tel kafes eğrisine tıkla; çizim düzlemine "
                "izdüşümü taslağa eklenir",
     "POINT": "Nokta: tıkla (uç / orta / merkez / ızgara yakalaması geçerli)",
-    "EDITSK": "Taslağa al: kaydedilmiş eğriye tıkla, taslakta düzenle, Bitir ile geri yaz",
+    "EDITSK": "Taslağa al: kaydedilmiş eğriye tıkla (Shift+tık: bütün çizim), taslakta düzenle, Bitir ile geri yaz",
     "TEXT": "Metin: yazının sol alt köşesine tıkla, yaz (Tab: yükseklik), Enter",
 }
 
@@ -421,7 +421,10 @@ class ShapeMixin:
                     self.ct_lines = []
             elif self.tool == "EDITSK" and pk.get("edit") is not None:
                 e = pk["edit"]
-                self._edit_load(context, e[1], e[2])
+                if self.shift:                   # Shift+tık: çizimin tamamı (v0.23.0)
+                    self._edit_load_all(context, e[1])
+                else:
+                    self._edit_load(context, e[1], e[2])
                 self.dirty = True
             elif self.tool == "PROJECT" and pk.get("segs"):
                 st = {"segs": [dict(s) for s in pk["segs"]], "cyclic": pk["closed"],

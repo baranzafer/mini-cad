@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.22.0)
+# Mini CAD — Geliştirme Notları (v0.23.0)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -8,21 +8,21 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/nice-albattani-hfscvj`** dalı.
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`** dalı.
 - Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
 - Kurulum zip'leri `dist/` klasöründe.
 - Her sürüm ayrı bir commit.
 
 **A) Claude Code (web) ile — önerilen, zip gerekmez**
 1. Yeni oturumu `baranzafer/mini-cad` deposuyla aç.
-2. Açılış mesajı: "Mini CAD projesine devam ediyoruz. Kod `claude/nice-albattani-hfscvj`
+2. Açılış mesajı: "Mini CAD projesine devam ediyoruz. Kod `claude/mini-cad-continue-4zvqyj`
    dalında; önce o dalı al ve DEVELOPMENT.md'yi oku." Ardından isteklerini yaz.
 3. Claude'un yapacağı kurulum:
    - Yeni oturumun kendi çalışma dalı farklı adda olabilir. O dal bu dalın son commit'inden
      başlatılır:
      ```bash
-     git fetch origin claude/nice-albattani-hfscvj
-     git checkout -B <oturumun dalı> origin/claude/nice-albattani-hfscvj
+     git fetch origin claude/mini-cad-continue-4zvqyj
+     git checkout -B <oturumun dalı> origin/claude/mini-cad-continue-4zvqyj
      ```
    - Başlangıç durumu için testler çalıştırılır:
      ```bash
@@ -52,7 +52,7 @@ Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/nice-albattani-hfscvj`** 
 **Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
 beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
 
-Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t59.py` ...),
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t60.py` ...),
 sürüm artırılır ve paketlenir (§8).
 
 ---
@@ -190,7 +190,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `constraints_arcs.py` | 302 | Yay kısıtları: yay grubu, sanal merkez, yayı yeniden kurma, Pürüzsüz (G2) eğrilik eşleme |
 | `draw_dims.py` | 414 | DimMixin: genel Ölçü aracı, ölçü değeri düzenleme, Yatay / Dikey, karışık referanslı seçim |
 | `constraints_glyphs.py` | 268 | Kısıt simgesi çizimi, `glyph_at` |
-| `draw.py` | 811 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
+| `draw.py` | 946 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt; **MINICAD_OT_edit_sketch** (Çizimi Düzenle) ve menü girişleri |
 | `draw_common.py` | 481 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
 | `draw_plane.py` | 537 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (U) |
 | `draw_snap.py` | 663 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
@@ -203,7 +203,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `draw_xform.py` | 684 | TransformMixin: Düzenle / Desen araçları (seçim, temel nokta, hedef, önizleme, ölçü kutusu) |
 | `shapemath.py` | 337 | bpy'siz şekil matematiği: dikdörtgen çeşitleri, çokgen, kanallar, yay kanal, elips, 3 doğruya teğet daire, düzleme izdüşüm |
 | `draw_shapes.py` | 499 | ShapeMixin: çok tıklamalı şekiller, Nokta, Teğet daire, Geometri yansıt |
-| `draw_text.py` | 236 | TextMixin: Metin aracı (yazı → eğri), Taslağa al (Edit Sketch) |
+| `draw_text.py` | 320 | TextMixin: Metin aracı (yazı → eğri), Taslağa al (Edit Sketch): tek spline (`_edit_load`) ve bütün çizim (`_edit_load_all`, `_edit_plane`) |
 | `links.py` | 282 | İlişkisel desen / yansıtma: kopyaları kaynaktan yeniden üretir, adet değişince ekler / siler |
 | `draw_skcons.py` | 433 | SketchConsMixin: taslak kısıtları (uid referansı, canlı çözüm, Bitir'de gerçek kısıt), sağ tıkla silme |
 | `drawmath.py` | 627 | bpy'siz çizim matematiği: düzlemler, doğru / yay / daire / dikdörtgen, B-spline→Bézier (Boehm), Catmull-Rom, kalem, kılavuz rafinesi |
@@ -378,6 +378,36 @@ Diğer kısayollar:
   - Blender FONT nesnesi geçici olarak oluşturulup `to_curve` ile eğriye çevrilir, her
     spline kapalı taslak çizgisi olur (`_font_splines`).
   - Testte `_font_splines` taklit edilir; gerçek dönüşüm yalnızca Blender'da denenebilir.
+
+**v0.23.0: Çizimi Düzenle** (Inventor "Edit Sketch", bütün çizim):
+- Kaydedilmiş (Bitir'lenmiş, "2. aşama") bir çizim, yani eğri objesinin tamamı yeniden taslağa
+  ("1. aşama") alınır.
+- Giriş yolları:
+  - Outliner'da eğriye sağ tık → **Mini CAD: Çizimi Düzenle** (`OUTLINER_MT_object`).
+  - 3D görünümde nesne sağ tık menüsü (`VIEW3D_MT_object_context_menu`).
+  - Gövde panelinde aktif eğri varken **Çizimi Düzenle: <ad>** düğmesi.
+  - Çizim aracında Taslağa al (EDITSK) + **Shift+tık**.
+- Komut `minicad.edit_sketch` (`draw.MINICAD_OT_edit_sketch`):
+  - Hedef `draw.edit_target`: ad, Outliner seçimi (`selected_ids`), aktif obje, seçili objeler.
+  - Önce `ed.undo_push("Mini CAD: Çizimi Düzenle")` yapılır: Bitir'den sonra Ctrl+Z
+    düzenleme öncesine döner.
+  - Çizim aracı açıksa taslağa eklenir (aynı çizim ikinci kez alınmaz). Kapalıysa en büyük 3D
+    görünümde `minicad.draw(edit_curve=ad)` açılır (`_view3d`, `temp_override`).
+- `_edit_load_all`:
+  - ≥2 noktalı bütün bezier spline'lar sırayla taslağa alınır, her biri kendi `token`ını
+    alır (`edit_src`). Tek noktalı (Nokta) ve bezier olmayan spline'lar objede kalır,
+    referansları aşağı eşlenir.
+  - Bitir'de çizgiler aynı sırayla sona yazılır: kalan spline'lar önce, düzenlenenler aynı
+    göreli sırayla sonra gelir; referanslar tokenlardan eşlenir.
+  - `self.edit_obj`: düzenleme sürerken çizilen **yeni** çizgiler de hedef ayarından bağımsız
+    olarak bu çizime yazılır. Bitir düzenlemeyi bitirir (`edit_obj = None`).
+  - Çizim düzlemselse düzlem kilitlenir (`_edit_plane`: SVD; eksen düzlemiyse XY / XZ / YZ,
+    değilse "FACE"), faz DRAW olur ve görünüm düzleme çevrilir. Düzlemsel değilse ya da tek
+    doğruysa düzlem değişmez.
+- Ctrl+Z koruması: taslakta `edit_src`'li çizgi varken ve taslak geçmişi boşken Ctrl+Z
+  Blender'a gitmez. Gitseydi spline'lar objeye geri gelir, Bitir'de çiftlenirdi.
+- Yalnızca düzenlenen çizgilerin olduğu Bitir artık geri alma adımı yazar (`created` artar)
+  ve taslak geçmişini temizler.
 
 **Oluştur araçları** (v0.18.0; `draw_shapes` + `shapemath`):
 - **Çok tıklamalı şekiller** `CLICK_SHAPES` ⊂ `SHAPE_TOOLS` (RECT3, RECTC, RECT3C, POLYGON,
@@ -669,6 +699,7 @@ Betiğin yaptıkları:
 | t53 | Aşama 4 modal: Ölçü (uzunluk, açı, paralel uzaklık, nokta mesafesi, nokta-doğru, yarıçap, çap, değer düzenleme), Eş merkezli, Yatay / Dikey, Simetrik (çizgi), Pürüzsüz (G2) |
 | t54 | solver: SYMLINE, PTLINE, LINEDIST, RADIUSN, EQDIST |
 | t57 | Delikli yüzey: chain_loops / nest_loops (delik, adacık, ayrı döngüler, düzlemsel olmayan), gather → motor (delik sayısı, alt yüzler) |
+| t59 | Çizimi Düzenle: bütün çizimi taslağa alma (sıra, nokta, referanslar, düzlem kilidi, yeni çizgi aynı çizime), Ctrl+Z koruması, düzlem tanıma, Shift+tık, komut (açık / kapalı araç, Outliner seçimi), `edit_curve` ile açılış |
 | t58 | Taslak kısıtları (Bitir'lememe, canlı çözüm, ölçü, sürükleme / taşıma, geri al, silme, Bitir, karışık ve yay kısıtları), F ile iç içe çizgiler, dairesel ızgara |
 | tools/occ_holes_check.py | GERÇEK OCC ile delikli yüz (alan, ortak kenar, iki yön) |
 | t56 | 2. parti: ayna simetri kısıtları, yuvarlamada eşit, ilişkisel dikdörtgen / dairesel desen (adet / aralık / kaynak izleme / silme ve remap), ilişkisel yansıtma, taslağa al (remap, taşıma, geri yazma), metin |
@@ -711,6 +742,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - Yüzey birleşimi varsayılanı Keskin'dir; mevcut modeller aynı hesaplanır.
 - Değiştir araçları kaydedilmiş eğrilere dokunmaz; yalnızca taslağı değiştirir.
 - Kısıt / ölçü araçları taslağı Bitir'lemez (v0.22).
+- Çizimi Düzenle: Bitir'de spline'lar aynı göreli sırayla geri yazılır, bağlı yüzey / kısıt
+  referansları korunur; düzenleme sürerken Blender Ctrl+Z'si engellenir (v0.23).
 - Tek döngülü yüzeyler eskisi gibi hesaplanır. Çoklu döngü desteği yalnızca eskiden hata
   veren durumu açar.
 - Taslak sürüklerken ölçü kutusu görünür. Yazılan değer kilitler, X/Y/Z hâlâ eksen kilididir.
@@ -758,8 +791,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
      mesafesi).
      - Yay kısıtları taslakta değil, kaydedilmiş eğrilerde çalışır (diğer kısıtlar gibi).
      - Otomatik ölçü konum ölçüsü (merkeze göre) eklemez, yalnızca boyutları ölçer.
-  - Ayrıca değerlendirilecek: Bitir'lenmiş eğriyi taslağa geri alma (Inventor "Edit
-    Sketch"). Spline sırası / yüzey referansları nedeniyle dikkatli tasarım gerekir.
+  - Bitir'lenmiş eğriyi taslağa geri alma (Inventor "Edit Sketch"): v0.21.0'da tek spline
+    (Taslağa al aracı), v0.23.0'da bütün çizim (Çizimi Düzenle, Outliner'dan).
   - Autodesk yardım sayfaları bu ortamın ağ ayarlarında kapalıydı. Davranışlar Inventor
     bilgisinden uygulandı.
 - **Eksikler 2. parti:** v0.21.0'da yapıldı (metin, taslağa al, ayna simetrisi, ilişkisel
@@ -835,3 +868,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - Delikli yüzey: B harfi gibi dış sınır + delikler; F iç içe çizgileri birlikte alır.
   - Izgara: spot ışığı gibi yumuşak geçişli daire (yumuşaklık ve yarıçap ayarlanır).
   - Yeni modül `draw_skcons.py`; testler t57, t58; araç `occ_holes_check.py`.
+- **0.23.0:** Çizimi Düzenle (Inventor "Edit Sketch", bütün çizim).
+  - Outliner / 3D sağ tık menüsü ve Gövde panelinden kaydedilmiş çizim yeniden taslağa alınır;
+    Taslağa al aracında Shift+tık.
+  - Düzlem çizimden alınır; yeni çizgiler aynı çizime yazılır; Ctrl+Z koruması.
+  - Test t59.

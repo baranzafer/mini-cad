@@ -159,6 +159,11 @@ class MINICAD_PT_select(_Sub, bpy.types.Panel):
             sub.operator("minicad.draw", text="Çizimi Kapat", icon="CANCEL")
         else:
             big.operator("minicad.draw", text="Çiz", icon="CURVE_BEZCURVE")
+        act = context.active_object
+        if act is not None and act.type == "CURVE":
+            row = layout.row(align=True)
+            row.operator("minicad.edit_sketch", text=f"Çizimi Düzenle: {act.name}",
+                         icon="GREASEPENCIL")
         col = layout.column(align=True)
         col.scale_y = 0.8
         col.label(text="Tık: zincir · Alt+tık: tek parça")

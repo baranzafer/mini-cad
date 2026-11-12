@@ -400,13 +400,29 @@ class SketchMixin:
                                           len(st["segs"])})
             out[i] = (ob2.name, si2, len(st["segs"]))
         strokes_main = [(i, st) for i, st in enumerate(strokes) if not st.get("edit_src")]
+        edit_ob = bpy.data.objects.get(getattr(self, "edit_obj", None) or "")
+        self.edit_obj = None                     # çizim düzenleme Bitir'le biter
         if not strokes_main and not points:
             self._after_finish(context, None, {}, out)
             self._skc_finish(context, self._written_uid(strokes, out))
             constraints.solve_all(context.scene, force=True)
+            if edited:
+                self.created += 1
+                if edit_ob is not None:
+                    _LAST["curve"] = edit_ob.name
+                try:
+                    bpy.ops.ed.undo_push(message="Mini CAD: Çizimi Bitir")
+                except Exception:
+                    pass
+                self.dirty = True
+                self._status(context, f"Bitti: {len(edited)} çizgi geri yazıldı")
+                self.sk_sel = None
+                self._hist_reset()
             return out
         try:
-            if getattr(context.scene, "minicad_draw_target", "ACTIVE") == "NEW":
+            if edit_ob is not None and edit_ob.type == "CURVE":
+                ob = edit_ob                     # düzenlenen çizime eklenir (Inventor gibi)
+            elif getattr(context.scene, "minicad_draw_target", "ACTIVE") == "NEW":
                 ob = self._new_curve(context)
             else:
                 ob = self._target_curve(context)
