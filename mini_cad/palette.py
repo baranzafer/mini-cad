@@ -30,6 +30,7 @@ DRAW_TOOLS = [
     ("SLOTO", "Kanal: toplam boy (iki uç, genişlik)", ""),
     ("SLOTC", "Kanal: merkez noktalı (merkez, yay merkezi, genişlik)", ""),
     ("ARCSLOT", "Yay kanal: 3 nokta (başlangıç, bitiş, yay noktası, genişlik)", ""),
+    ("SLOTARCC", "Yay kanal: merkez noktalı (merkez, başlangıç, bitiş, genişlik; D: yön)", ""),
     ("CV", "Spline: kontrol noktalı (CV)", "S"),
     ("FIT", "Spline: noktalardan geçen", "K"),
     ("PEN", "Kalem: tıkla-sürükle ile bezier tutamacı", "P"),
@@ -64,6 +65,7 @@ PLANES = [("PICK", "Seç", "Çizim düzlemini görünümde seç: eksen düzlemi 
 CONSTRAINTS = [
     ("DIM", "Ölçü: doğru (Enter) → uzunluk, yay → yarıçap, daire → çap, 2 doğru → açı, "
             "2 nokta → mesafe, nokta + doğru → uzaklık · ölçüye tık: düzenle"),
+    ("AUTODIM", "Otomatik ölçü: eğriye tıkla, ölçüsüz doğrulara uzunluk, yaylara yarıçap"),
     ("HORIZ", "Yatay: 1 kenar (çizim düzleminin yatay ekseni)"),
     ("VERT", "Dikey: 1 kenar (çizim düzleminin dikey ekseni)"),
     ("AXIS", "Eksene hizala (yatay / dikey): 1 kenar"),
@@ -263,6 +265,8 @@ def icon_lines(name):
         else:
             out += _dot(0.0, 0.0, 0.07) + _dot(0.45, 0.0, 0.07)
         return out
+    if name == "SLOTARCC":
+        return icon_lines("ARCSLOT") + _dot(0.0, -0.9, 0.08)
     if name == "ARCSLOT":
         return P(_arc(0.0, -0.9, 1.25, 0.6, math.pi - 0.6, 12)) + \
             P(_arc(0.0, -0.9, 0.75, 0.6, math.pi - 0.6, 12)) + \
@@ -350,6 +354,11 @@ def icon_lines(name):
             P([(-0.8, -0.2), (-0.55, -0.35)]) + P([(0.8, -0.2), (0.55, -0.05)]) + \
             P([(0.8, -0.2), (0.55, -0.35)]) + P([(-0.25, 0.35), (0.25, 0.35)]) + \
             P([(-0.25, 0.65), (0.25, 0.65)])
+    if name == "AUTODIM":
+        return P([(-0.8, -0.75), (0.8, -0.75)]) + P([(-0.8, -0.95), (-0.8, -0.55)]) + \
+            P([(0.8, -0.95), (0.8, -0.55)]) + P([(-0.75, -0.3), (-0.75, 0.75)]) + \
+            P([(-0.95, -0.3), (-0.55, -0.3)]) + P([(-0.95, 0.75), (-0.55, 0.75)]) + \
+            P([(-0.2, 0.0), (0.1, 0.0), (0.25, 0.25), (0.4, -0.3), (0.55, 0.4), (0.8, 0.4)])
     if name == "HORIZ":
         return P([(-0.8, 0.0), (0.8, 0.0)]) + _dot(-0.8, 0.0) + _dot(0.8, 0.0)
     if name == "VERT":

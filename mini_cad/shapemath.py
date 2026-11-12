@@ -323,3 +323,15 @@ def segs_from_poly(P, closed=False):
         segs = dm.fit_bezier(list(Q) + [Q[0]])
         return _close(segs), True
     return dm.fit_bezier(list(Q)), False
+
+
+def arc_slot_center(c, p0, p_end, r, pl, flip=False):
+    """Merkez noktalı yay kanal: yay merkezi c, başlangıç p0, bitiş yönü p_end."""
+    arc = dm.center_arc(c, p0, p_end, pl.n, flip)
+    if arc is None:
+        return None
+    segs = arc["segs"]
+    k = len(segs)
+    pm = segs[k // 2]["p"][0] if k % 2 == 0 else \
+        dm.sample(segs[k // 2], 3)[1]
+    return arc_slot(p0, arc["end"], pm, r, pl)

@@ -454,7 +454,7 @@ CHAIN_TOOLS = {"LINE", "TARC", "ARC3", "CARC", "CV", "FIT", "PEN"}
 
 # Çok tıklamalı şekiller (draw_shapes): her tıkta çizimin yakalamaları geçerli
 CLICK_SHAPES = {"RECT3", "RECTC", "RECT3C", "POLYGON", "SLOTCC", "SLOTO", "SLOTC", "ARCSLOT",
-                "ELLIPSE"}
+                "SLOTARCC", "ELLIPSE"}
 
 SHAPE_TOOLS = {"CIRCLE", "RECT"} | CLICK_SHAPES
 

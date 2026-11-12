@@ -111,6 +111,7 @@ class SketchMixin:
                 self.plane = base.moved(cur)
                 return
             self.start = cur
+            self.typed, self.field = ["", ""], 0      # ilk nokta X / Y ile yazılmış olabilir
             self.node_ids = {0: self.snap_id} if self.snap_id else {}
             src = getattr(self, "snap_src", None)   # geçici zeminde: izdüşürülmeden önceki nokta
             sid = self.snap_id or (getattr(self, "snap_src_id", None) if src is not None else None)

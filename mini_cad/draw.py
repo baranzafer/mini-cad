@@ -316,10 +316,11 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self._sh_init()
         self.ct_lines, self.pk = [], None
         self.dim_edit = None
+        self.fl_sel = None
         if tool not in XFORM_TOOLS:
             self.xf, self.xprev = None, []
             if tool not in MODIFY_TOOLS:
-                self.xsel, self.xnodes = set(), set()
+                self.xsel, self.xnodes, self.xpts = set(), set(), set()
         if tool == "TARC" and not self.segs and self.start_tan is None:
             msg = ("Teğet yay: bir çizginin ucundan başlarsan ona teğet devam eder; boşlukta "
                    "başlarsan 3 noktalı yay gibi çizer")
@@ -609,7 +610,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                 else:
                     self._set_tool(context, "LINE")
             elif event.type != "RIGHTMOUSE" and any(self.typed) and \
-                    self._lock_anchor() is not None:
+                    (self._lock_anchor() is not None or self._coord_on()):
                 self._update(context, mx, my)
                 self._place(context)              # yazılan değerle noktayı koy
             else:
@@ -629,6 +630,14 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                 self.area.tag_redraw()
                 return {"RUNNING_MODAL"}
 
+        if event.type == "TAB" and event.shift:
+            self.coord_mode = not getattr(self, "coord_mode", False)   # hassas giriş
+            self.typed, self.field = ["", ""], 0
+            self._status(context, "Hassas giriş: ΔX / ΔY (ilk noktada X / Y) · Shift+Tab: uzunluk / "
+                                  "açı" if self.coord_mode else "Ölçü girişi: uzunluk / açı · "
+                                  "Shift+Tab: X / Y")
+            self._refresh(context)
+            return {"RUNNING_MODAL"}
         if event.type == "TAB":
             self.field = 1 - self.field
             self._refresh(context)
@@ -648,8 +657,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         typing = bool(self.typed[self.field])
         if ch and not event.ctrl and (ch in "0123456789.,-+°" or
                                       (typing and (ch.isalpha() or ch in "'\""))):
-            if (self._lock_anchor() is not None or (self.track and self.track["pts"])) and \
-                    not self.tool.startswith("C_"):
+            if (self._lock_anchor() is not None or (self.track and self.track["pts"]) or
+                    self._coord_on()) and not self.tool.startswith("C_"):
                 self.typed[self.field] += ch
                 self._refresh(context)
             else:

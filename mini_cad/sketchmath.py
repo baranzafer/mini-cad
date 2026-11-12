@@ -1176,3 +1176,57 @@ def stretch(sketch, nodes, d):
         st["node_ids"] = {}
         st["start_tan"] = None
     return fix_sketch_refs(out)
+
+
+# ================================================================ ayrı iki doğrunun köşesi
+
+def lines_corner(sketch, pa, pb):
+    """İki ayrı çizginin doğrularını (tıklanan parçalar korunarak) kesişim noktasına uzatıp /
+    kırpıp birleştirir; köşe yuvarlama / pah için. pa, pb: (çizgi, segment, tık parametresi).
+    (yeni taslak, birleşik çizgi, köşe düğümü) ya da (None, sebep, None)."""
+    (ka, ia, ta), (kb, ib, tb) = pa, pb
+    if ka == kb:
+        return None, "iki ayrı çizgi seç (aynı çizginin köşesine doğrudan tıkla)", None
+    A, B = sketch[ka], sketch[kb]
+    if A["cyclic"] or B["cyclic"]:
+        return None, "kapalı çizgide köşeye doğrudan tıkla", None
+    sa, sb = A["segs"][ia], B["segs"][ib]
+    if sa["kind"] != "line" or sb["kind"] != "line":
+        return None, "iki doğru seç", None
+    Pa, Pb = _P(sa), _P(sb)
+    pl = fit_plane(Pa + Pb)
+    if pl is None:
+        return None, "doğrular aynı düzlemde değil", None
+    da, db = dm.unit(Pa[3] - Pa[0]), dm.unit(Pb[3] - Pb[0])
+    X = _line_isect(Pa[0], da, Pb[0], db, pl[1])
+    if X is None:
+        return None, "doğrular paralel", None
+    out = [copy.deepcopy(s) for s in sketch]
+    ends = []
+    for k, i, t, P in ((ka, ia, ta, Pa), (kb, ib, tb, Pb)):
+        st = out[k]
+        n = len(st["segs"])
+        L = float(np.linalg.norm(P[3] - P[0]))
+        tx = float(np.dot(X - P[0], P[3] - P[0])) / (L * L)
+        if n == 1:
+            end = 1 if t < tx else 0
+        elif i == n - 1:
+            end = 1
+        elif i == 0:
+            end = 0
+        else:
+            return None, "doğru çizginin ucunda olmalı", None
+        a, b = (P[0], X) if end == 1 else (X, P[3])
+        if float(np.linalg.norm(b - a)) <= 1e-9 * (1.0 + L):
+            return None, "kesişim doğrunun ucunda: köşeye doğrudan tıkla", None
+        sg = st["segs"][i]
+        sg["p"] = dm.line_seg(a, b)["p"]
+        sg["auto"] = [x for x in sg.get("auto", ()) if x[0] != "DIST"]
+        if end == 1:
+            st["node_ids"] = {kk: v for kk, v in st.get("node_ids", {}).items() if kk != n}
+        else:
+            st["node_ids"] = {kk: v for kk, v in st.get("node_ids", {}).items() if kk != 0}
+            st["start_tan"] = None
+        ends.append(end)
+    new, k, j = join_ends(out, ka, ends[0], kb, ends[1])
+    return new, k, j

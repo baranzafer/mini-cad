@@ -56,6 +56,19 @@ class ConstraintUIMixin:
             return
         self.c_refs.append(self.c_hover)
         self.c_hover = None
+        if kind == "AUTODIM":
+            refs = self._refs_of(self.c_refs)
+            self.c_refs = []
+            if refs:
+                n_ = self._autodim(context, refs[0])
+                try:
+                    bpy.ops.ed.undo_push(message="Mini CAD: Otomatik ölçü")
+                except Exception:
+                    pass
+                self.dirty = True
+                self._status(context, f"Otomatik ölçü: {n_} ölçü eklendi" if n_ else
+                                      "Otomatik ölçü: eklenecek ölçü yok (hepsi ölçülü)")
+            return
         if kind == "DIM":
             if len(self.c_refs) >= 2:
                 self._dim_create(context)

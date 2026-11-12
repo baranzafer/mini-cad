@@ -184,6 +184,7 @@ CONSTRAINT_KINDS = [
     ("SYMLINE", "Simetrik (çizgi)", "İki nokta bir doğruya göre simetrik"),
     ("PTLINE", "Nokta-doğru", "Noktanın doğruya uzaklığı"),
     ("LINEDIST", "Doğru-doğru", "Paralel iki doğru arası uzaklık"),
+    ("CENTERDIST", "Merkez mesafesi", "Yay / daire merkezinden yay, nokta ya da doğruya"),
 ]
 
 
@@ -216,6 +217,9 @@ class MINICAD_Constraint(bpy.types.PropertyGroup):
     offset: bpy.props.FloatProperty(default=0.0)
     pos: bpy.props.FloatVectorProperty(size=3)     # FIX: objenin yerel koordinatı
     auto: bpy.props.BoolProperty(default=False)
+    driven: bpy.props.BoolProperty(
+        name="Referans", description="Referans ölçü: şekli yönetmez, yalnızca ölçüp gösterir "
+        "(Inventor'daki driven dimension)", default=False, update=_on_constraint_change)
     ok: bpy.props.BoolProperty(default=True)
     info: bpy.props.StringProperty(default="")
 

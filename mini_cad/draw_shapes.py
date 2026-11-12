@@ -31,7 +31,8 @@ SHAPE_NAMES = {
     "RECT3": "Dikdörtgen (3 nokta)", "RECTC": "Dikdörtgen (merkezden)",
     "RECT3C": "Dikdörtgen (3 nokta, merkezden)", "POLYGON": "Çokgen",
     "SLOTCC": "Kanal (merkezden merkeze)", "SLOTO": "Kanal (toplam boy)",
-    "SLOTC": "Kanal (merkez noktalı)", "ARCSLOT": "Yay kanal (3 nokta)", "ELLIPSE": "Elips",
+    "SLOTC": "Kanal (merkez noktalı)", "ARCSLOT": "Yay kanal (3 nokta)",
+    "SLOTARCC": "Yay kanal (merkez noktalı)", "ELLIPSE": "Elips",
 }
 STEPS = {
     "RECT3": ["1. köşe", "kenarın ucu (uzunluk / açı yazılabilir)", "genişlik"],
@@ -42,12 +43,14 @@ STEPS = {
     "SLOTO": ["1. uç", "2. uç", "genişlik"],
     "SLOTC": ["kanal merkezi", "yay merkezi", "genişlik"],
     "ARCSLOT": ["yay başlangıcı", "yay bitişi", "yay üzerinde bir nokta", "genişlik"],
+    "SLOTARCC": ["yay merkezi", "yay başlangıcı", "yay bitişi (D: yön)", "genişlik"],
     "ELLIPSE": ["merkez", "1. eksen ucu", "2. yarı eksen"],
 }
 NEEDED = {"RECT3": 3, "RECTC": 2, "RECT3C": 3, "POLYGON": 2, "SLOTCC": 3, "SLOTO": 3,
-          "SLOTC": 3, "ARCSLOT": 4, "ELLIPSE": 3}
+          "SLOTC": 3, "ARCSLOT": 4, "SLOTARCC": 4, "ELLIPSE": 3}
 PICK_HELP = {
-    "CIRCT": "Teğet daire: üç doğruya tıkla (Backspace: son seçimi geri al)",
+    "CIRCT": "Teğet daire: üç doğruya tıkla, sonra imleci istediğin teğet dairenin yerine "
+             "götürüp tıkla (Backspace: son seçimi geri al)",
     "PROJECT": "Yansıt: CAD gövde kenarına ya da tel kafes eğrisine tıkla; çizim düzlemine "
                "izdüşümü taslağa eklenir",
     "POINT": "Nokta: tıkla (uç / orta / merkez / ızgara yakalaması geçerli)",
@@ -176,6 +179,28 @@ class ShapeMixin:
             segs = shm.ellipse(st[0], st[1], cur, plane)
             b = shm.width_of(st[0], st[1], cur, plane)
             rows = _len_rows([("2. yarı eksen", core.fmt_len(b))], typed, self.field)
+        elif t == "SLOTARCC":
+            if k == 1:
+                R = float(np.linalg.norm(cur - st[0]))
+                g = dm.line_seg(st[0], cur)
+                g["kind"] = "guide"
+                self.preview = [g]
+                self.shape_rows = [("R", core.fmt_len(R), False)]
+                self.cursor = cur
+                return
+            if k == 2:
+                arc = dm.center_arc(st[0], st[1], cur, plane.n, self.carc_flip)
+                if arc is not None:
+                    self.preview = list(arc["segs"])
+                    self.shape_rows = [("R", core.fmt_len(arc["radius"]), False),
+                                       ("Yay", f"{math.degrees(arc['angle']):.1f}°", False)]
+                return
+            arc = dm.center_arc(st[0], st[1], st[2], plane.n, self.carc_flip)
+            if arc is not None:
+                d = float(np.linalg.norm(cur - st[0]))
+                r = abs(d - arc["radius"]) if v0 is None else v0 / 2.0
+                segs = shm.arc_slot_center(st[0], st[1], st[2], r, plane, self.carc_flip)
+                rows = _len_rows([("Genişlik", core.fmt_len(2 * r))], typed, self.field)
         elif t == "ARCSLOT":
             if k == 2:
                 arc = dm.arc_3pt(st[0], cur, st[1])
@@ -232,7 +257,7 @@ class ShapeMixin:
             self._status(context, f"{SHAPE_NAMES[t]}: {STEPS[t][len(self.stage)]}")
             return True
         if not self.preview or self.preview[0].get("kind") == "guide" or \
-                (t == "ARCSLOT" and len(self.stage) < 3):
+                (t in ("ARCSLOT", "SLOTARCC") and len(self.stage) < 3):
             return True
         segs = [dict(s) for s in self.preview]
         self._write_shape(context, segs)
@@ -310,12 +335,16 @@ class ShapeMixin:
         self.pk = None
         t = self.tool
         if t == "CIRCT":
-            ln = self._pk_line_at(mx, my)
-            lines = list(self.ct_lines) + ([ln] if ln is not None and len(self.ct_lines) < 3
-                                           else [])
+            ln = self._pk_line_at(mx, my) if len(self.ct_lines) < 3 else None
+            lines = list(self.ct_lines) + ([ln] if ln is not None else [])
             self.pk = {"hover": ln, "circle": None}
             if len(lines) == 3:
-                res = shm.tangent_circle_3lines(lines, self._pk_plane())
+                hint = None
+                if len(self.ct_lines) == 3:          # yerleştirme: imlece en yakın çözüm
+                    ro, rd = self._ray(mx, my)
+                    pl0 = self._pk_plane().moved(self.ct_lines[0][0])
+                    hint = pl0.ray_hit(ro, rd)
+                res = shm.tangent_circle_3lines(lines, self._pk_plane(), hint)
                 if res is not None:
                     c, R = res
                     pl = dm.Plane.from_normal(c, self._pk_plane().n, "C",
@@ -367,9 +396,14 @@ class ShapeMixin:
             self._pk_update(context, mx, my)
             pk = self.pk or {}
             if self.tool == "CIRCT":
-                if pk.get("hover") is not None and len(self.ct_lines) < 3:
-                    self.ct_lines.append(pk["hover"])
-                if len(self.ct_lines) == 3:
+                if len(self.ct_lines) < 3:
+                    if pk.get("hover") is not None:
+                        self.ct_lines.append(pk["hover"])
+                    n_ = len(self.ct_lines)
+                    self._status(context, f"Teğet daire: {n_}/3 doğru seçildi" + (
+                        " · imleci istediğin teğet dairenin yerine götürüp tıkla" if n_ == 3
+                        else ""))
+                elif len(self.ct_lines) == 3:
                     if pk.get("circle") is not None:
                         c, R, segs = pk["circle"]
                         self._write_shape(context, [dict(s) for s in segs])
@@ -380,8 +414,6 @@ class ShapeMixin:
                         self._status(context, "Teğet daire: bu üç doğruya teğet daire yok "
                                               "(paralel doğrular?)")
                     self.ct_lines = []
-                else:
-                    self._status(context, f"Teğet daire: {len(self.ct_lines)}/3 doğru seçildi")
             elif self.tool == "PROJECT" and pk.get("segs"):
                 st = {"segs": [dict(s) for s in pk["segs"]], "cyclic": pk["closed"],
                       "node_ids": {}, "start_tan": None}
@@ -430,7 +462,8 @@ class ShapeMixin:
         mx, my = self.mouse
         label = ""
         if self.tool == "CIRCT":
-            label = f"Teğet daire: {len(self.ct_lines)}/3 doğru"
+            label = f"Teğet daire: {len(self.ct_lines)}/3 doğru" if len(self.ct_lines) < 3 else \
+                "Teğet daire: yerine götür, tıkla"
         elif self.tool == "PROJECT":
             label = "Yansıt" if (self.pk or {}).get("segs") else "Yansıt: kenara gel"
         _text(mx + 14 * s, my + 12 * s, label, COL_SNAP, int(11 * s))

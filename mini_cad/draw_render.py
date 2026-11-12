@@ -199,6 +199,19 @@ class RenderMixin:
         """Dinamik ölçü: segmentin ortasında uzunluk, imleç yanında ölçü kutusu."""
         anchor = self._lock_anchor()
         pl = self._cur_plane()
+        if self._coord_on() and self.cursor is not None and (pl or self.tmp_plane) is not None:
+            pl = pl or self.tmp_plane                   # hassas giriş: X / Y
+            base = pl.uv(anchor) if anchor is not None else pl.uv(np.zeros(3))
+            q = pl.uv(self.cursor)
+            names = (("ΔX", q[0] - base[0]), ("ΔY", q[1] - base[1])) if anchor is not None \
+                else (("X", q[0] - base[0]), ("Y", q[1] - base[1]))
+            rows = []
+            for i, (name, live) in enumerate(names):
+                txt = self.typed[i]
+                val = (txt + ("_" if i == self.field else "")) if txt else core.fmt_len(live)
+                rows.append((name, val, i == self.field))
+            self._draw_rows(cur, rows)
+            return
         if anchor is None or self.cursor is None or pl is None:
             return
         sc = self.ui_scale

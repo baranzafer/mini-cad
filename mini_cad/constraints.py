@@ -31,8 +31,8 @@ from .constraints_tangent import (
     _seg_straight, _set_handle_dir, _set_world, _side, _tangent_plan,
 )
 from .constraints_glyphs import ICON, _anchor, _draw_glyphs, _glyph_boxes, glyph_at
-from .constraints_arcs import arc_group, centers_dist, group_key, radius_of, rebuild_group, \
-    smooth_post
+from .constraints_arcs import arc_group, center_dist_value, centers_dist, group_key, \
+    radius_of, rebuild_group, smooth_post
 
 _flags = {"solving": False, "force": False, "prefer": None}
 
@@ -66,12 +66,51 @@ def _kpos(k):
     return np.asarray(k[4], dtype=np.float64) if k[0] == "@c" else _world(*k)
 
 
-def solve_all(scene=None, force=False, prefer=None):
-    """Sahnedeki bütün kısıtları çözer. prefer: yerinde kalması istenen nokta anahtarları."""
+VALUE_KINDS = ("DISTANCE", "ANGLE", "RADIUS", "PTLINE", "LINEDIST", "CENTERDIST")
+
+
+def _is_arc_ref(r):
+    return r is not None and not r.point and arc_group(r.obj, r.spline, r.index) is not None
+
+
+def measure_value(c):
+    """Ölçü kısıtının şu anki geometrideki değeri (referans ölçüler için). None: ölçülemez."""
+    if c.kind == "RADIUS":
+        return radius_of(c)
+    if c.kind == "CENTERDIST":
+        return center_dist_value(c)
+    pts = _constraint_points(c)
+    if pts is None:
+        return None
+    P = np.array([_world(o, si, pi) for o, si, pi in pts])
+    if c.kind in ("DISTANCE", "PTLINE", "LINEDIST", "ANGLE"):
+        return solver.measure(c.kind, P)
+    return None
+
+
+def _set_measured(c):
+    v = measure_value(c)
+    if v is None:
+        c.ok, c.info = False, "ölçülemedi (referans kayboldu)"
+        return
+    if c.kind == "ANGLE":
+        if abs(math.radians(v) - c.angle) > 1e-12:
+            c.angle = math.radians(v)
+    elif abs(v - c.length) > 1e-12:
+        c.length = v
+    c.ok, c.info = True, ""
+
+
+def solve_all(scene=None, force=False, prefer=None, dry=False):
+    """Sahnedeki bütün kısıtları çözer. prefer: yerinde kalması istenen nokta anahtarları.
+    dry: çözüm hesaplanır, kısıtların ok / info durumu yazılır ama geometri değişmez (yeni
+    ölçünün çelişip çelişmediğini anlamak için). Referans (driven) ölçüler çözüme girmez,
+    değerleri geometriden ölçülür."""
     if _flags["solving"]:
         return True
     scene = scene or bpy.context.scene
     _flags["solving"] = True
+    driven = []
     try:
         keys, var_of, cons, owners, post = [], {}, [], [], []
         hold = set()                     # eğri / yay noktaları: şekil bozulmasın diye sabit
@@ -83,46 +122,92 @@ def solve_all(scene=None, force=False, prefer=None):
                 keys.append(key)
             return var_of[name]
 
-        sized = set()                    # yarıçap ölçüsü olan yay grupları
+        sized = set()                    # yarıçap ölçüsü / eşit yarıçapı olan yay grupları
         for _o, _j, c in all_constraints(scene):
-            if c.enabled and c.kind == "RADIUS" and len(c.refs) and not c.refs[0].point:
-                r = c.refs[0]
+            if not c.enabled or getattr(c, "driven", False):
+                continue
+            arcs = []
+            if c.kind == "RADIUS":
+                arcs = c.refs[:1]
+            elif c.kind == "EQUAL" and len(c.refs) == 2 and all(_is_arc_ref(r) for r in c.refs):
+                arcs = c.refs
+            for r in arcs:
+                if r.point:
+                    continue
                 g = arc_group(r.obj, r.spline, r.index)
                 if g is not None:
                     sized.add(group_key(r.obj, r.spline, g))
 
+        def center(r, keep_radius):
+            """Yayın sanal merkez değişkeni (düğümler merkeze bağlanır). (indeks, düğümler)"""
+            g = arc_group(r.obj, r.spline, r.index) if not r.point else None
+            if g is None:
+                return None, None
+            ck = group_key(r.obj, r.spline, g)
+            ci = var(ck, ck + (g["c"],))
+            arc_jobs.setdefault(ck, (r.obj, r.spline, g))
+            nid = tuple(var((r.obj.name, r.spline, k), (r.obj, r.spline, k)) for k in g["nodes"])
+            if keep_radius and ck not in sized:
+                # boyutu ölçülmeyen yay: boyutu korunur (Inventor gibi)
+                cons.append(("RADIUSN", (ci,) + nid, {"value": g["R"]}))
+                owners.append(None)
+                sized.add(ck)
+            return ci, (nid, g)
+
+        def pt_vars(r):
+            pts = ref_points(r.obj, r.spline, r.index, r.point)
+            if pts is None:
+                return None
+            return [var((o.name, si, pi), (o, si, pi)) for o, si, pi in pts]
+
         for ob, _i, c in all_constraints(scene):
             if not c.enabled:
                 continue
-            if c.kind in ("RADIUS", "CONCENTRIC"):
-                gs = []
-                for r in c.refs:
-                    g = arc_group(r.obj, r.spline, r.index) if not r.point else None
-                    if g is None:
-                        break
-                    gs.append((r, g))
-                if len(gs) != len(c.refs) or not gs:
+            if getattr(c, "driven", False):
+                driven.append(c)
+                continue
+            if c.kind in ("RADIUS", "CONCENTRIC") or (
+                    c.kind == "EQUAL" and len(c.refs) == 2 and
+                    all(_is_arc_ref(r) for r in c.refs)):
+                got = [center(r, c.kind == "CONCENTRIC") for r in c.refs]
+                if any(ci is None for ci, _ in got) or not got:
                     c.ok, c.info = False, "yay / daire gerekli (ya da referans kayboldu)"
                     continue
-                cid = []
-                for r, g in gs:
-                    ck = group_key(r.obj, r.spline, g)
-                    ci = var(ck, ck + (g["c"],))
-                    cid.append(ci)
-                    arc_jobs.setdefault(ck, (r.obj, r.spline, g))
-                    nid = tuple(var((r.obj.name, r.spline, k), (r.obj, r.spline, k))
-                                for k in g["nodes"])
-                    if c.kind == "RADIUS":
-                        cons.append(("RADIUSN", (ci,) + nid, {"value": c.length}))
-                        owners.append(c)
-                    elif ck not in sized:
-                        # eş merkezli boyutu değiştirmez (Inventor gibi): yarıçap korunur
-                        cons.append(("RADIUSN", (ci,) + nid, {"value": g["R"]}))
-                        owners.append(c)
-                        sized.add(ck)
-                if c.kind == "CONCENTRIC" and len(cid) == 2:
-                    cons.append(("COINCIDENT", tuple(cid), {}))
+                if c.kind == "RADIUS":
+                    ci, (nid, g) = got[0]
+                    cons.append(("RADIUSN", (ci,) + nid, {"value": c.length}))
                     owners.append(c)
+                elif c.kind == "CONCENTRIC":
+                    cons.append(("COINCIDENT", (got[0][0], got[1][0]), {}))
+                    owners.append(c)
+                else:                                  # eşit yarıçap
+                    for ci, (nid, g) in got:
+                        if len(nid) >= 2:
+                            cons.append(("EQDIST", (ci,) + nid, {}))
+                            owners.append(c)
+                    (c1, (n1, _)), (c2, (n2, _)) = got
+                    cons.append(("EQUAL", (c1, n1[0], c2, n2[0]), {}))
+                    owners.append(c)
+                continue
+            if c.kind == "CENTERDIST":
+                ra, rb = c.refs[0], c.refs[1]
+                ca, _ga = center(ra, True)
+                if ca is None:
+                    c.ok, c.info = False, "ilk referans yay / daire olmalı"
+                    continue
+                if _is_arc_ref(rb):
+                    cb, _gb = center(rb, True)
+                    cons.append(("DISTANCE", (ca, cb), {"value": c.length}))
+                else:
+                    pv = pt_vars(rb)
+                    if pv is None:
+                        c.ok, c.info = False, "referans kayboldu"
+                        continue
+                    if rb.point:
+                        cons.append(("DISTANCE", (ca, pv[0]), {"value": c.length}))
+                    else:
+                        cons.append(("PTLINE", (ca, pv[0], pv[1]), {"value": c.length}))
+                owners.append(c)
                 continue
             if c.kind in ("TANGENT", "SMOOTH"):
                 plan, why = _tangent_plan(c, scene)
@@ -135,9 +220,9 @@ def solve_all(scene=None, force=False, prefer=None):
                     idx = [var((o.name, si, pi), (o, si, pi)) for o, si, pi in tpts]
                     cons.append(("TLINE", tuple(idx), {"dir": tuple(tdir)}))
                     owners.append(c)
-                else:
+                elif not dry:
                     post.append((c, plan[1]))
-                if c.kind == "SMOOTH":
+                if c.kind == "SMOOTH" and not dry:
                     post.append((c, lambda c=c: smooth_post(c, _joint(c)[0])))
                 continue
             pts = _constraint_points(c)
@@ -171,10 +256,14 @@ def solve_all(scene=None, force=False, prefer=None):
         scale = 1.0 + float(np.abs(X0).max())
         res = {}
         for c, r in zip(owners, per):           # bir kısıt birden çok denklem olabilir
+            if c is None:
+                continue
             res[id(c)] = (c, res.get(id(c), (c, True))[1] and r <= 1e-6 * scale)
         for c, good in res.values():
             c.ok = good
             c.info = "" if c.ok else "sağlanamadı: diğer kısıtlarla çelişiyor olabilir"
+        if dry:
+            return ok
         _write(keys, X0, X)
         for ck, (o, si, g) in arc_jobs.items():   # yaylar yeni merkez ve uçlardan kurulur
             try:
@@ -189,6 +278,12 @@ def solve_all(scene=None, force=False, prefer=None):
         traceback.print_exc()
         return False
     finally:
+        if not dry:
+            for c in driven:                   # referans ölçüler: geometriden ölçülür
+                try:
+                    _set_measured(c)
+                except Exception:
+                    traceback.print_exc()
         _flags["solving"] = False
 
 
@@ -272,6 +367,12 @@ def add(kind, refs, auto=False, value=None, solve=True, scene=None):
             c.offset = 0.0
         elif kind in ("PTLINE", "LINEDIST"):
             c.length = solver.measure(kind, P) if value is None else float(value)
+        elif kind == "CENTERDIST":
+            v = center_dist_value(c)
+            if v is None:
+                owner.cad.constraints.remove(len(owner.cad.constraints) - 1)
+                return None
+            c.length = v if value is None else float(value)
         elif kind == "RADIUS":
             R = radius_of(c)
             if R is None:
@@ -308,6 +409,13 @@ def satisfied(c, tol_rel=1e-6):
     if c.kind == "CONCENTRIC":
         d = centers_dist(c)
         return d is not None and d <= 1e-6
+    if c.kind == "CENTERDIST":
+        v = center_dist_value(c)
+        return v is not None and abs(v - c.length) <= tol_rel * (1.0 + v) + 1e-9
+    if c.kind == "EQUAL" and len(c.refs) == 2 and all(_is_arc_ref(r) for r in c.refs):
+        ga = arc_group(c.refs[0].obj, c.refs[0].spline, c.refs[0].index)
+        gb = arc_group(c.refs[1].obj, c.refs[1].spline, c.refs[1].index)
+        return abs(ga["R"] - gb["R"]) <= tol_rel * (1.0 + ga["R"]) + 1e-9
     pts = _constraint_points(c)
     if pts is None:
         return False

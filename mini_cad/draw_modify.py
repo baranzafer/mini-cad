@@ -54,6 +54,8 @@ class ModifyMixin:
             self.chamfer_d = None
         if not hasattr(self, "_drag_last"):
             self._drag_last = None
+        if not hasattr(self, "fl_sel"):
+            self.fl_sel = None           # köşe araçlarında seçilen ilk doğru (çizgi, segment, t)
 
     def _mod_tool(self):
         """Etkin değiştirme aracı (Shift ile Kırp ⇄ Uzat)."""
@@ -313,7 +315,11 @@ class ModifyMixin:
         """(çalışma taslağı, çizgi sırası, düğüm, sonuç, sebep)"""
         kind = cand[0]
         sketch = self.sketch
-        if kind == "pair":
+        if kind == "lines":                       # ayrı iki doğru: kesişime uzat / kırp
+            sketch, k, j = sm.lines_corner(sketch, cand[1], cand[2])
+            if sketch is None:
+                return None, None, None, None, k, v1
+        elif kind == "pair":
             _, k1, e1, k2, e2 = cand
             sketch, k, j = sm.join_ends(sketch, k1, e1, k2, e2)
         else:
@@ -333,22 +339,47 @@ class ModifyMixin:
         M = np.array(self.rv3d.perspective_matrix, dtype=np.float64)
         cands = self._corner_candidates()
         if not cands:
+            self._corner_lines_update(mx, my)
             return
         P = np.array([c[0] for c in cands])
         px, ok, _ = _project(P, M, self.region)
         d = np.where(ok, np.linalg.norm(px - np.array([mx, my]), axis=1), np.inf)
         i = int(np.argmin(d))
         if d[i] > self.radius * 1.5:
+            self._corner_lines_update(mx, my)
             return
         v1, v2 = self._corner_value()
         sketch, k, j, res, why, used = self._corner_compute(cands[i][1], v1, v2)
         self.mod = {"kind": "CORNER", "cand": cands[i][1], "pos": cands[i][0], "res": res,
                     "why": why, "value": used, "v2": v2}
 
+    def _corner_lines_update(self, mx, my):
+        """Köşe değilse: doğru seçimi (Inventor gibi iki ayrı doğru da yuvarlanır / pah
+        kırılır; doğrular kesişime uzatılır / kırpılır)."""
+        hit = self._pick_seg(mx, my)
+        if hit is None:
+            return
+        k, i, t, pos = hit
+        if self.sketch[k]["segs"][i]["kind"] != "line":
+            return
+        if self.fl_sel is not None and self.fl_sel[0] != k:
+            v1, v2 = self._corner_value()
+            cand = ("lines", self.fl_sel, (k, i, t))
+            sketch, kk, j, res, why, used = self._corner_compute(cand, v1, v2)
+            self.mod = {"kind": "CORNER", "cand": cand, "pos": pos, "res": res,
+                        "why": why, "value": used, "v2": v2}
+            return
+        self.mod = {"kind": "LINEPICK", "k": k, "i": i, "t": t, "pos": pos}
+
     def _corner_click(self, context, mx, my):
         self._corner_update(mx, my)
         m = self.mod
         if m is None:
+            return
+        if m["kind"] == "LINEPICK":
+            self.fl_sel = (m["k"], m["i"], m["t"])
+            self._status(context, "İkinci doğruya tıkla (doğrular kesişime uzatılır / kırpılır)"
+                                  " · sağ tık: bırak")
             return
         if m["res"] is None:
             self._status(context, m["why"])
@@ -359,6 +390,7 @@ class ModifyMixin:
             self._status(context, why)
             return
         new = sm.apply_corner(sketch, k, j, res)
+        self.fl_sel = None
         from . import core
         if self.tool == "FILLET2D":
             self.fillet_r = used
@@ -445,6 +477,7 @@ class ModifyMixin:
         if not press:
             return {"RUNNING_MODAL"} if et == "RIGHTMOUSE" else None
         if et == "RIGHTMOUSE":
+            self.fl_sel = None
             if self.off_sel is not None:
                 self.off_sel = None
                 self.typed, self.field = ["", ""], 0
@@ -519,7 +552,14 @@ class ModifyMixin:
             for sg in m["new"]["segs"]:
                 _poly([tuple(p) for p in dm.sample(sg, 2 if sg["kind"] == "line" else 20)],
                       COL_RUBBER, 2.2, region)
-        elif kind == "CORNER" and m.get("res") is not None:
+        elif kind == "LINEPICK":
+            sg = self.sketch[m["k"]]["segs"][m["i"]]
+            _poly([tuple(sg["p"][0]), tuple(sg["p"][3])], COL_RUBBER, 3.0, region)
+        if self.fl_sel is not None and self.fl_sel[0] < len(self.sketch) and \
+                self.fl_sel[1] < len(self.sketch[self.fl_sel[0]]["segs"]):
+            sg = self.sketch[self.fl_sel[0]]["segs"][self.fl_sel[1]]
+            _poly([tuple(sg["p"][0]), tuple(sg["p"][3])], COL_GUIDE, 4.0, region)
+        if kind == "CORNER" and m.get("res") is not None:
             r = m["res"]
             for sg in [r["a"]] + r["mids"] + [r["b"]]:
                 _poly([tuple(p) for p in dm.sample(sg, 2 if sg["kind"] == "line" else 20)],

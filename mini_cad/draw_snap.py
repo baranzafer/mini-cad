@@ -282,6 +282,9 @@ class SnapMixin:
         v1 = None
         if anchor is not None and f1:
             v1 = parse_length(self.typed[1]) if self.tool == "RECT" else parse_angle(self.typed[1])
+        if self._coord_on():                 # hassas giriş: ΔX / ΔY (ilk noktada X / Y)
+            v0 = self._signed_len(self.typed[0]) if self.typed[0] else None
+            v1 = self._signed_len(self.typed[1]) if self.typed[1] else None
         locked = v0 is not None or v1 is not None
 
         # Çalışma düzlemi
@@ -406,7 +409,24 @@ class SnapMixin:
                     best = (e, plane.xyz(w) + plane.n * plane.dist(q))
         return None if best is None else best[1]
 
+    def _coord_on(self):
+        """Koordinat (X / Y) girişi açık mı (Shift+Tab). Çok tıklamalı şekiller kendi
+        ölçülerini kullanır."""
+        return bool(getattr(self, "coord_mode", False)) and self.tool not in CLICK_SHAPES
+
+    def _coord_lock(self, plane, anchor, p, dx, dy):
+        """Düzlem eksenlerinde: önceki noktaya göre ΔX / ΔY, ilk noktada dünya merkezine
+        göre X / Y. Yazılmayan bileşen imleçten alınır."""
+        base = plane.uv(anchor) if anchor is not None else plane.uv(np.zeros(3))
+        q = plane.uv(p)
+        u = base[0] + dx if dx is not None else q[0]
+        v = base[1] + dy if dy is not None else q[1]
+        h = plane.dist(anchor) if anchor is not None else plane.dist(p)
+        return plane.xyz((u, v)) + plane.n * h
+
     def _apply_locks(self, plane, anchor, p, v0, v1):
+        if self._coord_on():
+            return self._coord_lock(plane, anchor, p, v0, v1)
         if self.tool == "CIRCLE":
             d = dm.unit(np.asarray(p) - anchor)
             if d is None:

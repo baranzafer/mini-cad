@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.19.0)
+# Mini CAD — Geliştirme Notları (v0.20.0)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -8,7 +8,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-1. İki dosyayı yükle: `mini_cad_v0.19.0.zip` (eklenti) ve `mini_cad_devkit_v0.19.0.zip`
+1. İki dosyayı yükle: `mini_cad_v0.20.0.zip` (eklenti) ve `mini_cad_devkit_v0.20.0.zip`
    (testler + araçlar).
 2. Açılış mesajında şunu söyle: "Mini CAD projesine devam ediyoruz, önce DEVELOPMENT.md'yi oku."
    Ardından isteklerini yaz. Mümkünse birkaç isteği tek mesajda topla.
@@ -20,7 +20,7 @@ hangi dosyaya bakılacağını söyler.
    ```
    Beklenen sonuç: `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den beri
    bayat; "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
-4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t55.py` ...),
+4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t56.py` ...),
    sürümü artır ve paketle (§8).
 5. Kod GitHub'da da tutuluyor: `baranzafer/mini-cad` deposunda eklenti `mini_cad/`, testler ve
    araçlar `devkit/` klasöründe. Her sürüm ayrı bir commit olarak eklenir. Kurulum zip'leri
@@ -142,33 +142,33 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `jobs.py` | 337 | Süreç istemcisi (ensure / submit / call / control / poll / stop / describe) |
 | `errors.py` | 2 | `CadError` |
 | `geometry.py` | 2123 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
-| `core.py` | 1616 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
+| `core.py` | 1620 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
 | `solver.py` | 185 | numpy kısıt çözücü: ağırlıklı Gauss-Newton, en az hareket; `residual`, `evaluate`, `solve`, `measure` |
-| `constraints.py` | 482 | Kısıt çözümünü çalıştırma (`solve_all`), ekleme / kontrol / silme, canlı tetikleme, operatörler, kayıt |
+| `constraints.py` | 590 | Kısıt çözümünü çalıştırma (`solve_all`), ekleme / kontrol / silme, canlı tetikleme, operatörler, kayıt |
 | `constraints_refs.py` | 100 | Kısıt veri erişimi: referans noktaları, dünya konumu, `all_constraints` |
 | `constraints_tangent.py` | 355 | Teğet planlaması (§6) |
-| `constraints_arcs.py` | 234 | Yay kısıtları: yay grubu, sanal merkez, yayı yeniden kurma, Pürüzsüz (G2) eğrilik eşleme |
-| `draw_dims.py` | 302 | DimMixin: genel Ölçü aracı, ölçü değeri düzenleme, Yatay / Dikey, karışık referanslı seçim |
-| `constraints_glyphs.py` | 105 | Kısıt simgesi çizimi, `glyph_at` |
-| `draw.py` | 775 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
+| `constraints_arcs.py` | 302 | Yay kısıtları: yay grubu, sanal merkez, yayı yeniden kurma, Pürüzsüz (G2) eğrilik eşleme |
+| `draw_dims.py` | 363 | DimMixin: genel Ölçü aracı, ölçü değeri düzenleme, Yatay / Dikey, karışık referanslı seçim |
+| `constraints_glyphs.py` | 268 | Kısıt simgesi çizimi, `glyph_at` |
+| `draw.py` | 784 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
 | `draw_common.py` | 481 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
 | `draw_plane.py` | 537 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (U) |
-| `draw_snap.py` | 643 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
-| `draw_sketch.py` | 647 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
+| `draw_snap.py` | 663 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
+| `draw_sketch.py` | 648 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
 | `draw_edit.py` | 427 | EditMixin: taslak noktası / tutamaç sürükleme, pivot, sürüklerken yakalama, sürüklerken ölçü yardımcısı |
-| `draw_glyphs.py` | 202 | ConstraintUIMixin: kısıt için kenar / nokta seçimi, simge sağ tık menüsü |
-| `draw_render.py` | 264 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
-| `sketchmath.py` | 1178 | bpy'siz taslak düzenleme matematiği: bezier bölme, varlıklar, kesişimler, Kırp / Uzat / Böl / Ötele / Köşe yuvarla / Pah |
-| `draw_modify.py` | 587 | ModifyMixin: Değiştir araçlarının seçimi, önizlemesi, olayları ve çizimi |
-| `draw_xform.py` | 540 | TransformMixin: Düzenle / Desen araçları (seçim, temel nokta, hedef, önizleme, ölçü kutusu) |
-| `shapemath.py` | 325 | bpy'siz şekil matematiği: dikdörtgen çeşitleri, çokgen, kanallar, yay kanal, elips, 3 doğruya teğet daire, düzleme izdüşüm |
-| `draw_shapes.py` | 447 | ShapeMixin: çok tıklamalı şekiller, Nokta, Teğet daire, Geometri yansıt |
+| `draw_glyphs.py` | 215 | ConstraintUIMixin: kısıt için kenar / nokta seçimi, simge sağ tık menüsü |
+| `draw_render.py` | 277 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
+| `sketchmath.py` | 1232 | bpy'siz taslak düzenleme matematiği: bezier bölme, varlıklar, kesişimler, Kırp / Uzat / Böl / Ötele / Köşe yuvarla / Pah |
+| `draw_modify.py` | 627 | ModifyMixin: Değiştir araçlarının seçimi, önizlemesi, olayları ve çizimi |
+| `draw_xform.py` | 621 | TransformMixin: Düzenle / Desen araçları (seçim, temel nokta, hedef, önizleme, ölçü kutusu) |
+| `shapemath.py` | 337 | bpy'siz şekil matematiği: dikdörtgen çeşitleri, çokgen, kanallar, yay kanal, elips, 3 doğruya teğet daire, düzleme izdüşüm |
+| `draw_shapes.py` | 480 | ShapeMixin: çok tıklamalı şekiller, Nokta, Teğet daire, Geometri yansıt |
 | `drawmath.py` | 585 | bpy'siz çizim matematiği: düzlemler, doğru / yay / daire / dikdörtgen, B-spline→Bézier (Boehm), Catmull-Rom, kalem, kılavuz rafinesi |
 | `snapmath.py` | 410 | FORGE snap_math (GPL başlıklı kopya) |
-| `palette.py` | 598 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
+| `palette.py` | 607 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
 | `pick.py` | 579 | Kenar seçim modu (hover + tık), sarı gövde kenarları, B ile fillet |
 | `ui.py` | 590 | Operatörler, tercihler (`background`), `add_feature` (BODY ref) |
-| `panels.py` | 534 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
+| `panels.py` | 536 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
 | `bool_overlay.py` | 177 | Boolean vurgusu, CAD kenarları, hayalet çizimi |
 | `wire.py` | 308 | Mesh kenarlarından bezier tel kafes |
 | `recorder.py` | 533 | Ctrl+Alt+R kayıt / rapor (§7) |
@@ -297,6 +297,13 @@ Diğer kısayollar:
   - Gövde kenarı çoklu çizgisinden doğru / daire / yay tanınır, değilse spline uydurulur.
   - Sonuç taslağa normal çizgi olarak eklenir (Inventor'daki gibi ilişkisel, sarı referans
     değil).
+- **Merkez noktalı yay kanal** (`SLOTARCC`): merkez, başlangıç, bitiş (D: yön), genişlik.
+- **Teğet daire:** üç doğrudan sonra 4. tık yerleştirir; imlece en yakın çözüm (iç / dış
+  teğet daireler) seçilir.
+- **Hassas giriş** (Shift+Tab, `coord_mode`): ölçü alanları ΔX / ΔY olur (düzlem u / v
+  eksenlerinde). İlk noktada mutlak X / Y (dünya merkezine göre) yazılabilir.
+  `_coord_lock` uygular. Düzenle araçlarında da geçerlidir (`_xf_point` → `_update`).
+  Çok tıklamalı şekiller kendi ölçülerini kullanır.
 - **Tuş döngüleri** `TOOL_CYCLES`: aynı araç tuşuna tekrar basınca türler arasında geçilir.
 
 **Değiştir araçları** (v0.16.0, Inventor 2D gibi; `draw_modify` + `sketchmath`):
@@ -328,6 +335,9 @@ Diğer kısayollar:
   - Yuvarlama yayı her eğri türünde iki ötelenmiş eğrinin kesişiminden (Newton) bulunur.
   - Değer yazılır, son değer hatırlanır. Yazılmadıysa ilk değer kısa kenarın %20'si.
   - Pah: 1. mesafe köşeden önceki parçaya, Tab ile 2. mesafe sonrakine (boşsa eşit).
+- **Ayrı iki doğruda köşe** (`sketchmath.lines_corner`): köşe yoksa iki doğruya tıklanır.
+  - Doğrular kesişime uzatılır / kırpılır; tek parçalı doğruda tıklanan taraf kalır.
+  - Sonra `join_ends` ile birleşir ve yuvarlama / pah uygulanır.
 - Hepsi taslak geçmişine girer (Ctrl+Z / Ctrl+Shift+Z). Oto kısıt referansları (`chain`)
   yeniden eşlenir, uzunluk kısıtı değişen parçada düşer.
   `("@sketch", ...)` teğet referansları `fix_sketch_refs` ile konumdan yeniden bulunur.
@@ -339,6 +349,8 @@ Diğer kısayollar:
   (hedef / açı / ölçek / 1. yön) → DIR2 (yalnız dikdörtgen desen).
   - İşlem bitince seçim korunur, BASE'e dönülür.
   - Sağ tık bir adım geri gider. SEL'de Enter / sağ tık ilerler.
+- **Noktalar** (`self.xpts`, `sk_points` sırası; v0.20): tıklayarak ya da kutuyla seçilir,
+  bütün düzenle / desen araçlarında çizgilerle birlikte dönüşür (kopyalarda eklenir).
 - **Seçim** `self.xsel` (çizgi sıraları), Esnet için `self.xnodes` (çizgi, düğüm).
   - Tık seçer / bırakır; boşluğa tık seçimi temizler (Shift ile korunur).
   - Kutu: soldan sağa tamamen içindekileri, sağdan sola değenleri seçer. Esnet'te kutu
@@ -464,6 +476,27 @@ devam eder; boşlukta başlarsa 3 noktalı yay gibi davranır. `start_tan` iki k
     eksenine AXIS kısıtı yazılır; değilse uyarır.
   - **Karışık seçim** `constraints_refs.MIXED` / `slot_type`: SYMLINE (nokta, nokta, kenar),
     PTLINE (nokta, kenar).
+- **v0.20.0 eklemeleri:**
+  - **Referans (driven) ölçü** `c.driven`: çözüme girmez, `_set_measured` ile değeri
+    geometriden ölçülür; parantezli gösterilir, panelde açılır / kapanır.
+    - Ölçü aracı yeni ölçüyü önce `solve_all(dry=True)` ile dener. Kuru çözüm geometriyi
+      değiştirmez. Çelişirse ölçü referans yapılır.
+    - Referans ölçüye değer yazmak onu sürücü yapar. Çelişirse referans kalır.
+  - **Merkez mesafesi** `CENTERDIST (yay, yay | nokta | doğru)`: yay merkezi sanal
+    değişken; ölçüsüz yayların yarıçapı korunur (`center(..., keep_radius=True)`).
+  - **Eşit (yay–yay):** iki referans da yaysa yarıçap eşitliği (Inventor gibi). Doğrularda
+    eskisi gibi boy eşitliği.
+  - **Otomatik ölçü** (`C_AUTODIM`): tıklanan spline'ın ölçüsüz doğrularına uzunluk,
+    yay / dairelerine yarıçap / çap eklenir.
+  - **Ölçü çizgileri** (`constraints_glyphs.dim_geometry` / `dim_layout`):
+    - Doğrusal: uzatma çizgileri ve oklu ölçü çizgisi.
+    - Yarıçap / çap: merkezden ok.
+    - Açı: yay.
+    - Değer kutusu çizginin üstündedir; tıklanınca düzenlenir.
+  - **Düğüm dağıtma** (`_respace`): sanal merkezli çözümde düğümler çember boyunca
+    kayabiliyordu (dairenin parçaları eşitsiz → yay tanınmıyordu).
+    `rebuild_group` artık daire düğümlerini eski açı aralıklarıyla, açık yayın ara
+    düğümlerini eski oranlarla yerleştirir.
 - **Ölçü aracı** (`C_DIM`, `draw_dims`):
   - Seçim: köşe / uç noktası önce, yay / daire / spline ortasındaki pürüzsüz ara düğüm kenar
     sayılır (`_smooth_node`).
@@ -523,6 +556,7 @@ Betiğin yaptıkları:
 | t51 | shapemath: dikdörtgenler, çokgen, kanallar, yay kanal, elips, teğet daire, yansıtma |
 | t53 | Aşama 4 modal: Ölçü (uzunluk, açı, paralel uzaklık, nokta mesafesi, nokta-doğru, yarıçap, çap, değer düzenleme), Eş merkezli, Yatay / Dikey, Simetrik (çizgi), Pürüzsüz (G2) |
 | t54 | solver: SYMLINE, PTLINE, LINEDIST, RADIUSN, EQDIST |
+| t55 | Eksikler 1. parti: referans ölçü (kuru çözüm), merkez mesafesi, yaylarda eşit, otomatik ölçü, ölçü çizgileri ve çizimi, ayrı doğrularda köşe, X / Y hassas giriş, merkez noktalı yay kanal, düzenle araçlarında noktalar |
 | t52 | Oluştur modal: R / O döngüleri, yazarak şekiller, çokgen D, kanallar, teğet daire, Nokta (yakalama, geri al, Bitir), Yansıt, Bitir |
 | tools/occ_blend_check.py | GERÇEK OCC ile teğet birleşim ölçümü (test koşucusunda değil, OCP gerekir) |
 
@@ -579,7 +613,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - GPU görselleri (palet, pivot, kılavuzlar, simgeler) yalnızca stub'larla test edildi.
   Görünüşe dair geri bildirim kullanıcıdan gelir.
 - t6 / t14 bayat testler; istenirse güncellenebilir.
-- `core.py` (1616) ve `geometry.py` (2123) hâlâ büyük; bölünmemesinin nedeni §4'te.
+- `core.py` (1620) ve `geometry.py` (2123) hâlâ büyük; bölünmemesinin nedeni §4'te.
 - Aşama 2 kısıtları çalışıyor. Simetrik / açı gibi kısıtların Inventor'daki tüm etkileşimleri
   henüz incelenmedi.
 
@@ -601,18 +635,24 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
      - Noktalar Düzenle / Değiştir araçlarına girmez (taşınmaz).
   4. **(0.19.0, yapıldı)** Genel Ölçü aracı, Yatay / Dikey, Eş merkezli, Yarıçap / Çap,
      Pürüzsüz (G2), Simetrik (çizgiye göre), nokta-doğru ve doğru-doğru uzaklığı.
-     Eksikler:
-     - Otomatik ölçülendirme (Inventor "Automatic Dimensions") yok.
-     - Ölçüler sürücü / referans (driven) ayrımı yok.
-     - Ölçü çizgileri (ok, uzatma çizgisi) çizilmiyor, değer etiketi gösteriliyor.
-     - İki daire arası merkez mesafesi ölçüsü yok.
+     Eksikler (v0.20.0'da kapandı: otomatik ölçü, referans ölçü, ölçü çizgileri, merkez
+     mesafesi).
      - Yay kısıtları taslakta değil, kaydedilmiş eğrilerde çalışır (diğer kısıtlar gibi).
+     - Otomatik ölçü konum ölçüsü (merkeze göre) eklemez, yalnızca boyutları ölçer.
   - Ayrıca değerlendirilecek: Bitir'lenmiş eğriyi taslağa geri alma (Inventor "Edit
     Sketch"). Spline sırası / yüzey referansları nedeniyle dikkatli tasarım gerekir.
   - Autodesk yardım sayfaları bu ortamın ağ ayarlarında kapalıydı. Davranışlar Inventor
     bilgisinden uygulandı.
-- 2D Köşe yuvarla / Pah henüz yalnızca birleşik köşelerde çalışıyor. Inventor'daki gibi
-  kesişen ya da ayrık iki nesneyi seçme yok. Eşit yarıçap kısıtı yok.
+- **Eksikler 2. parti (sıradaki):**
+  - Metin aracı (Text).
+  - Kaydedilmiş eğriyi taslağa geri açma (Inventor "Edit Sketch"; spline sırası / yüzey ve
+    kısıt referansları yeniden eşlenmeli).
+  - Ayna için çizgiye göre simetri kısıtı.
+  - İlişkisel (düzenlenebilir) desen.
+  - İlişkisel yansıtma.
+  - Fillet'te eşit yarıçap kısıtı (aynı oturumdaki yuvarlamalar).
+- 2D Köşe yuvarla / Pah: v0.20'den beri ayrı iki doğruda da çalışıyor (yay / spline'larda
+  yalnızca birleşik köşe).
 
 ## 11. Sürüm geçmişi (kısa)
 
@@ -661,3 +701,10 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - Yatay, Dikey, Eş merkezli, Yarıçap, Pürüzsüz (G2), Simetrik (çizgi), Nokta-doğru,
     Doğru-doğru.
   - Yeni modüller `constraints_arcs.py` ve `draw_dims.py`; testler t53, t54.
+- **0.20.0:** eksikler 1. parti.
+  - Ölçüler: referans ölçü (çelişen ölçü otomatik referans olur), merkez mesafesi,
+    otomatik ölçü, ölçü çizgileri.
+  - Kısıtlar: yaylarda eşit yarıçap; çözümde kayan yay düğümleri düzeltildi.
+  - Çizim: ayrı iki doğruda köşe yuvarla / pah, X / Y hassas giriş (Shift+Tab), merkez
+    noktalı yay kanal, teğet dairede çözüm seçimi, düzenle araçlarında noktalar.
+  - Test t55.

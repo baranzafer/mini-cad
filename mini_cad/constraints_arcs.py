@@ -80,7 +80,48 @@ def arc_group(ob, si, i):
             if k not in nodes:
                 nodes.append(k)
     closed = cyc and len(segs) == nseg
-    return {"segs": segs, "nodes": nodes, "c": c, "R": R, "n": nn, "closed": closed}
+    pos = [_world(ob, si, k) for k in nodes]
+    return {"segs": segs, "nodes": nodes, "c": c, "R": R, "n": nn, "closed": closed, "pos": pos}
+
+
+def _ang(v, e1, e2):
+    return math.atan2(float(np.dot(v, e2)), float(np.dot(v, e1)))
+
+
+def _respace(g, P, C):
+    """Çözümden sonra düğümler çember boyunca kaymış olabilir: daire düğümleri eski açı
+    aralıklarıyla, açık yayın ara düğümleri eski oranlarla yeniden yerleştirilir (uçlar
+    çözümde kalır). Yeni konumlar listesi."""
+    nn = dm.unit(g["n"])
+    c0 = np.asarray(g["c"], dtype=np.float64)
+    O = [np.asarray(q, dtype=np.float64) - c0 for q in g["pos"]]
+    if len(P) < 3 or float(np.linalg.norm(O[0])) < 1e-12:
+        return P
+    f1 = O[0] / np.linalg.norm(O[0])
+    f2 = np.cross(nn, f1)
+    oa = [(_ang(o, f1, f2)) % (2 * math.pi) for o in O]
+    V = [p - C - nn * float(np.dot(p - C, nn)) for p in P]
+    if float(np.linalg.norm(V[0])) < 1e-12:
+        return P
+    e1 = V[0] / np.linalg.norm(V[0])
+    e2 = np.cross(nn, e1)
+    h0 = float(np.dot(P[0] - C, nn))
+    if g["closed"]:
+        R = float(np.mean([np.linalg.norm(v) for v in V]))
+        out = [P[0]]
+        for a in oa[1:]:
+            out.append(C + nn * h0 + R * (math.cos(a) * e1 + math.sin(a) * e2))
+        return out
+    total0 = oa[-1] if oa[-1] > 1e-9 else oa[-1] + 2 * math.pi
+    total = _ang(V[-1], e1, e2) % (2 * math.pi)
+    if total <= 1e-9:
+        total += 2 * math.pi
+    R = 0.5 * (float(np.linalg.norm(V[0])) + float(np.linalg.norm(V[-1])))
+    out = [P[0]]
+    for a in oa[1:-1]:
+        t = (a / total0) * total
+        out.append(C + nn * h0 + R * (math.cos(t) * e1 + math.sin(t) * e2))
+    return out + [P[-1]]
 
 
 def rebuild_group(ob, si, g, C):
@@ -92,6 +133,13 @@ def rebuild_group(ob, si, g, C):
     mwi = ob.matrix_world.inverted()
     changed = False
     C = np.asarray(C, dtype=np.float64)
+    if "pos" in g:                            # çember boyunca kaymış düğümleri düzelt
+        P = [_world(ob, si, k) for k in g["nodes"]]
+        Q = _respace(g, P, C)
+        for k, p, q in zip(g["nodes"], P, Q):
+            if float(np.linalg.norm(p - q)) > 1e-12 * (1.0 + float(np.abs(q).max())):
+                sp.bezier_points[k].co = mwi @ Vector(tuple(q))
+                changed = True
     for s in g["segs"]:
         ia, ib = s, (s + 1) % n
         a, b = _world(ob, si, ia), _world(ob, si, ib)
@@ -144,6 +192,26 @@ def radius_of(c):
     r = c.refs[0]
     g = arc_group(r.obj, r.spline, r.index)
     return None if g is None else g["R"]
+
+
+def center_dist_value(c):
+    """Merkez mesafesi: yay–yay merkezleri, yay merkezi–nokta, yay merkezi–doğru."""
+    if len(c.refs) != 2:
+        return None
+    ra, rb = c.refs[0], c.refs[1]
+    ga = arc_group(ra.obj, ra.spline, ra.index) if not ra.point else None
+    if ga is None:
+        return None
+    if not rb.point:
+        gb = arc_group(rb.obj, rb.spline, rb.index)
+        if gb is not None:
+            return float(np.linalg.norm(ga["c"] - gb["c"]))
+        P = seg_bez(rb.obj, rb.spline, rb.index)
+        d = dm.unit(P[3] - P[0])
+        if d is None:
+            return None
+        return float(np.linalg.norm(np.cross(ga["c"] - P[0], d)))
+    return float(np.linalg.norm(ga["c"] - _world(rb.obj, rb.spline, rb.index)))
 
 
 def centers_dist(c):

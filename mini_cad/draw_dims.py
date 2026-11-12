@@ -19,7 +19,7 @@ from . import drawmath as dm
 from .draw_common import COL_SNAP, _text, parse_angle, parse_length
 
 AXES = {"XY": (0, 1), "XZ": (0, 2), "YZ": (1, 2)}
-VALUE_KINDS = ("DISTANCE", "ANGLE", "RADIUS", "PTLINE", "LINEDIST")
+VALUE_KINDS = ("DISTANCE", "ANGLE", "RADIUS", "PTLINE", "LINEDIST", "CENTERDIST")
 
 
 class DimMixin:
@@ -35,7 +35,7 @@ class DimMixin:
         kind = self.tool[2:]
         if kind == "DIM":
             return "any"
-        if kind in ("HORIZ", "VERT"):
+        if kind in ("HORIZ", "VERT", "AUTODIM"):
             return "seg"
         return constraints.slot_type(kind, len(self.c_refs))
 
@@ -72,7 +72,7 @@ class DimMixin:
 
     def _c_needed(self):
         kind = self.tool[2:]
-        if kind in ("HORIZ", "VERT"):
+        if kind in ("HORIZ", "VERT", "AUTODIM"):
             return 1
         if kind == "DIM":
             return 2
@@ -153,11 +153,15 @@ class DimMixin:
                 return
         elif types == ["seg", "seg"]:
             a, b = self._seg_info(refs[0]), self._seg_info(refs[1])
-            if a[0] != "line" or b[0] != "line":
-                self._status(context, "Ölçü: iki doğru seç (açı / uzaklık)")
+            if "arc" in (a[0], b[0]) and "curve" not in (a[0], b[0]):
+                # yay / daire içeren: merkez mesafesi (yay önce)
+                kind = "CENTERDIST"
+                use = [refs[0], refs[1]] if a[0] == "arc" else [refs[1], refs[0]]
+            elif a[0] != "line" or b[0] != "line":
+                self._status(context, "Ölçü: iki doğru (açı / uzaklık) ya da yay / daire seç")
                 return
-            d1, d2 = dm.unit(a[2] - a[1]), dm.unit(b[2] - b[1])
-            if float(np.linalg.norm(np.cross(d1, d2))) < 1e-6:
+            elif float(np.linalg.norm(np.cross(dm.unit(a[2] - a[1]), dm.unit(b[2] - b[1])))) < \
+                    1e-6:
                 kind = "LINEDIST"                  # paralel: aralarındaki uzaklık (paralel kalır)
                 use = [refs[1], refs[0]]
             else:
@@ -167,19 +171,67 @@ class DimMixin:
         elif sorted(types) == ["pt", "seg"]:
             pt = refs[0] if types[0] == "pt" else refs[1]
             sg = refs[1] if types[0] == "pt" else refs[0]
-            if self._seg_info(sg)[0] != "line":
-                self._status(context, "Ölçü: nokta ile doğru seç")
+            info = self._seg_info(sg)[0]
+            if info == "arc":
+                kind, use = "CENTERDIST", [sg, pt]      # merkezden noktaya
+            elif info != "line":
+                self._status(context, "Ölçü: nokta ile doğru / yay seç")
                 return
-            kind, use = "PTLINE", [pt, sg]
+            else:
+                kind, use = "PTLINE", [pt, sg]
         if kind is None:
             return
-        c = constraints.add(kind, use)
+        c = constraints.add(kind, use, solve=False)
+        if c is not None:
+            # önce kuru çözüm: çelişiyorsa geometri bozulmadan referans ölçü yapılır
+            constraints.solve_all(context.scene, force=True, dry=True)
+            if not c.ok:
+                c.driven = True
+            constraints.solve_all(context.scene, force=True)
         self._c_done(context, c, kind)
+        if c is not None and getattr(c, "driven", False):
+            self._status(context, f"{constraints.NAMES.get(kind, kind)}: mevcut kısıtlarla "
+                                  "çelişiyor → referans ölçü yapıldı (yalnızca gösterir)")
+            return
         if c is not None:
             ob = use[0][1]
             self.dim_edit = (ob.name, len(ob.cad.constraints) - 1)
             self.typed, self.field = ["", ""], 0
             self._status(context, self._c_status_text())
+
+    def _autodim(self, context, ref):
+        """Otomatik ölçülendirme: seçilen eğrinin (spline) ölçüsüz doğrularına uzunluk,
+        yay / dairelerine yarıçap / çap eklenir. Eklenen sayı."""
+        from .constraints_arcs import arc_group, group_key
+        ob, si = ref[1], ref[2]
+        sp = ob.data.splines[si]
+        from . import core
+        have_len, have_rad = set(), set()
+        for o2, _i, c in constraints.all_constraints(context.scene):
+            for r in c.refs:
+                if r.obj == ob and r.spline == si and not r.point:
+                    if c.kind == "DISTANCE" and len(c.refs) == 1:
+                        have_len.add(r.index)
+                    if c.kind == "RADIUS":
+                        g = arc_group(ob, si, r.index)
+                        if g is not None:
+                            have_rad.add(group_key(ob, si, g))
+        made = 0
+        for i in range(core._seg_count(sp)):
+            info = self._seg_info(("seg", ob, si, i))
+            if info[0] == "line" and i not in have_len:
+                if constraints.add("DISTANCE", [("seg", ob, si, i)], solve=False) is not None:
+                    made += 1
+                    have_len.add(i)
+            elif info[0] == "arc":
+                k = group_key(ob, si, info[1])
+                if k not in have_rad:
+                    if constraints.add("RADIUS", [("seg", ob, si, i)], solve=False) is not None:
+                        made += 1
+                    have_rad.add(k)
+        if made:
+            constraints.solve_all(context.scene, force=True)
+        return made
 
     def _c_done(self, context, c, kind):
         try:
@@ -211,6 +263,8 @@ class DimMixin:
         self.dim_edit = None
         if c is None or not txt:
             return
+        was_driven = getattr(c, "driven", False)
+        c.driven = False                       # değer yazılan ölçü şekli yönetir
         if c.kind == "ANGLE":
             v = parse_angle(txt)
             if v is None or not (0.0 <= v <= 180.0):
@@ -223,6 +277,13 @@ class DimMixin:
                 self._status(context, "Geçersiz değer")
                 return
             c.length = v / 2.0 if (c.kind == "RADIUS" and c.axis == 1) else v
+        if was_driven:
+            constraints.solve_all(context.scene, force=True, dry=True)
+            if not c.ok:
+                c.driven = True
+                constraints.solve_all(context.scene, force=True)
+                self._status(context, "Bu değer mevcut kısıtlarla çelişiyor; referans ölçü kaldı")
+                return
         constraints.solve_all(context.scene, force=True)
         try:
             bpy.ops.ed.undo_push(message="Mini CAD: Ölçü")
