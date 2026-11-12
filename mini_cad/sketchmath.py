@@ -1019,3 +1019,160 @@ def join_ends(sketch, k1, e1, k2, e2):
     _carry(s1, [new])
     out = [copy.deepcopy(s) for s in rest[:lo]] + [new] + [copy.deepcopy(s) for s in rest[lo:]]
     return fix_sketch_refs(out), lo, j
+
+
+# ================================================================ dönüşümler (Aşama 2)
+# Taşı / Kopyala / Döndür / Ölçekle / Ayna / Esnet / Dikdörtgen ve dairesel desen.
+# Dönüşümler noktaya uygulanan fonksiyonlardır (benzerlik dönüşümleri: doğru doğru,
+# yay yay kalır).
+
+def T_move(d):
+    d = np.asarray(d, dtype=np.float64)
+    return lambda p: np.asarray(p, dtype=np.float64) + d
+
+
+def T_rotate(c, n, ang):
+    """c'den geçen n ekseni etrafında ang radyan (sağ el kuralı)."""
+    c = np.asarray(c, dtype=np.float64)
+    k = dm.unit(n)
+    ca, sa = math.cos(ang), math.sin(ang)
+
+    def f(p):
+        v = np.asarray(p, dtype=np.float64) - c
+        return c + v * ca + np.cross(k, v) * sa + k * float(np.dot(k, v)) * (1.0 - ca)
+    return f
+
+
+def T_scale(c, s):
+    c = np.asarray(c, dtype=np.float64)
+    return lambda p: c + (np.asarray(p, dtype=np.float64) - c) * s
+
+
+def T_mirror(p1, p2, n):
+    """Düzlem normali n olan çizim düzleminde p1-p2 doğrusuna göre ayna."""
+    p1 = np.asarray(p1, dtype=np.float64)
+    m = dm.unit(np.cross(np.asarray(p2, dtype=np.float64) - p1, np.asarray(n, dtype=np.float64)))
+    if m is None:
+        return None
+
+    def f(p):
+        p = np.asarray(p, dtype=np.float64)
+        return p - 2.0 * float(np.dot(p - p1, m)) * m
+    return f
+
+
+def xform_stroke(st, f, copy_=False):
+    """Çizginin bütün kontrol noktalarına f uygulanmış yeni çizgi. Kopyada gruplar yenilenir.
+    Konumu değişen çizginin dış bağlantıları (çakışık / teğet başlangıç) düşer."""
+    gmap = {}
+    segs = []
+    for sg in st["segs"]:
+        new = {k: v for k, v in sg.items() if k not in ("p", "tan_start")}
+        new["p"] = tuple(f(q) for q in sg["p"])
+        new["auto"] = list(sg.get("auto", ()))   # geçersiz kalanları Bitir ayıklar (satisfied)
+        if copy_:
+            g = sg.get("grp")
+            new["grp"] = gmap.setdefault(g, new_grp()) if g is not None else None
+        segs.append(new)
+    return {"segs": segs, "cyclic": st["cyclic"], "node_ids": {}, "start_tan": None}
+
+
+def apply_xform(sketch, ks, f, copy_=False):
+    """ks çizgilerine f'yi uygular (copy_: kopyalar sona eklenir). Yeni taslak listesi."""
+    out = [copy.deepcopy(s) for s in sketch]
+    ks = [k for k in sorted(set(ks)) if 0 <= k < len(sketch)]
+    if copy_:
+        out += [xform_stroke(sketch[k], f, True) for k in ks]
+    else:
+        for k in ks:
+            out[k] = xform_stroke(sketch[k], f, False)
+    return fix_sketch_refs(out)
+
+
+def apply_many(sketch, ks, fns):
+    """Desen: her dönüşüm için seçili çizgilerin bir kopyası sona eklenir."""
+    out = [copy.deepcopy(s) for s in sketch]
+    ks = [k for k in sorted(set(ks)) if 0 <= k < len(sketch)]
+    for f in fns:
+        out += [xform_stroke(sketch[k], f, True) for k in ks]
+    return fix_sketch_refs(out)
+
+
+def rect_pattern(d1, n1, d2=None, n2=1):
+    """Dikdörtgen desen ötelemeleri (özdeşlik hariç). d1 / d2: bir adımlık vektörler."""
+    d1 = np.asarray(d1, dtype=np.float64)
+    d2 = np.zeros(3) if d2 is None else np.asarray(d2, dtype=np.float64)
+    fns = []
+    for i in range(max(1, int(n1))):
+        for j in range(max(1, int(n2))):
+            if i == 0 and j == 0:
+                continue
+            fns.append(T_move(d1 * i + d2 * j))
+    return fns
+
+
+def circ_pattern(c, n, count, total_deg=360.0):
+    """Dairesel desen dönmeleri (özdeşlik hariç). Tam turda eşit bölünür."""
+    count = max(1, int(count))
+    if count < 2:
+        return []
+    full = abs(abs(total_deg) - 360.0) < 1e-9
+    step = math.radians(total_deg) / (count if full else count - 1)
+    return [T_rotate(c, n, step * i) for i in range(1, count)]
+
+
+def stroke_nodes(st):
+    segs = st["segs"]
+    n = len(segs)
+    out = [_P(segs[j])[0] for j in range(n)]
+    if not st["cyclic"] and n:
+        out.append(_P(segs[-1])[3])
+    return out
+
+
+def _move_node(segs, j, new, cyclic):
+    """j. düğümü taşır: doğrular düz kalır, eğrilerde bağlı tutamaç da kayar."""
+    n = len(segs)
+    touch = []
+    if j < n:
+        touch.append((j, 0))
+    if j > 0:
+        touch.append((j - 1, 3))
+    elif cyclic:
+        touch.append((n - 1, 3))
+    for k, end in touch:
+        sg = segs[k]
+        P = list(_P(sg))
+        delta = np.asarray(new, dtype=np.float64) - P[end]
+        P[end] = np.asarray(new, dtype=np.float64)
+        if sg["kind"] != "line":
+            h = 1 if end == 0 else 2
+            P[h] = P[h] + delta
+            sg["p"] = tuple(P)
+        else:
+            sg["p"] = dm.line_seg(P[0], P[3])["p"]
+
+
+def stretch(sketch, nodes, d):
+    """Esnet: seçili düğümler (çizgi, düğüm) d kadar taşınır; bağlı parçalar esner.
+    Bir çizginin bütün düğümleri seçiliyse çizgi olduğu gibi taşınır."""
+    d = np.asarray(d, dtype=np.float64)
+    out = [copy.deepcopy(s) for s in sketch]
+    by = {}
+    for k, j in nodes:
+        if 0 <= k < len(out):
+            by.setdefault(k, set()).add(j)
+    for k, js in by.items():
+        st = out[k]
+        pos = stroke_nodes(st)
+        if len(js) >= len(pos):
+            out[k] = xform_stroke(st, T_move(d))
+            continue
+        for j in sorted(js):
+            if 0 <= j < len(pos):
+                _move_node(st["segs"], j, pos[j] + d, st["cyclic"])
+        for sg in st["segs"]:
+            sg["auto"] = [a for a in sg.get("auto", ()) if a[0] != "DIST"]
+        st["node_ids"] = {}
+        st["start_tan"] = None
+    return fix_sketch_refs(out)

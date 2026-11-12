@@ -19,7 +19,7 @@ import numpy as np
 from . import drawmath as dm
 from . import sketchmath as sm
 from .draw_common import (
-    COL_ACTIVE, COL_GUIDE, COL_RUBBER, COL_SNAP, MODIFY_TOOLS, _dashed, _marker, _poly, _project,
+    COL_ACTIVE, COL_GUIDE, COL_RUBBER, COL_SNAP, MODIFY_TOOLS, XFORM_TOOLS, _dashed, _marker, _poly, _project,
     _seg_px_dist, _text, parse_length,
 )
 
@@ -109,6 +109,9 @@ class ModifyMixin:
     # ------------------------------------------------------------ hover
 
     def _mod_update(self, context, mx, my):
+        if self.tool in XFORM_TOOLS:
+            self._xf_update(context, mx, my)
+            return
         self._mod_init()
         self.mouse = (mx, my)
         self.cursor, self.preview, self.info, self.snap_kind = None, [], None, None
@@ -402,6 +405,8 @@ class ModifyMixin:
 
     def _mod_event(self, context, event, mx, my, press):
         """Değiştir araçlarının olayları; işlenmediyse None (genel işleyiciye gider)."""
+        if self.tool in XFORM_TOOLS:
+            return self._xf_event(context, event, mx, my, press)
         self._mod_init()
         et = event.type
         if et in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE"}:
@@ -474,6 +479,9 @@ class ModifyMixin:
     # ------------------------------------------------------------ çizim
 
     def _draw_modify3d(self, region):
+        if self.tool in XFORM_TOOLS:
+            self._xf_draw3d(region)
+            return
         self._mod_init()
         sel = self.off_sel
         if sel is not None:
@@ -510,6 +518,9 @@ class ModifyMixin:
                       COL_RUBBER, 2.5, region)
 
     def _draw_modify2d(self, region):
+        if self.tool in XFORM_TOOLS:
+            self._xf_draw2d(region)
+            return
         self._mod_init()
         s = self.ui_scale
         mx, my = self.mouse

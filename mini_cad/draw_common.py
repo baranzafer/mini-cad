@@ -442,7 +442,10 @@ SHAPE_TOOLS = {"CIRCLE", "RECT"}
 TOOL_KEYS = {"W": "SELECT", "L": "LINE", "E": "ARC3", "M": "CARC", "O": "CIRCLE",
              "R": "RECT", "S": "CV", "K": "FIT", "P": "PEN", "B": "TRIM"}
 
-MODIFY_TOOLS = {"TRIM", "EXTEND", "SPLIT", "OFFSET", "FILLET2D", "CHAMFER2D"}
+XFORM_TOOLS = {"MOVE", "COPY", "ROTATE", "SCALE", "STRETCH", "RPAT", "CPAT", "MIRROR"}
+
+# Taslak üzerinde çalışan bütün araçlar (Değiştir + Düzenle / Desen)
+MODIFY_TOOLS = {"TRIM", "EXTEND", "SPLIT", "OFFSET", "FILLET2D", "CHAMFER2D"} | XFORM_TOOLS
 
 FIELDS = {"CIRCLE": ("Yarıçap", None), "RECT": ("Genişlik", "Yükseklik"),
           "ARC3": (None, None), "CARC": (None, None), "TARC": (None, None)}

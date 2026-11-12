@@ -32,6 +32,18 @@ MODIFY_TOOLS = [
     ("FILLET2D", "Köşe yuvarla: yarıçap yaz, köşeye tıkla", ""),
     ("CHAMFER2D", "Pah: mesafe yaz (Tab: 2. mesafe), köşeye tıkla", ""),
 ]
+XFORM_TOOLS = [
+    ("MOVE", "Taşı: seç → temel nokta → hedef (uzunluk / açı yazılabilir)", ""),
+    ("COPY", "Kopyala: seç → temel nokta → hedef", ""),
+    ("ROTATE", "Döndür: seç → merkez → açı (Shift: 15°, C: kopya)", ""),
+    ("SCALE", "Ölçekle: seç → temel nokta → ölçek (C: kopya)", ""),
+    ("STRETCH", "Esnet: noktaları kutuyla seç → temel → hedef", ""),
+]
+PATTERN_TOOLS = [
+    ("RPAT", "Dikdörtgen desen: seç → başlangıç → 1. yön (adet, aralık) → 2. yön", ""),
+    ("CPAT", "Dairesel desen: seç → merkez → adet, açı", ""),
+    ("MIRROR", "Ayna: seç → ayna çizgisinin iki noktası (kopya eklenir)", ""),
+]
 PLANES = [("PICK", "Seç", "Çizim düzlemini görünümde seç: eksen düzlemi ya da gövde yüzü "
                           "(Shift+Q)"),
           ("AUTO", "Oto", "Görüşe göre eksen düzlemi; gövde yüzüne tıklarsan yüz düzlemi"),
@@ -230,6 +242,46 @@ def icon_lines(name):
             P([(-0.05, -0.8), (0.85, -0.8)])
     if name == "CHAMFER2D":
         return P([(-0.75, 0.8), (-0.75, -0.2), (-0.15, -0.8), (0.85, -0.8)])
+    if name == "MOVE":
+        out = P([(-0.8, 0.0), (0.8, 0.0)]) + P([(0.0, -0.8), (0.0, 0.8)])
+        for x, y, dx, dy in ((0.8, 0, 1, 0), (-0.8, 0, -1, 0), (0, 0.8, 0, 1), (0, -0.8, 0, -1)):
+            out += P([(x - dx * 0.25 + dy * 0.2, y - dy * 0.25 + dx * 0.2), (x, y),
+                      (x - dx * 0.25 - dy * 0.2, y - dy * 0.25 - dx * 0.2)])
+        return out
+    if name == "COPY":
+        return P([(-0.8, -0.2), (0.2, -0.2), (0.2, 0.8), (-0.8, 0.8)], True) + \
+            P([(-0.2, -0.8), (0.8, -0.8), (0.8, 0.2), (0.4, 0.2)]) + P([(-0.2, -0.8), (-0.2, -0.4)])
+    if name == "ROTATE":
+        return P(_arc(0.0, 0.0, 0.7, 0.3, 2 * math.pi - 0.3, 18)) + \
+            P([(0.45, 0.45), (0.67, 0.2), (0.9, 0.42)]) + _dot(0, 0, 0.08)
+    if name == "SCALE":
+        return P([(-0.85, -0.85), (0.1, -0.85), (0.1, 0.1), (-0.85, 0.1)], True) + \
+            P([(-0.85, -0.85), (0.85, -0.85), (0.85, 0.85), (-0.85, 0.85)], True) + \
+            P([(0.1, 0.1), (0.7, 0.7)]) + P([(0.45, 0.7), (0.7, 0.7), (0.7, 0.45)])
+    if name == "STRETCH":
+        return P([(-0.85, -0.6), (0.0, -0.6), (0.0, 0.6), (-0.85, 0.6)]) + \
+            P([(0.0, -0.6), (0.85, -0.6)]) + P([(0.0, 0.6), (0.85, 0.6)]) + \
+            P([(0.45, -0.2), (0.85, 0.0), (0.45, 0.2)]) + P([(0.2, 0.0), (0.85, 0.0)])
+    if name == "RPAT":
+        out = []
+        for x in (-0.6, 0.0, 0.6):
+            for y in (-0.5, 0.3):
+                out += P([(x - 0.2, y - 0.2), (x + 0.2, y - 0.2), (x + 0.2, y + 0.2),
+                          (x - 0.2, y + 0.2)], True)
+        return out
+    if name == "CPAT":
+        out = _dot(0, 0, 0.07)
+        for k in range(6):
+            a = k * math.pi / 3
+            x, y = 0.65 * math.cos(a), 0.65 * math.sin(a)
+            out += P(_arc(x, y, 0.17, 0, 2 * math.pi, 8))
+        return out
+    if name == "MIRROR":
+        dash = []
+        for k in range(-4, 4, 2):
+            dash += [(0.0, k * 0.22), (0.0, (k + 1) * 0.22)]
+        return P([(-0.15, -0.7), (-0.85, 0.7), (-0.15, 0.7)], True) + \
+            P([(0.15, -0.7), (0.85, 0.7), (0.15, 0.7)], True) + dash
     if name == "AXIS":
         return P([(-0.8, 0.0), (0.8, 0.0)]) + P([(-0.8, -0.3), (-0.8, 0.3)]) + \
             P([(0.8, -0.3), (0.8, 0.3)]) + P([(0.0, -0.75), (0.0, -0.45)])
@@ -331,6 +383,8 @@ class Palette:
         grid("tool", DRAW_TOOLS)
         section("DEĞİŞTİR")
         grid("tool", MODIFY_TOOLS)
+        section("DÜZENLE · DESEN")
+        grid("tool", XFORM_TOOLS + PATTERN_TOOLS)
         section("DÜZLEM")
         strip("plane", PLANES)
         section("KISIT")
@@ -359,7 +413,7 @@ class Palette:
             return ""
         kind, ident = self.hover
         if kind == "tool":
-            for k, name, key in DRAW_TOOLS + MODIFY_TOOLS:
+            for k, name, key in DRAW_TOOLS + MODIFY_TOOLS + XFORM_TOOLS + PATTERN_TOOLS:
                 if k == ident:
                     return name + (f"  [{key}]" if key else "")
         if kind == "plane":

@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.16.0)
+# Mini CAD — Geliştirme Notları (v0.17.0)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -8,7 +8,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-1. İki dosyayı yükle: `mini_cad_v0.16.0.zip` (eklenti) ve `mini_cad_devkit_v0.16.0.zip`
+1. İki dosyayı yükle: `mini_cad_v0.17.0.zip` (eklenti) ve `mini_cad_devkit_v0.17.0.zip`
    (testler + araçlar).
 2. Açılış mesajında şunu söyle: "Mini CAD projesine devam ediyoruz, önce DEVELOPMENT.md'yi oku."
    Ardından isteklerini yaz. Mümkünse birkaç isteği tek mesajda topla.
@@ -20,7 +20,7 @@ hangi dosyaya bakılacağını söyler.
    ```
    Beklenen sonuç: `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den beri
    bayat; "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
-4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t49.py` ...),
+4. Değişiklikten sonra testleri yeniden çalıştır. Gerekirse yeni test ekle (`t51.py` ...),
    sürümü artır ve paketle (§8).
 5. Kod GitHub'da da tutuluyor: `baranzafer/mini-cad` deposunda eklenti `mini_cad/`, testler ve
    araçlar `devkit/` klasöründe. Her sürüm ayrı bir commit olarak eklenir. Kurulum zip'leri
@@ -148,19 +148,20 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `constraints_refs.py` | 86 | Kısıt veri erişimi: referans noktaları, dünya konumu, `all_constraints` |
 | `constraints_tangent.py` | 355 | Teğet planlaması (§6) |
 | `constraints_glyphs.py` | 98 | Kısıt simgesi çizimi, `glyph_at` |
-| `draw.py` | 732 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
-| `draw_common.py` | 450 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
+| `draw.py` | 744 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt |
+| `draw_common.py` | 453 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
 | `draw_plane.py` | 537 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (U) |
 | `draw_snap.py` | 638 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
 | `draw_sketch.py` | 611 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
 | `draw_edit.py` | 427 | EditMixin: taslak noktası / tutamaç sürükleme, pivot, sürüklerken yakalama, sürüklerken ölçü yardımcısı |
 | `draw_glyphs.py` | 197 | ConstraintUIMixin: kısıt için kenar / nokta seçimi, simge sağ tık menüsü |
 | `draw_render.py` | 255 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
-| `sketchmath.py` | 1021 | bpy'siz taslak düzenleme matematiği: bezier bölme, varlıklar, kesişimler, Kırp / Uzat / Böl / Ötele / Köşe yuvarla / Pah |
-| `draw_modify.py` | 565 | ModifyMixin: Değiştir araçlarının seçimi, önizlemesi, olayları ve çizimi |
+| `sketchmath.py` | 1178 | bpy'siz taslak düzenleme matematiği: bezier bölme, varlıklar, kesişimler, Kırp / Uzat / Böl / Ötele / Köşe yuvarla / Pah |
+| `draw_modify.py` | 576 | ModifyMixin: Değiştir araçlarının seçimi, önizlemesi, olayları ve çizimi |
+| `draw_xform.py` | 540 | TransformMixin: Düzenle / Desen araçları (seçim, temel nokta, hedef, önizleme, ölçü kutusu) |
 | `drawmath.py` | 585 | bpy'siz çizim matematiği: düzlemler, doğru / yay / daire / dikdörtgen, B-spline→Bézier (Boehm), Catmull-Rom, kalem, kılavuz rafinesi |
 | `snapmath.py` | 410 | FORGE snap_math (GPL başlıklı kopya) |
-| `palette.py` | 462 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
+| `palette.py` | 516 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
 | `pick.py` | 579 | Kenar seçim modu (hover + tık), sarı gövde kenarları, B ile fillet |
 | `ui.py` | 590 | Operatörler, tercihler (`background`), `add_feature` (BODY ref) |
 | `panels.py` | 532 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
@@ -190,7 +191,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 ## 5. Çizim aracı (`MINICAD_OT_draw`, `minicad.draw`)
 
 **Sınıf:** `MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintUIMixin,
-RenderMixin, ModifyMixin, bpy.types.Operator)`. Mixin'lerde **aynı adlı metot olmamalı** (v0.16'da
+RenderMixin, ModifyMixin, TransformMixin, bpy.types.Operator)`. Mixin'lerde **aynı adlı metot olmamalı** (v0.16'da
 `_offset_update` çakışması yakalandı). Kontrol:
 `grep -ho "^    def [a-zA-Z_0-9]*" draw_*.py draw.py | sort | uniq -d` boş dönmeli.
 
@@ -217,6 +218,7 @@ RenderMixin, ModifyMixin, bpy.types.Operator)`. Mixin'lerde **aynı adlı metot 
 | Kalem | P |
 | Kırp (Shift: Uzat) | B |
 | Uzat, Böl, Ötele, Köşe yuvarla, Pah | palet (DEĞİŞTİR) |
+| Taşı, Kopyala, Döndür, Ölçekle, Esnet, Dikdörtgen / Dairesel desen, Ayna | palet (DÜZENLE · DESEN) |
 
 Diğer kısayollar:
 - **Araç geçişi:** Q son iki araç arasında geçiş yapar. Shift+Q düzlemi yeniden seçtirir.
@@ -291,6 +293,38 @@ Diğer kısayollar:
 - Hepsi taslak geçmişine girer (Ctrl+Z / Ctrl+Shift+Z). Oto kısıt referansları (`chain`)
   yeniden eşlenir, uzunluk kısıtı değişen parçada düşer.
   `("@sketch", ...)` teğet referansları `fix_sketch_refs` ile konumdan yeniden bulunur.
+
+**Düzenle / Desen araçları** (v0.17.0; `draw_xform` + `sketchmath` dönüşümleri):
+- `XFORM_TOOLS` ⊂ `MODIFY_TOOLS`: aynı yönlendirmeyi kullanırlar (`_mod_update`,
+  `_mod_event` ve çizim bunları `_xf_*`'a iletir). Yalnızca taslakta çalışırlar.
+- **Adımlar** `self.xf["step"]`: SEL (seçim) → BASE (temel / merkez / ayna 1. nokta) → TGT
+  (hedef / açı / ölçek / 1. yön) → DIR2 (yalnız dikdörtgen desen).
+  - İşlem bitince seçim korunur, BASE'e dönülür.
+  - Sağ tık bir adım geri gider. SEL'de Enter / sağ tık ilerler.
+- **Seçim** `self.xsel` (çizgi sıraları), Esnet için `self.xnodes` (çizgi, düğüm).
+  - Tık seçer / bırakır; boşluğa tık seçimi temizler (Shift ile korunur).
+  - Kutu: soldan sağa tamamen içindekileri, sağdan sola değenleri seçer. Esnet'te kutu
+    düğüm seçer.
+  - Düzenle araçları arasında geçişte seçim korunur, diğer araçlarda temizlenir.
+- **Nokta girişi** `_xf_point`: araç geçici olarak Doğru yapılıp `_update` çalıştırılır. Bütün
+  yakalamalar, kılavuzlar, ızgara, geçici zemin ve yazılan uzunluk / açı kilitleri böylece
+  aynen geçerli.
+- **Dönüşümler** (benzerlik: doğru doğru, yay yay kalır): `T_move`, `T_rotate` (düzlem
+  normali etrafında), `T_scale`, `T_mirror`.
+  - `apply_xform`: yerinde ya da kopya. Taşınan çizginin dış bağlantıları (`node_ids`,
+    `start_tan`) düşer. Oto kısıtlar korunur, geçersiz kalanları Bitir ayıklar.
+  - `apply_many`: desenler.
+  - `stretch`: düğüm taşır, bağlı tutamaç kayar, doğru düz kalır. Bütün düğümler seçiliyse
+    çizgi olduğu gibi taşınır.
+- **Döndür:** açı, merkezden seçimin ortasına olan doğrultuya göre ölçülür (fare seçimi
+  "tutar"). Shift ile 15° adım, yazılan değer derece. C kopyayı açar / kapar.
+- **Ölçekle:** ölçek = imleç uzaklığı / en uzak seçili noktanın uzaklığı. Yazılan değer
+  çarpandır. C kopyayı açar / kapar.
+- **Dikdörtgen desen:** yön ve aralık fareyle (yazılan Aralık öncelikli), varsayılan Adet 3.
+  2. yön isteğe bağlıdır (varsayılan Adet 2); sağ tık 2. yönü atlar.
+- **Dairesel desen:** varsayılan 6 adet, 360°. Tam turda eşit bölünür, değilse uçlar dahil.
+- **Ayna:** iki nokta (çizim düzleminde doğru) tanımlar; kopyalar eklenir. Simetri kısıtı
+  yazılmaz, mevcut SYMMETRIC yalnızca dünya düzlemine göre.
 
 **Yakalama:**
 - Yakalanan noktalar: tel kafes ve CAD gövde kenarlarının ucu / ortası, çember ve yay merkezleri,
@@ -414,6 +448,8 @@ Betiğin yaptıkları:
 | t46 | Yüzey birleşimi: gather → motor kurma sırası, gövde sırası, imza, eski dosya |
 | t47 | Değiştir araçları modal: Kırp (sürükleme, Shift), Uzat, Böl, Ötele, Köşe yuvarla, Pah, ayrı uçları birleştirme, Bitir, çizim |
 | t48 | sketchmath: kesişim, kırpma (daire dahil), uzatma, bölme, öteleme, yuvarlama, pah |
+| t49 | Düzenle / Desen modal: seçim (tık, pencere / kesişen kutu), Taşı, Kopyala, Döndür (+kopya), Ölçekle, Esnet, desenler, Ayna, seçim koruma, Bitir, çizim |
+| t50 | sketchmath dönüşümleri: yay korunumu, kopya grupları, desen açıları, esnetme |
 | tools/occ_blend_check.py | GERÇEK OCC ile teğet birleşim ölçümü (test koşucusunda değil, OCP gerekir) |
 
 **Test yazma kalıbı:**
@@ -477,7 +513,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 
 - **Inventor 2D çizim araçları yol haritası** (kullanıcı isteği; 3–4 aşama):
   1. **(0.16.0, yapıldı)** Değiştir: Kırp, Uzat, Böl, Ötele; 2D Köşe yuvarla / Pah.
-  2. Taşı, Kopyala, Döndür, Ölçekle, Esnet; Desen: dikdörtgen, dairesel, Ayna.
+  2. **(0.17.0, yapıldı)** Taşı, Kopyala, Döndür, Ölçekle, Esnet; Desen: dikdörtgen,
+     dairesel, Ayna. Eksikler: Ayna için simetri kısıtı (çizgiye göre), desenin ilişkisel
+     (düzenlenebilir) olması, Inventor'daki "Hassas giriş" penceresi (x / y yazma).
   3. Çiz eksikleri: dikdörtgen (3 nokta, merkezden), çokgen, kanal (slot), daire (teğet,
      elips?), Nokta, Geometri yansıt (Project Geometry).
   4. Kısıt / Ölçü: genel Ölçü aracı (tıklanan varlığa göre uzunluk / yarıçap / açı), Eş
@@ -521,3 +559,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - **0.16.0:** Inventor 2D araçları, 1. aşama.
   - DEĞİŞTİR paleti: Kırp (B, sürükleme, Shift: Uzat), Uzat, Böl, Ötele, Köşe yuvarla, Pah.
   - Yeni modüller `sketchmath.py` ve `draw_modify.py`; testler t47, t48.
+- **0.17.0:** Inventor 2D araçları, 2. aşama.
+  - DÜZENLE · DESEN paleti: Taşı, Kopyala, Döndür, Ölçekle, Esnet, Dikdörtgen desen,
+    Dairesel desen, Ayna.
+  - Ortak seçim: tık ve pencere / kesişen kutu. Nokta girişinde çizimin bütün yakalamaları
+    geçerli.
+  - Yeni modül `draw_xform.py`; testler t49, t50.
