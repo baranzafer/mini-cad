@@ -175,6 +175,8 @@ def _build(job, res, geometry):
     blended = any(p.get("blend", "SHARP") != "SHARP" for p in patches)
     if blended and hasattr(geometry, "blend_order"):
         patches = geometry.blend_order(patches)    # kaynaşacak yamalar komşularından sonra
+        if hasattr(geometry, "blend_prepare"):
+            geometry.blend_prepare(builder, patches)   # kaynaşan komşular: ortak teğet şeridi
     built = {}
     for p in patches:
         try:

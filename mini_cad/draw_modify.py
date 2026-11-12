@@ -113,6 +113,9 @@ class ModifyMixin:
     # ------------------------------------------------------------ hover
 
     def _mod_update(self, context, mx, my):
+        # Değiştir araçları _update'ten geçmez: kaydedilmiş eğri değiştiyse (ör. Taslağa al)
+        # sınırlar burada yenilenmeli, yoksa objeden çıkan spline'lar sınır sanılır (v0.23.1)
+        self._refs_sync(context)
         if self.tool in ("CIRCT", "PROJECT", "EDITSK"):
             self._pk_update(context, mx, my)
             return

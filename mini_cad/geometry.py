@@ -101,6 +101,10 @@ _TopAbs_COMPOUND = _optional("OCP.TopAbs", "TopAbs_COMPOUND")
 _BRepGProp = _optional("OCP.BRepGProp", "BRepGProp")
 _Pnt2dArray = _optional("OCP.TColgp", "TColgp_Array1OfPnt2d")
 _gp_Pnt2d = _optional("OCP.gp", "gp_Pnt2d")
+_SA_Surface = _optional("OCP.ShapeAnalysis", "ShapeAnalysis_Surface")
+_PointsToBSpline = _optional("OCP.GeomAPI", "GeomAPI_PointsToBSpline")
+_GeomFill = _optional("OCP.GeomFill", "GeomFill")
+_GeomAbs_C2 = _optional("OCP.GeomAbs", "GeomAbs_C2")
 
 if _PntArray is None:
     raise CadError("OCP: TColgp_Array1OfPnt bulunamadı (OCP 7.9 gerekli)")
@@ -197,6 +201,22 @@ def _is_anchor(p):
     return p["method"] == "AUTO" and plane_of(p["chain"]) is not None
 
 
+def blend_prepare(builder, patches):
+    """v0.23.1: iki kaynaşan (sabit olmayan) yamanın ortak kenarları. Bu kenarlarda yamalar
+    birbirine sırayla değil, ortak bir TEĞET ŞERİDİNE (iki yamanın keskin hâllerinin
+    ortalama teğet düzlemi) G1 bağlanır: sonuç kurma sırasından bağımsız olur. Eskiden
+    ilk kurulan (kısıtsız) dolgu komşusuna kötü bir destek olabiliyor, teğetlik
+    sağlanamıyordu (yuvarlatılmış dikdörtgen → daire modelinde 35°)."""
+    owners = {}
+    for p in patches:
+        if p.get("holes") or p.get("blend", "SHARP") not in BLEND_LABELS or _is_anchor(p):
+            continue
+        for k in {_ekey(s["p"]) for s in p["chain"]}:
+            owners.setdefault(k, []).append(p)
+    builder.ribbon_pairs = {k: [(q["chain"], q["sides"], q["method"]) for q in v]
+                            for k, v in owners.items() if len(v) == 2}
+
+
 def blend_order(patches):
     """Kurma sırası: önce sabit yamalar, sonra kaynaşacaklar (onlar komşularına uyar).
     Aynı gruptaki sıra korunur."""
@@ -254,6 +274,8 @@ class Builder:
         self.prev = prev
         self.verts, self.edges, self.faces = {}, {}, {}
         self.face_keys = []
+        self.ribbons = {}        # teğet şeritleri (kaynaşan iki yamanın ortak kenarı)
+        self.ribbon_pairs = {}   # kenar anahtarı -> [(zincir, kenarlar, yöntem)] (blend_prepare)
         self.edge_owner = {}     # kenar anahtarı -> (bu turda o kenarı ilk kullanan yüz, anahtarı)
 
     def _get(self, table, key):
@@ -310,9 +332,15 @@ class Builder:
                 _blend_order(blend) is not None:
             seen = set()
             for s, k in zip(chain, ekeys):
+                if k in seen:
+                    continue
+                seen.add(k)
+                rib = self._ribbon(k, s["p"], preview) if k in self.ribbon_pairs else None
+                if rib is not None:
+                    nbrs.append((s, rib))
+                    continue
                 own = self.edge_owner.get(k)
-                if own is not None and k not in seen:
-                    seen.add(k)
+                if own is not None:
                     nbrs.append((s, own))
             if nbrs:
                 key = key + (blend, preview, tuple(hash(o[1]) for _, o in nbrs))
@@ -325,6 +353,13 @@ class Builder:
             self.faces[key] = hit
             self._own(ekeys, hit, key)
             return hit
+        res = self._make(chain, sides, method, preview, nbrs, blend)
+        self.faces[key] = res
+        self._own(ekeys, res, key)
+        return res
+
+    def _make(self, chain, sides, method, preview, nbrs=(), blend="SHARP"):
+        """Yüzü kurar (önbellek / kayıt yok)."""
         wire = self._wire(chain)
         res = None
         tried = []
@@ -367,9 +402,41 @@ class Builder:
                 res = (res[0], res[1] + f" ({'/'.join(tried)} geçersizdi)")
         if blend_note:
             res = (res[0], res[1] + blend_note)
-        self.faces[key] = res
-        self._own(ekeys, res, key)
         return res
+
+    def _sharp(self, chain, sides, method, preview):
+        """Yamanın keskin (kaynaşmasız) hâli; kayıt yapmaz (teğet şeridi için)."""
+        key = (tuple(_ekey(s["p"]) for s in chain), method, preview if method == "FILL"
+               else False)
+        hit = self._get("faces", key)
+        if hit is None:
+            hit = self._make(chain, sides, method, preview)
+        self.faces[key] = hit
+        return hit[0]
+
+    def _ribbon(self, k, pts, preview):
+        """Ortak kenar boyunca teğet şeridi: (yüz, anahtar) | None. İki yamanın keskin
+        hâllerinin kenardaki normalleri ortalanır; şerit kenar eğrisinden bu ortak teğet
+        düzleminde, kenara dik yönde uzanan dar bir yüzeydir."""
+        pair = self.ribbon_pairs.get(k)
+        if not pair or None in (_SA_Surface, _SLProps, _PointsToBSpline, _GeomFill,
+                                _RealArray):
+            return None
+        rkey = ("ribbon", k, preview,
+                tuple((tuple(_ekey(x["p"]) for x in ch), m) for ch, _sd, m in pair))
+        hit = self._get("ribbons", rkey)
+        if hit is None:
+            try:
+                # şeridin dayandığı keskin yüzler önizlemede de tam kalitede (teğet düzlemi
+                # kaba dolgudan alınırsa önizlemede 9°'ye varan kırılma kalıyordu)
+                faces = [self._sharp(ch, sd, m, False) for ch, sd, m in pair]
+                hit = _make_ribbon(faces, pts)
+            except Exception:
+                hit = None
+            if hit is None:
+                return None
+        self.ribbons[rkey] = hit
+        return hit, rkey
 
     def _holed(self, chain, holes, ekeys, key):
         """Delikli düzlemsel yüz: dış tel + delik telleri (kenarlar ortak topolojiden)."""
@@ -455,11 +522,56 @@ class Builder:
             raise CadError("Coons yüzeyi oluşturulamadı")
         return _fix_face(mf.Face()), "Coons"
 
+    @staticmethod
+    def _support_edge(face, edge, pts):
+        """Teğet kısıtı için destek yüzünde kullanılacak kenar. Kısıt kenarının o yüzde
+        parametrik eğrisi (pcurve) olmalı: yoksa OCC dolgu aracı ÇÖKER (segfault). Ortak kenar
+        yüzdeyse o; değilse (Dolgu yüzleri kenarları kopyalar) yüzün aynı geometrideki kendi
+        kenarı; bulunamazsa None (o kenar keskin kalır). v0.23.1"""
+        if _has_pcurve(edge, face):
+            return edge
+        if _BRepAdaptor_Curve is None:
+            return None
+        P = _np(_cubic(_np(pts)))
+        S = np.array([_bez(P, t) for t in np.linspace(0.0, 1.0, 65)])
+        a, b = S[0], S[-1]
+        tol = 1e-4 * (1.0 + float(np.ptp(S, axis=0).max()))
+        degen = _static(BRep_Tool, "Degenerated")
+        exp = TopExp_Explorer(face, TopAbs_EDGE)
+        while exp.More():
+            e = _EDGE_CAST(exp.Current())
+            exp.Next()
+            try:
+                if degen(e):
+                    continue
+                c = _BRepAdaptor_Curve(e)
+                u0, u1 = c.FirstParameter(), c.LastParameter()
+                Q = []
+                for u in (u0, u0 + (u1 - u0) * 0.25, 0.5 * (u0 + u1), u0 + (u1 - u0) * 0.75, u1):
+                    q = c.Value(u)
+                    Q.append((q.X(), q.Y(), q.Z()))
+                Q = np.array(Q)
+            except Exception:
+                continue
+            ends = min(np.linalg.norm(Q[0] - a) + np.linalg.norm(Q[-1] - b),
+                       np.linalg.norm(Q[0] - b) + np.linalg.norm(Q[-1] - a))
+            if ends > 2 * tol:
+                continue
+            if max(float(np.min(np.linalg.norm(S - q, axis=1))) for q in Q[1:-1]) > \
+                    tol + float(np.linalg.norm(S[1] - S[0])):
+                continue
+            if _has_pcurve(e, face):
+                return e
+        return None
+
     def _filling(self, chain, preview, nbrs=None, blend=None):
         """Dolgu yüzeyi. nbrs verilirse o kenarlar komşu yüze teğet (G1) sürekliliğiyle
         bağlanır; diğer kenarlar yalnızca konumdan (C0)."""
         prm = FILL_PREVIEW if preview else FILL_FINAL
-        filler = BRepOffsetAPI_MakeFilling(prm["degree"], prm["nbpts"], prm["nbiter"], False,
+        nbiter = prm["nbiter"]
+        if nbrs and blend in BLEND_LABELS:
+            nbiter = max(nbiter, 2)      # önizlemede tek tur teğetliği tutturamıyor (12° → 2°)
+        filler = BRepOffsetAPI_MakeFilling(prm["degree"], prm["nbpts"], nbiter, False,
                                            1e-5, 1e-4, 1e-2, 0.1, prm["maxdeg"], prm["maxseg"])
         sup = {id(s): own[0] for s, own in (nbrs or ())}
         order = _blend_order(blend) if sup else None
@@ -468,8 +580,12 @@ class Builder:
             for s in chain:
                 e = self.edge(s["p"])
                 f = sup.get(id(s))
+                es = None
                 if f is not None and order is not None:
-                    filler.Add(e, _FACE_CAST(f), order, True)
+                    f = _FACE_CAST(f)
+                    es = self._support_edge(f, e, s["p"])
+                if es is not None:
+                    filler.Add(es, f, order, True)
                     n_cons += 1
                 else:
                     filler.Add(e, GeomAbs_C0, True)
@@ -588,6 +704,84 @@ def _shape_edges(shape):
             edges.append(e)
         exp.Next()
     return edges
+
+
+def _bez(P, t):
+    """Kübik bezier noktası (P: 4×3)."""
+    m = 1.0 - t
+    return m * m * m * P[0] + 3 * m * m * t * P[1] + 3 * m * t * t * P[2] + t * t * t * P[3]
+
+
+def _bez_d(P, t):
+    m = 1.0 - t
+    return 3 * (m * m * (P[1] - P[0]) + 2 * m * t * (P[2] - P[1]) + t * t * (P[3] - P[2]))
+
+
+def _face_normal(face, p):
+    """Yüzün p noktasına en yakın yerdeki (yönelimli) normali | None."""
+    surf = _static(BRep_Tool, "Surface")(face)
+    uv = _SA_Surface(surf).ValueOfUV(_pnt(p), 1e-7)
+    pr = _SLProps(surf, uv.X(), uv.Y(), 1, 1e-9)
+    if not pr.IsNormalDefined():
+        return None
+    n = pr.Normal()
+    n = np.array([n.X(), n.Y(), n.Z()])
+    return -n if face.Orientation() == TopAbs_REVERSED else n
+
+
+def _make_ribbon(faces, pts, n_samples=17):
+    """Teğet şeridi yüzü: kenar eğrisi C(t) ile C(t) + w·D(t) arası doğrusal yüzey;
+    D, iki yüzün ortalama normaline ve kenar teğetine dik. | None"""
+    P = _np(_cubic(_np(pts)))
+    ts = np.linspace(0.0, 1.0, n_samples)
+    C = np.array([_bez(P, t) for t in ts])
+    length = float(np.sum(np.linalg.norm(np.diff(C, axis=0), axis=1)))
+    if length < 1e-9:
+        return None
+    w = 0.1 * length
+    R = []
+    prev = None
+    for t, c in zip(ts, C):
+        ns = [_face_normal(f, c) for f in faces]
+        ns = [n / np.linalg.norm(n) for n in ns if n is not None and np.linalg.norm(n) > 1e-12]
+        if not ns:
+            return None
+        if len(ns) == 2 and float(np.dot(ns[0], ns[1])) < 0:
+            ns[1] = -ns[1]                       # yönelim farkı: yalnızca düzlem önemli
+        n = ns[0] + (ns[1] if len(ns) == 2 else 0.0)
+        T = _bez_d(P, t)
+        D = np.cross(n, T)
+        nd = float(np.linalg.norm(D))
+        if nd < 1e-12:
+            return None
+        D = D / nd
+        if prev is not None and float(np.dot(D, prev)) < 0:
+            D = -D                               # şerit kenarın hep aynı yanında
+        prev = D
+        R.append(c + w * D)
+    par = _RealArray(1, n_samples)
+    for i, t in enumerate(ts):
+        par.SetValue(i + 1, float(t))
+    curves = []
+    for Q in (C, np.array(R)):
+        ap = _PointsToBSpline(_pnt_array(Q), par, 3, 8, _GeomAbs_C2, 1e-7)
+        if not ap.IsDone():
+            return None
+        curves.append(ap.Curve())
+    surf = _static(_GeomFill, "Surface")(curves[0], curves[1])
+    mf = BRepBuilderAPI_MakeFace(surf, 1e-7)
+    if not mf.IsDone():
+        return None
+    return mf.Face()
+
+
+def _has_pcurve(edge, face):
+    """Kenarın yüz üzerinde parametrik eğrisi var mı? (düzlemde OCC kendisi hesaplar)"""
+    try:
+        c = _static(BRep_Tool, "CurveOnSurface")(edge, face, 0.0, 0.0)
+    except Exception:
+        return False
+    return c is not None and not (hasattr(c, "IsNull") and c.IsNull())
 
 
 def _edge_samples(edge):

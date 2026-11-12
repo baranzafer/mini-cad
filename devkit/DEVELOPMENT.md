@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.23.0)
+# Mini CAD — Geliştirme Notları (v0.23.1)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -168,6 +168,26 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
   - Eğrilik (G2) yok: OCC 7.9 dolgu aracı kenar kısıtında G2'yi reddediyor ("continuity is
     not G0 G1 or G2").
   - Ayna dikişinde (simetri düzlemi) teğetlik henüz sağlanmıyor.
+  - **v0.23.1: ortak teğet şeridi** (`blend_prepare`, `Builder._ribbon`, `_make_ribbon`):
+    - Sorun (kullanıcı raporu: yuvarlatılmış dikdörtgen → daire, 8 eğri yama): Teğet seçilince
+      motor **çöküyordu** (segfault). Dolgu (`MakeFilling`) yüzü ortak kenarı kullanmaz, kendi
+      kopyasını üretir. Sonraki yama G1 kısıtını ortak kenarla verince kenarın komşu yüzde
+      pcurve'ü olmuyor, OCC null işaretçiye düşüyordu. Çökmese de sıralı kaynaşmada ilk
+      (kısıtsız) dolgu kötü destek olabiliyor: kurma sırasına göre 35°'ye varan kırılma.
+    - `_support_edge`: G1 kısıtı için destek yüzündeki kenar, ortak kenarın o yüzde pcurve'ü
+      varsa kendisi (düzlemsel komşu: eski davranış), yoksa yüzün geometrice eşleşen kendi
+      kenarı; bulunamazsa o kenar C0 kalır (çökme yok).
+    - İki **kaynaşan** yamanın ortak kenarı (`builder.ribbon_pairs`, motor `blend_prepare`
+      çağırır): iki yamanın keskin hâlleri (`_sharp`, kayıtsız, önizlemede de tam kalite)
+      kurulur, kenar boyunca normalleri ortalanır. Kenar eğrisinden bu ortak teğet düzleminde
+      kenara dik uzanan dar doğrusal yüzey (şerit, genişlik kenar boyunun %10'u) yapılır;
+      iki yama da aynı şeride G1 bağlanır → **kurma sırasından bağımsız** teğetlik.
+      Sabit (düzlemsel / keskin / Coons) komşulu kenarlar eskisi gibi komşu yüze bağlanır.
+    - Kaynaşan dolguda önizleme de 2 tur (`nbiter`) yapar.
+    - Ölçüm (`devkit/tools/occ_blend_ring_check.py`, 4 biçim, 3 kurma sırası): keskin
+      4.6–23.5° → teğet en kötü 0.65° (önizleme ≤ 1.9°). Süre: 8 yamada ~50 ms → ~270 ms.
+    - Not: bu modelde 4 kenarlı yamalarda Coons geçersiz çıkıyor, Dolgu'ya düşülüyor
+      (etiket "Coons geçersizdi"); keskin modda da böyleydi, ayrı konu.
 
 ---
 
@@ -181,7 +201,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `engine_host.py` | 52 | Alt süreç girişi; paketi sahte `minicad_engine` paketi olarak yükler |
 | `jobs.py` | 337 | Süreç istemcisi (ensure / submit / call / control / poll / stop / describe) |
 | `errors.py` | 2 | `CadError` |
-| `geometry.py` | 2180 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
+| `geometry.py` | 2374 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
 | `core.py` | 1855 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
 | `solver.py` | 185 | numpy kısıt çözücü: ağırlıklı Gauss-Newton, en az hareket; `residual`, `evaluate`, `solve`, `measure` |
 | `constraints.py` | 590 | Kısıt çözümünü çalıştırma (`solve_all`), ekleme / kontrol / silme, canlı tetikleme, operatörler, kayıt |
@@ -404,6 +424,10 @@ Diğer kısayollar:
   - Çizim düzlemselse düzlem kilitlenir (`_edit_plane`: SVD; eksen düzlemiyse XY / XZ / YZ,
     değilse "FACE"), faz DRAW olur ve görünüm düzleme çevrilir. Düzlemsel değilse ya da tek
     doğruysa düzlem değişmez.
+- v0.23.1: Değiştir araçları `_update`'ten geçmediği için yakalama / sınır referansları
+  (`self.refs`) yenilenmiyordu; taslağa alınan spline'lar objeden çıktığı hâlde sınır
+  sanılıyor, Kırp / Böl / Uzat kendi gizli kopyasında kesiyordu. `_refs_sync` (draw_snap)
+  artık `_mod_update` başında ve taslağa alma sonrasında da çağrılır.
 - Ctrl+Z koruması: taslakta `edit_src`'li çizgi varken ve taslak geçmişi boşken Ctrl+Z
   Blender'a gitmez. Gitseydi spline'lar objeye geri gelir, Bitir'de çiftlenirdi.
 - Yalnızca düzenlenen çizgilerin olduğu Bitir artık geri alma adımı yazar (`created` artar)
@@ -699,13 +723,14 @@ Betiğin yaptıkları:
 | t53 | Aşama 4 modal: Ölçü (uzunluk, açı, paralel uzaklık, nokta mesafesi, nokta-doğru, yarıçap, çap, değer düzenleme), Eş merkezli, Yatay / Dikey, Simetrik (çizgi), Pürüzsüz (G2) |
 | t54 | solver: SYMLINE, PTLINE, LINEDIST, RADIUSN, EQDIST |
 | t57 | Delikli yüzey: chain_loops / nest_loops (delik, adacık, ayrı döngüler, düzlemsel olmayan), gather → motor (delik sayısı, alt yüzler) |
-| t59 | Çizimi Düzenle: bütün çizimi taslağa alma (sıra, nokta, referanslar, düzlem kilidi, yeni çizgi aynı çizime), Ctrl+Z koruması, düzlem tanıma, Shift+tık, komut (açık / kapalı araç, Outliner seçimi), `edit_curve` ile açılış |
+| t59 | (G: v0.23.1 taslağa alınan çizimde Kırp / Böl / Uzat) Çizimi Düzenle: bütün çizimi taslağa alma (sıra, nokta, referanslar, düzlem kilidi, yeni çizgi aynı çizime), Ctrl+Z koruması, düzlem tanıma, Shift+tık, komut (açık / kapalı araç, Outliner seçimi), `edit_curve` ile açılış |
 | t58 | Taslak kısıtları (Bitir'lememe, canlı çözüm, ölçü, sürükleme / taşıma, geri al, silme, Bitir, karışık ve yay kısıtları), F ile iç içe çizgiler, dairesel ızgara |
 | tools/occ_holes_check.py | GERÇEK OCC ile delikli yüz (alan, ortak kenar, iki yön) |
 | t56 | 2. parti: ayna simetri kısıtları, yuvarlamada eşit, ilişkisel dikdörtgen / dairesel desen (adet / aralık / kaynak izleme / silme ve remap), ilişkisel yansıtma, taslağa al (remap, taşıma, geri yazma), metin |
 | t55 | Eksikler 1. parti: referans ölçü (kuru çözüm), merkez mesafesi, yaylarda eşit, otomatik ölçü, ölçü çizgileri ve çizimi, ayrı doğrularda köşe, X / Y hassas giriş, merkez noktalı yay kanal, düzenle araçlarında noktalar |
 | t52 | Oluştur modal: R / O döngüleri, yazarak şekiller, çokgen D, kanallar, teğet daire, Nokta (yakalama, geri al, Bitir), Yansıt, Bitir |
 | tools/occ_blend_check.py | GERÇEK OCC ile teğet birleşim ölçümü (test koşucusunda değil, OCP gerekir) |
+| tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme) |
 
 **Test yazma kalıbı:**
 - t41–t43, `exec(open("t.py")...)` ile stub'ları yükler. Üstten ortografik görünüm
@@ -873,3 +898,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
     Taslağa al aracında Shift+tık.
   - Düzlem çizimden alınır; yeni çizgiler aynı çizime yazılır; Ctrl+Z koruması.
   - Test t59.
+- **0.23.1:**
+  - Taslağa alınan çizimde Kırp / Uzat / Böl düzeldi (eski spline'lar sınır sayılıyordu).
+  - Yüzey birleşimi Teğet: komşusu da kaynaşan yamalarda motor çöküyordu (segfault) ve
+    teğetlik kurma sırasına bağlıydı; artık ortak teğet şeridi (kırılma ≤ 0.65°).
+  - Araç `occ_blend_ring_check.py`.

@@ -242,14 +242,18 @@ class SnapMixin:
                 ref_segs.append(((ue - ut[0] * k, ve - ut[1] * k), (ue, ve), "ray"))
         return ref_pts, ref_dirs, ref_segs
 
-    def _update(self, context, mx, my):
-        self.mouse = (mx, my)
+    def _refs_sync(self, context):
+        """Taslak / kaydedilmiş eğriler değiştiyse yakalama ve sınır referanslarını yeniler."""
         if self.dirty:
             try:
                 self.refs = _Refs(context, self.sketch, getattr(self, "sk_points", None) or ())
             except Exception:
                 pass
             self.dirty = False
+
+    def _update(self, context, mx, my):
+        self.mouse = (mx, my)
+        self._refs_sync(context)
         if self.phase == "PLANE":
             self._hover_plane(context, mx, my)
             self.plane_snap = None                 # yön seçerken de noktalara yapışır

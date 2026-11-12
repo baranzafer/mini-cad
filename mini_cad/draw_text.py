@@ -204,6 +204,7 @@ class TextMixin:
                             "edit_src": {"obj": ob.name, "token": tok}})
         self.dirty = True
         self._hist_reset()               # spline objeden çıktı: öncesine taslakta dönülmez
+        self._refs_sync(context)         # çıkan spline'lar yakalama / sınır olmasın
         self._status(context, f"Taslağa alındı: '{ob.name}' spline {si} · düzenle, Bitir "
                               "(Ctrl+Enter) ile geri yazılır")
         return True
@@ -256,6 +257,7 @@ class TextMixin:
         self.edit_obj = ob.name                          # yeni çizgiler de bu çizime yazılır
         self.dirty = True
         self._hist_reset()               # spline'lar objeden çıktı: öncesine taslakta dönülmez
+        self._refs_sync(context)         # çıkan spline'lar yakalama / sınır olmasın
         pl = self._edit_plane(loaded)
         if pl is not None:
             self._lock_plane(context, pl.name, pl)
