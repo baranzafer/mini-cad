@@ -62,6 +62,10 @@ PLANES = [("PICK", "Seç", "Çizim düzlemini görünümde seç: eksen düzlemi 
           ("XY", "XY", "Üst düzlem (Z)"), ("XZ", "XZ", "Ön düzlem (Y)"),
           ("YZ", "YZ", "Yan düzlem (X)"), ("VIEW", "Görüş", "Ekrana paralel düzlem (V)")]
 CONSTRAINTS = [
+    ("DIM", "Ölçü: doğru (Enter) → uzunluk, yay → yarıçap, daire → çap, 2 doğru → açı, "
+            "2 nokta → mesafe, nokta + doğru → uzaklık · ölçüye tık: düzenle"),
+    ("HORIZ", "Yatay: 1 kenar (çizim düzleminin yatay ekseni)"),
+    ("VERT", "Dikey: 1 kenar (çizim düzleminin dikey ekseni)"),
     ("AXIS", "Eksene hizala (yatay / dikey): 1 kenar"),
     ("PARALLEL", "Paralel: 2 kenar"),
     ("PERP", "Dik: 2 kenar"),
@@ -70,6 +74,10 @@ CONSTRAINTS = [
     ("COINCIDENT", "Çakışık: 2 nokta"),
     ("FIX", "Sabitle: 1 nokta"),
     ("TANGENT", "Teğet: aynı noktada birleşen 2 kenar"),
+    ("SMOOTH", "Pürüzsüz (G2): spline ile komşusu (teğet + eşit eğrilik)"),
+    ("CONCENTRIC", "Eş merkezli: 2 yay / daire"),
+    ("RADIUS", "Yarıçap / çap: 1 yay / daire (değer panelden ya da Ölçü ile)"),
+    ("SYMLINE", "Simetrik (çizgiye göre): 2 nokta + simetri doğrusu"),
     ("SYMMETRIC", "Simetrik: 2 nokta (dünya eksen düzlemine göre)"),
     ("DISTANCE", "Uzunluk ölçüsü: 1 kenar (değer panelden)"),
     ("ANGLE", "Açı ölçüsü: 2 kenar"),
@@ -336,6 +344,26 @@ def icon_lines(name):
             dash += [(0.0, k * 0.22), (0.0, (k + 1) * 0.22)]
         return P([(-0.15, -0.7), (-0.85, 0.7), (-0.15, 0.7)], True) + \
             P([(0.15, -0.7), (0.85, 0.7), (0.15, 0.7)], True) + dash
+    if name == "DIM":
+        return P([(-0.8, -0.2), (0.8, -0.2)]) + P([(-0.8, -0.6), (-0.8, 0.4)]) + \
+            P([(0.8, -0.6), (0.8, 0.4)]) + P([(-0.8, -0.2), (-0.55, -0.05)]) + \
+            P([(-0.8, -0.2), (-0.55, -0.35)]) + P([(0.8, -0.2), (0.55, -0.05)]) + \
+            P([(0.8, -0.2), (0.55, -0.35)]) + P([(-0.25, 0.35), (0.25, 0.35)]) + \
+            P([(-0.25, 0.65), (0.25, 0.65)])
+    if name == "HORIZ":
+        return P([(-0.8, 0.0), (0.8, 0.0)]) + _dot(-0.8, 0.0) + _dot(0.8, 0.0)
+    if name == "VERT":
+        return P([(0.0, -0.8), (0.0, 0.8)]) + _dot(0.0, -0.8) + _dot(0.0, 0.8)
+    if name == "CONCENTRIC":
+        return P(_arc(0, 0, 0.8, 0, 2 * math.pi, 20)) + P(_arc(0, 0, 0.45, 0, 2 * math.pi, 14)) + \
+            _dot(0, 0, 0.06)
+    if name == "RADIUS":
+        return P(_arc(0, 0, 0.8, 0, 2 * math.pi, 20)) + P([(0.0, 0.0), (0.57, 0.57)]) + \
+            P([(0.35, 0.57), (0.57, 0.57), (0.57, 0.35)]) + _dot(0, 0, 0.06)
+    if name == "SMOOTH":
+        return P([(-0.9, -0.5), (-0.2, -0.5)]) + \
+            P([(x, -0.5 + 0.9 * ((x + 0.2) / 1.1) ** 2) for x in np.linspace(-0.2, 0.9, 10)]) + \
+            _dot(-0.2, -0.5)
     if name == "AXIS":
         return P([(-0.8, 0.0), (0.8, 0.0)]) + P([(-0.8, -0.3), (-0.8, 0.3)]) + \
             P([(0.8, -0.3), (0.8, 0.3)]) + P([(0.0, -0.75), (0.0, -0.45)])

@@ -77,11 +77,12 @@ from .draw_render import RenderMixin
 from .draw_modify import MOD_HELP, ModifyMixin
 from .draw_xform import TransformMixin
 from .draw_shapes import PICK_HELP, SHAPE_NAMES, STEPS, ShapeMixin
+from .draw_dims import DimMixin
 from .draw_common import CLICK_SHAPES, MODIFY_TOOLS, PICK_TOOLS, TOOL_CYCLES, XFORM_TOOLS
 
 
 class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintUIMixin, RenderMixin,
-                      ModifyMixin, TransformMixin, ShapeMixin, bpy.types.Operator):
+                      ModifyMixin, TransformMixin, ShapeMixin, DimMixin, bpy.types.Operator):
     bl_idname = "minicad.draw"
 
     bl_label = "Tel Kafes Çiz"
@@ -170,6 +171,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self._mod_init()                 # değiştir araçları (draw_modify)
         self._xf_init()                  # düzenle / desen araçları (draw_xform)
         self._sh_init()                  # şekiller, nokta, teğet daire, yansıt (draw_shapes)
+        self._dim_init()                 # ölçü değeri düzenleme (draw_dims)
         self.phase = "PLANE" if getattr(sc, "minicad_pick_plane", True) else "DRAW"
         self.palette = palette.Palette(self.ui_scale)
         self.created = 0
@@ -254,9 +256,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                 pass
             return
         if self.tool.startswith("C_"):
-            n, is_pt = constraints.needed(self.tool[2:])
-            txt = (f"{self._tool_name()}  |  {len(self.c_refs)}/{n} "
-                   f"{'nokta' if is_pt else 'kenar'} seçildi  |  Sağ tık: çizime dön  |  "
+            txt = (f"{self._tool_name()}  |  {self._c_status_text()}  |  Sağ tık: çizime dön  |  "
                    "Simgeye sağ tık: dondur / sil  |  Esc: duraklat")
         else:
             tz = getattr(self, "temp", None)
@@ -315,6 +315,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             msg = PICK_HELP["POINT"]
         self._sh_init()
         self.ct_lines, self.pk = [], None
+        self.dim_edit = None
         if tool not in XFORM_TOOLS:
             self.xf, self.xprev = None, []
             if tool not in MODIFY_TOOLS:
@@ -452,6 +453,11 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         press = event.value == "PRESS"
         self.shift, self.ctrl = event.shift, event.ctrl
 
+        if getattr(self, "dim_edit", None) is not None and self.tool.startswith("C_") and \
+                event.type not in self.MOVE_EVENTS:
+            r = self._c_event(context, event, mx, my, press)     # ölçü değeri yazılıyor
+            if r is not None:
+                return r
         if event.type == "ESC" and press and self.sk_drag is not None:
             self._drag_cancel()
             return {"RUNNING_MODAL"}
@@ -549,6 +555,10 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             return self._modal_offset(context, event, mx, my, press)
         if self.tool in MODIFY_TOOLS:
             r = self._mod_event(context, event, mx, my, press)
+            if r is not None:
+                return r
+        if self.tool.startswith("C_"):
+            r = self._c_event(context, event, mx, my, press)
             if r is not None:
                 return r
         if self.track is not None:

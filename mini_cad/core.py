@@ -178,6 +178,12 @@ CONSTRAINT_KINDS = [
     ("EQUAL", "Eşit", "Eşit boy"), ("DISTANCE", "Uzunluk", ""), ("ANGLE", "Açı", ""),
     ("FIX", "Sabit", ""), ("COINCIDENT", "Çakışık", ""), ("SYMMETRIC", "Simetrik", ""),
     ("TANGENT", "Teğet", ""),
+    ("CONCENTRIC", "Eş merkezli", "İki yay / daire aynı merkezde"),
+    ("RADIUS", "Yarıçap", "Yay / daire yarıçapı (dairede çap gösterilir)"),
+    ("SMOOTH", "Pürüzsüz (G2)", "Teğet + birleşimde eğrilik eşit"),
+    ("SYMLINE", "Simetrik (çizgi)", "İki nokta bir doğruya göre simetrik"),
+    ("PTLINE", "Nokta-doğru", "Noktanın doğruya uzaklığı"),
+    ("LINEDIST", "Doğru-doğru", "Paralel iki doğru arası uzaklık"),
 ]
 
 

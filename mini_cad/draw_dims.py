@@ -1,0 +1,302 @@
+"""Kısıt / Ölçü arayüzü — Aşama 4 (Inventor 2D gibi):
+
+  Ölçü (genel)   doğruya tık + Enter / sağ tık → uzunluk · yay → yarıçap · daire → çap ·
+                 iki doğru → açı (paralelse aralarındaki uzaklık) · iki nokta → mesafe ·
+                 nokta + doğru → uzaklık. Ölçü oluşunca değeri yazılır (Enter); mevcut
+                 ölçü değerine tıklayınca düzenlenir.
+  Yatay / Dikey  çizim düzleminin eksenlerine göre (AXIS kısıtı).
+  Eş merkezli, Yarıçap, Pürüzsüz (G2), Simetrik (çizgi): constraints_arcs / solver.
+
+MINICAD_OT_draw (draw.py) bu mixin'den miras alır.
+"""
+import math
+
+import bpy
+import numpy as np
+
+from . import constraints
+from . import drawmath as dm
+from .draw_common import COL_SNAP, _text, parse_angle, parse_length
+
+AXES = {"XY": (0, 1), "XZ": (0, 2), "YZ": (1, 2)}
+VALUE_KINDS = ("DISTANCE", "ANGLE", "RADIUS", "PTLINE", "LINEDIST")
+
+
+class DimMixin:
+    """Genel ölçü aracı, ölçü değeri düzenleme, Yatay / Dikey, karışık referanslı kısıtlar."""
+
+    def _dim_init(self):
+        if not hasattr(self, "dim_edit"):
+            self.dim_edit = None
+
+    # ------------------------------------------------------------ seçim türü
+
+    def _c_want(self):
+        kind = self.tool[2:]
+        if kind == "DIM":
+            return "any"
+        if kind in ("HORIZ", "VERT"):
+            return "seg"
+        return constraints.slot_type(kind, len(self.c_refs))
+
+    def _c_pick(self, mx, my):
+        want = self._c_want()
+        if want == "any":
+            p = self._pick_entity(mx, my, True)
+            if p is not None and not self._smooth_node(p):
+                return p                        # köşe / uç noktası
+            q = self._pick_entity(mx, my, False)
+            return q if q is not None else p
+        return self._pick_entity(mx, my, want == "pt")
+
+    def _smooth_node(self, p):
+        """Yay / daire / spline ortasındaki pürüzsüz ara düğüm mü (ölçüde kenar sayılır)."""
+        ob = bpy.data.objects.get(p[1])
+        try:
+            sp = ob.data.splines[p[2]]
+            if sp.type != "BEZIER":
+                return False
+            n = len(sp.bezier_points)
+            k = p[3]
+            if not sp.use_cyclic_u and (k == 0 or k == n - 1):
+                return False
+            b = sp.bezier_points[k]
+            a = np.array(b.co) - np.array(b.handle_left)
+            c = np.array(b.handle_right) - np.array(b.co)
+            la, lc = float(np.linalg.norm(a)), float(np.linalg.norm(c))
+            if la < 1e-12 or lc < 1e-12:
+                return False
+            return float(np.dot(a, c)) / (la * lc) > 0.9999
+        except Exception:
+            return False
+
+    def _c_needed(self):
+        kind = self.tool[2:]
+        if kind in ("HORIZ", "VERT"):
+            return 1
+        if kind == "DIM":
+            return 2
+        return constraints.needed(kind)[0]
+
+    def _c_status_text(self):
+        kind = self.tool[2:]
+        if kind == "DIM":
+            if self.dim_edit is not None:
+                return "Ölçü: değeri yaz · Enter: uygula · sağ tık / Esc: ölçülen değer kalsın"
+            if not self.c_refs:
+                return ("Ölçü: doğru / yay / daire / noktaya tıkla · mevcut ölçü değerine tıkla: "
+                        "düzenle")
+            return ("Ölçü: Enter / sağ tık: uzunluk / yarıçap · ikinci doğru: açı · nokta / "
+                    "doğru: uzaklık")
+        n = self._c_needed()
+        want = self._c_want()
+        what = {"pt": "nokta", "seg": "kenar"}.get(want, "nesne")
+        return f"{len(self.c_refs)}/{n} seçildi · sıradaki: {what}"
+
+    # ------------------------------------------------------------ yatay / dikey
+
+    def _plane_axes(self):
+        pl = self._cur_plane() or self.tmp_plane
+        name = pl.name if pl is not None else None
+        if name not in AXES and self.plane_mode in AXES:
+            name = self.plane_mode
+        if name not in AXES and pl is not None:
+            for nm, (a, b) in AXES.items():
+                u, v = np.zeros(3), np.zeros(3)
+                u[a], v[b] = 1.0, 1.0
+                if abs(abs(float(np.dot(pl.n, np.cross(u, v)))) - 1.0) < 1e-9:
+                    name = nm
+                    break
+        return AXES.get(name)
+
+    # ------------------------------------------------------------ ölçü
+
+    def _refs_of(self, picks):
+        out = []
+        for r in picks:
+            ob = bpy.data.objects.get(r[1])
+            if ob is None:
+                return None
+            out.append((r[0], ob, r[2], r[3]))
+        return out
+
+    def _seg_info(self, r):
+        """("line", a, b) ya da ("arc", grup) ya da ("curve",)"""
+        from .constraints_arcs import arc_group, seg_bez
+        ob, si, i = r[1], r[2], r[3]
+        try:
+            P = seg_bez(ob, si, i)
+        except Exception:
+            return ("curve",)
+        if dm.is_straight_poly(np.array(P)):
+            return ("line", P[0], P[3])
+        g = arc_group(ob, si, i)
+        return ("arc", g) if g is not None else ("curve",)
+
+    def _dim_create(self, context):
+        picks = list(self.c_refs)
+        self.c_refs = []
+        refs = self._refs_of(picks)
+        if refs is None:
+            return
+        kind, use = None, refs
+        types = [r[0] for r in refs]
+        if types == ["pt"]:
+            self._status(context, "Ölçü: noktadan sonra ikinci nokta ya da doğru seç")
+            self.c_refs = picks
+            return
+        if types == ["seg"]:
+            info = self._seg_info(refs[0])
+            kind = {"line": "DISTANCE", "arc": "RADIUS"}.get(info[0])
+            if kind is None:
+                self._status(context, "Ölçü: spline'ın boyu ölçülemez (doğru / yay / daire seç)")
+                return
+        elif types == ["seg", "seg"]:
+            a, b = self._seg_info(refs[0]), self._seg_info(refs[1])
+            if a[0] != "line" or b[0] != "line":
+                self._status(context, "Ölçü: iki doğru seç (açı / uzaklık)")
+                return
+            d1, d2 = dm.unit(a[2] - a[1]), dm.unit(b[2] - b[1])
+            if float(np.linalg.norm(np.cross(d1, d2))) < 1e-6:
+                kind = "LINEDIST"                  # paralel: aralarındaki uzaklık (paralel kalır)
+                use = [refs[1], refs[0]]
+            else:
+                kind = "ANGLE"
+        elif types == ["pt", "pt"]:
+            kind = "DISTANCE"
+        elif sorted(types) == ["pt", "seg"]:
+            pt = refs[0] if types[0] == "pt" else refs[1]
+            sg = refs[1] if types[0] == "pt" else refs[0]
+            if self._seg_info(sg)[0] != "line":
+                self._status(context, "Ölçü: nokta ile doğru seç")
+                return
+            kind, use = "PTLINE", [pt, sg]
+        if kind is None:
+            return
+        c = constraints.add(kind, use)
+        self._c_done(context, c, kind)
+        if c is not None:
+            ob = use[0][1]
+            self.dim_edit = (ob.name, len(ob.cad.constraints) - 1)
+            self.typed, self.field = ["", ""], 0
+            self._status(context, self._c_status_text())
+
+    def _c_done(self, context, c, kind):
+        try:
+            bpy.ops.ed.undo_push(message="Mini CAD: Kısıt")
+        except Exception:
+            pass
+        self.dirty = True
+        name = constraints.NAMES.get(kind, kind)
+        if c is None:
+            self._status(context, f"{name}: eklenemedi (geçersiz referans)")
+        elif c.ok:
+            self._status(context, f"{name} eklendi")
+        else:
+            self._status(context, f"{name} eklendi ama sağlanamadı: {c.info}")
+
+    def _dim_constraint(self):
+        if self.dim_edit is None:
+            return None
+        ob = bpy.data.objects.get(self.dim_edit[0])
+        if ob is None or self.dim_edit[1] >= len(ob.cad.constraints):
+            self.dim_edit = None
+            return None
+        return ob.cad.constraints[self.dim_edit[1]]
+
+    def _dim_apply(self, context):
+        c = self._dim_constraint()
+        txt = self.typed[0]
+        self.typed, self.field = ["", ""], 0
+        self.dim_edit = None
+        if c is None or not txt:
+            return
+        if c.kind == "ANGLE":
+            v = parse_angle(txt)
+            if v is None or not (0.0 <= v <= 180.0):
+                self._status(context, "Açı 0–180° olmalı")
+                return
+            c.angle = math.radians(v)
+        else:
+            v = parse_length(txt)
+            if v is None:
+                self._status(context, "Geçersiz değer")
+                return
+            c.length = v / 2.0 if (c.kind == "RADIUS" and c.axis == 1) else v
+        constraints.solve_all(context.scene, force=True)
+        try:
+            bpy.ops.ed.undo_push(message="Mini CAD: Ölçü")
+        except Exception:
+            pass
+        self.dirty = True
+        self._status(context, "Ölçü uygulandı" if c.ok else f"Ölçü sağlanamadı: {c.info}")
+
+    def _c_event(self, context, event, mx, my, press):
+        """Kısıt araçlarının özel olayları (ölçü düzenleme); işlenmediyse None."""
+        self._dim_init()
+        et = event.type
+        if self.dim_edit is not None:
+            if not press:
+                return {"RUNNING_MODAL"} if et in {"LEFTMOUSE", "RIGHTMOUSE"} else None
+            if et in {"RET", "NUMPAD_ENTER"}:
+                self._dim_apply(context)
+                self.area.tag_redraw()
+                return {"RUNNING_MODAL"}
+            if et in {"RIGHTMOUSE", "ESC"}:
+                self.dim_edit = None
+                self.typed, self.field = ["", ""], 0
+                self._status(context, "Ölçülen değer kaldı")
+                self.area.tag_redraw()
+                return {"RUNNING_MODAL"}
+            if et == "BACK_SPACE":
+                self.typed[0] = self.typed[0][:-1]
+                self.area.tag_redraw()
+                return {"RUNNING_MODAL"}
+            ch = event.unicode or ""
+            if ch and not event.ctrl and (ch in "0123456789.,-+°" or
+                                          (self.typed[0] and (ch.isalpha() or ch in "'\""))):
+                self.typed[0] += ch
+                self.area.tag_redraw()
+                return {"RUNNING_MODAL"}
+            if et == "LEFTMOUSE":
+                self._dim_apply(context)
+            return None
+        if self.tool != "C_DIM":
+            return None
+        if et == "LEFTMOUSE" and press and not self.c_refs:
+            g = constraints.glyph_at(mx, my)
+            if g is not None:
+                ob = bpy.data.objects.get(g[0])
+                if ob is not None and g[1] < len(ob.cad.constraints) and \
+                        ob.cad.constraints[g[1]].kind in VALUE_KINDS:
+                    self.dim_edit = g
+                    self.typed, self.field = ["", ""], 0
+                    self._status(context, self._c_status_text())
+                    self.area.tag_redraw()
+                    return {"RUNNING_MODAL"}
+        if press and et in {"RET", "NUMPAD_ENTER", "RIGHTMOUSE"} and len(self.c_refs) == 1:
+            self._dim_create(context)
+            self.area.tag_redraw()
+            return {"RUNNING_MODAL"}
+        return None
+
+    def _dim_draw2d(self, region):
+        self._dim_init()
+        c = self._dim_constraint()
+        if c is None:
+            return
+        from . import core
+        if c.kind == "ANGLE":
+            live = f"{math.degrees(c.angle):.1f}°"
+            name = "Açı"
+        elif c.kind == "RADIUS":
+            live = core.fmt_len(c.length * (2 if c.axis == 1 else 1))
+            name = "Çap" if c.axis == 1 else "Yarıçap"
+        else:
+            live = core.fmt_len(c.length)
+            name = "Uzaklık" if c.kind in ("PTLINE", "LINEDIST") else "Uzunluk"
+        val = self.typed[0] + "_" if self.typed[0] else live
+        self._draw_rows(self.mouse, [(name, val, True)])
+        s = self.ui_scale
+        _text(self.mouse[0] + 14 * s, self.mouse[1] + 12 * s, "Ölçü değeri: yaz, Enter",
+              COL_SNAP, int(11 * s))

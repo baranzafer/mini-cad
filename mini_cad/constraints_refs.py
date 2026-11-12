@@ -8,7 +8,11 @@ from . import core
 
 
 SEG_COUNT = {"AXIS": 1, "PARALLEL": 2, "PERP": 2, "COLLINEAR": 2, "EQUAL": 2,
-             "DISTANCE": 1, "ANGLE": 2, "TANGENT": 2}
+             "DISTANCE": 1, "ANGLE": 2, "TANGENT": 2, "CONCENTRIC": 2, "RADIUS": 1,
+             "SMOOTH": 2, "HORIZ": 1, "VERT": 1, "LINEDIST": 2}
+
+# Karışık referanslı kısıtlar: sıra ile "pt" / "seg"
+MIXED = {"SYMLINE": ("pt", "pt", "seg"), "PTLINE": ("pt", "seg")}
 
 
 PT_COUNT = {"FIX": 1, "COINCIDENT": 2, "SYMMETRIC": 2}
@@ -24,7 +28,17 @@ def needed(kind):
     """(kaç referans, nokta mı)"""
     if kind in PT_COUNT:
         return PT_COUNT[kind], True
+    if kind in MIXED:
+        return len(MIXED[kind]), False
     return SEG_COUNT.get(kind, 1), False
+
+
+def slot_type(kind, i):
+    """i. seçimde beklenen referans türü: "pt" / "seg"."""
+    if kind in MIXED:
+        m = MIXED[kind]
+        return m[min(i, len(m) - 1)]
+    return "pt" if kind in PT_COUNT else "seg"
 
 
 def _spline(ob, si):

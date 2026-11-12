@@ -13,7 +13,9 @@ from .constraints_refs import _spline, _world, all_constraints, has_any, ref_poi
 
 ICON = {"AXIS": "AXIS", "PARALLEL": "PARALLEL", "PERP": "PERP", "COLLINEAR": "COLLINEAR",
         "EQUAL": "EQUAL", "FIX": "FIX", "COINCIDENT": "COINCIDENT", "SYMMETRIC": "SYMMETRIC",
-        "TANGENT": "TANGENT", "DISTANCE": "DISTANCE", "ANGLE": "ANGLE"}
+        "TANGENT": "TANGENT", "DISTANCE": "DISTANCE", "ANGLE": "ANGLE",
+        "CONCENTRIC": "CONCENTRIC", "RADIUS": "RADIUS", "SMOOTH": "SMOOTH",
+        "SYMLINE": "SYMMETRIC", "PTLINE": "DISTANCE", "LINEDIST": "DISTANCE"}
 
 
 _glyph_boxes = []       # son çizimdeki (x0, y0, x1, y1, obje adı, indeks)
@@ -80,9 +82,14 @@ def _draw_glyphs():
                 stack[key] = k + 1
                 x = px.x + 10 * s + k * (size + 3 * s)
                 y = px.y + 8 * s
-                if c.kind in ("DISTANCE", "ANGLE"):
-                    txt = core.fmt_len(c.length) if c.kind == "DISTANCE" else \
-                        f"{math.degrees(c.angle):.1f}°"
+                if c.kind in ("DISTANCE", "ANGLE", "RADIUS", "PTLINE", "LINEDIST"):
+                    if c.kind == "ANGLE":
+                        txt = f"{math.degrees(c.angle):.1f}°"
+                    elif c.kind == "RADIUS":
+                        txt = (f"Ø{core.fmt_len(c.length * 2)}" if c.axis == 1 else
+                               f"R{core.fmt_len(c.length)}")
+                    else:
+                        txt = core.fmt_len(c.length)
                     w = 8 * s + len(txt) * 6.5 * s
                     palette.rect(x, y, x + w, y + size, (0.1, 0.1, 0.12, 0.3))
                     palette.text(x + 4 * s, y + 4 * s, txt, col, int(10 * s))

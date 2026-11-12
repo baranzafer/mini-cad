@@ -271,8 +271,7 @@ class SnapMixin:
             self._track_update(context, mx, my)
             return
         if self.tool.startswith("C_"):
-            n, is_pt = constraints.needed(self.tool[2:])
-            self.c_hover = self._pick_entity(mx, my, is_pt)
+            self.c_hover = self._c_pick(mx, my)
             return
         ro, rd = self._ray(mx, my)
         anchor = self._lock_anchor()

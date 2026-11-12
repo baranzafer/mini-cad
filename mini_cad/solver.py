@@ -18,6 +18,13 @@ Kısıt: (tür, nokta indeksleri, parametreler)
   FIX         (a,)            {"pos": (x,y,z)}    nokta sabit
   COINCIDENT  (a, b)                              iki nokta çakışık
   SYMMETRIC   (a, b)          {"axis", "offset"}  eksene dik düzleme göre simetrik
+  SYMLINE     (p, q, a, b)                        p ve q, a-b doğrusuna göre simetrik
+  PTLINE      (p, a, b)       {"value": L}        p'nin a-b doğrusuna uzaklığı
+  LINEDIST    (c, d, a, b)    {"value": L}        c-d doğrusunun iki ucu a-b'ye L uzaklıkta
+                                                  (paralel iki doğru arası ölçü)
+  RADIUSN     (C, n1, n2, ..) {"value": R}        noktalar C merkezli R yarıçaplı çemberde
+  EQDIST      (C, n1, n2, ..)                     noktalar C'ye eşit uzaklıkta (aynı çember)
+                                                  (C: yay merkezi, sanal değişken)
 """
 
 import math
@@ -62,6 +69,23 @@ def residual(kind, P, prm):
         return P[0] - np.asarray(prm["pos"], dtype=np.float64)
     if kind == "COINCIDENT":
         return P[1] - P[0]
+    if kind == "SYMLINE":
+        d, _ = _u(P[3] - P[2])
+        m = 0.5 * (P[0] + P[1])
+        return np.concatenate([np.cross(m - P[2], d), [float(np.dot(P[1] - P[0], d))]])
+    if kind == "PTLINE":
+        d, _ = _u(P[2] - P[1])
+        return np.array([float(np.linalg.norm(np.cross(P[0] - P[1], d))) - prm["value"]])
+    if kind == "LINEDIST":
+        d, _ = _u(P[3] - P[2])
+        return np.array([float(np.linalg.norm(np.cross(P[i] - P[2], d))) - prm["value"]
+                         for i in (0, 1)])
+    if kind == "RADIUSN":
+        return np.array([float(np.linalg.norm(P[i] - P[0])) - prm["value"]
+                         for i in range(1, len(P))])
+    if kind == "EQDIST":
+        r0 = float(np.linalg.norm(P[1] - P[0]))
+        return np.array([float(np.linalg.norm(P[i] - P[0])) - r0 for i in range(2, len(P))])
     if kind == "SYMMETRIC":
         k, o = prm["axis"], prm.get("offset", 0.0)
         r = [0.5 * (P[0][k] + P[1][k]) - o]
@@ -152,4 +176,10 @@ def measure(kind, P):
         u2, _ = _u(P[3] - P[2])
         return math.degrees(math.atan2(float(np.linalg.norm(np.cross(u1, u2))),
                                        float(np.dot(u1, u2))))
+    if kind == "PTLINE":
+        d, _ = _u(P[2] - P[1])
+        return float(np.linalg.norm(np.cross(P[0] - P[1], d)))
+    if kind == "LINEDIST":
+        d, _ = _u(P[3] - P[2])
+        return 0.5 * sum(float(np.linalg.norm(np.cross(P[i] - P[2], d))) for i in (0, 1))
     return 0.0

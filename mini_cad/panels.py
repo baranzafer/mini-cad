@@ -239,8 +239,10 @@ class MINICAD_PT_constraints(_Sub, bpy.types.Panel):
                 name += " " + "XYZ"[c.axis]
             r.label(text=f"{name}{' (oto)' if c.auto else ''}",
                     icon="CHECKMARK" if c.ok or not c.enabled else "ERROR")
-            if c.kind == "DISTANCE":
+            if c.kind in ("DISTANCE", "PTLINE", "LINEDIST"):
                 r.prop(c, "length", text="")
+            elif c.kind == "RADIUS":
+                r.prop(c, "length", text="Ø/2" if c.axis == 1 else "R")
             elif c.kind == "ANGLE":
                 r.prop(c, "angle", text="")
             else:

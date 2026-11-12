@@ -23,7 +23,7 @@ from . import core, solver
 
 # Bölünmüş parçalar (v0.15.2); adlar geriye dönük uyum için burada da erişilebilir.
 from .constraints_refs import (
-    NAMES, PT_COUNT, SEG_COUNT, _co, _constraint_points, _last_pos, _npts, _spline, _world,
+    MIXED, NAMES, PT_COUNT, SEG_COUNT, slot_type, _co, _constraint_points, _last_pos, _npts, _spline, _world,
     all_constraints, has_any, needed, ref_points,
 )
 from .constraints_tangent import (
@@ -31,6 +31,8 @@ from .constraints_tangent import (
     _seg_straight, _set_handle_dir, _set_world, _side, _tangent_plan,
 )
 from .constraints_glyphs import ICON, _anchor, _draw_glyphs, _glyph_boxes, glyph_at
+from .constraints_arcs import arc_group, centers_dist, group_key, radius_of, rebuild_group, \
+    smooth_post
 
 _flags = {"solving": False, "force": False, "prefer": None}
 
@@ -50,7 +52,18 @@ def _params(c, owner, P):
         return {"pos": tuple(owner.matrix_world @ Vector(c.pos))}
     if c.kind == "SYMMETRIC":
         return {"axis": c.axis, "offset": c.offset}
+    if c.kind in ("PTLINE", "LINEDIST"):
+        return {"value": c.length}
     return {}
+
+
+def _kname(k):
+    """Değişken anahtarının adı: gerçek (obje adı, spline, nokta) ya da sanal yay merkezi."""
+    return k[:4] if k[0] == "@c" else (k[0].name, k[1], k[2])
+
+
+def _kpos(k):
+    return np.asarray(k[4], dtype=np.float64) if k[0] == "@c" else _world(*k)
 
 
 def solve_all(scene=None, force=False, prefer=None):
@@ -62,10 +75,56 @@ def solve_all(scene=None, force=False, prefer=None):
     try:
         keys, var_of, cons, owners, post = [], {}, [], [], []
         hold = set()                     # eğri / yay noktaları: şekil bozulmasın diye sabit
+        arc_jobs = {}                    # sanal merkez adı -> (obje, spline, grup)
+
+        def var(name, key):
+            if name not in var_of:
+                var_of[name] = len(keys)
+                keys.append(key)
+            return var_of[name]
+
+        sized = set()                    # yarıçap ölçüsü olan yay grupları
+        for _o, _j, c in all_constraints(scene):
+            if c.enabled and c.kind == "RADIUS" and len(c.refs) and not c.refs[0].point:
+                r = c.refs[0]
+                g = arc_group(r.obj, r.spline, r.index)
+                if g is not None:
+                    sized.add(group_key(r.obj, r.spline, g))
+
         for ob, _i, c in all_constraints(scene):
             if not c.enabled:
                 continue
-            if c.kind == "TANGENT":
+            if c.kind in ("RADIUS", "CONCENTRIC"):
+                gs = []
+                for r in c.refs:
+                    g = arc_group(r.obj, r.spline, r.index) if not r.point else None
+                    if g is None:
+                        break
+                    gs.append((r, g))
+                if len(gs) != len(c.refs) or not gs:
+                    c.ok, c.info = False, "yay / daire gerekli (ya da referans kayboldu)"
+                    continue
+                cid = []
+                for r, g in gs:
+                    ck = group_key(r.obj, r.spline, g)
+                    ci = var(ck, ck + (g["c"],))
+                    cid.append(ci)
+                    arc_jobs.setdefault(ck, (r.obj, r.spline, g))
+                    nid = tuple(var((r.obj.name, r.spline, k), (r.obj, r.spline, k))
+                                for k in g["nodes"])
+                    if c.kind == "RADIUS":
+                        cons.append(("RADIUSN", (ci,) + nid, {"value": c.length}))
+                        owners.append(c)
+                    elif ck not in sized:
+                        # eş merkezli boyutu değiştirmez (Inventor gibi): yarıçap korunur
+                        cons.append(("RADIUSN", (ci,) + nid, {"value": g["R"]}))
+                        owners.append(c)
+                        sized.add(ck)
+                if c.kind == "CONCENTRIC" and len(cid) == 2:
+                    cons.append(("COINCIDENT", tuple(cid), {}))
+                    owners.append(c)
+                continue
+            if c.kind in ("TANGENT", "SMOOTH"):
                 plan, why = _tangent_plan(c, scene)
                 if plan is None:
                     c.ok, c.info = False, why
@@ -73,38 +132,28 @@ def solve_all(scene=None, force=False, prefer=None):
                 if plan[0] == "tline":
                     _, tpts, tdir, tkeep = plan
                     hold.update(tkeep)
-                    idx = []
-                    for o, si, pi in tpts:
-                        k = (o.name, si, pi)
-                        if k not in var_of:
-                            var_of[k] = len(keys)
-                            keys.append((o, si, pi))
-                        idx.append(var_of[k])
+                    idx = [var((o.name, si, pi), (o, si, pi)) for o, si, pi in tpts]
                     cons.append(("TLINE", tuple(idx), {"dir": tuple(tdir)}))
                     owners.append(c)
                 else:
                     post.append((c, plan[1]))
+                if c.kind == "SMOOTH":
+                    post.append((c, lambda c=c: smooth_post(c, _joint(c)[0])))
                 continue
             pts = _constraint_points(c)
             if pts is None:
                 c.ok, c.info = False, "referans kayboldu (eğri yapısı değişmiş)"
                 continue
-            idx = []
-            for o, si, pi in pts:
-                k = (o.name, si, pi)
-                if k not in var_of:
-                    var_of[k] = len(keys)
-                    keys.append((o, si, pi))
-                idx.append(var_of[k])
+            idx = [var((o.name, si, pi), (o, si, pi)) for o, si, pi in pts]
             cons.append((c.kind, tuple(idx), _params(c, ob, None)))
             owners.append(c)
         if not cons:
             _run_post(post)
             return True
-        X0 = np.array([_world(o, si, pi) for o, si, pi in keys])
+        X0 = np.array([_kpos(k) for k in keys])
         moved, w = False, np.ones(len(keys))
-        for j, (o, si, pi) in enumerate(keys):
-            k = (o.name, si, pi)
+        for j, key in enumerate(keys):
+            k = _kname(key)
             last = _last_pos.get(k)
             if prefer is not None and k in prefer:
                 w[j] = 1e3
@@ -120,12 +169,20 @@ def solve_all(scene=None, force=False, prefer=None):
             return True
         X, ok, per = solver.solve(X0, cons, w)
         scale = 1.0 + float(np.abs(X0).max())
-        for c, r in zip(owners, per):
-            c.ok = r <= 1e-6 * scale
+        res = {}
+        for c, r in zip(owners, per):           # bir kısıt birden çok denklem olabilir
+            res[id(c)] = (c, res.get(id(c), (c, True))[1] and r <= 1e-6 * scale)
+        for c, good in res.values():
+            c.ok = good
             c.info = "" if c.ok else "sağlanamadı: diğer kısıtlarla çelişiyor olabilir"
         _write(keys, X0, X)
-        for j, (o, si, pi) in enumerate(keys):
-            _last_pos[(o.name, si, pi)] = X[j].copy()
+        for ck, (o, si, g) in arc_jobs.items():   # yaylar yeni merkez ve uçlardan kurulur
+            try:
+                rebuild_group(o, si, g, X[var_of[ck]])
+            except Exception:
+                traceback.print_exc()
+        for j, key in enumerate(keys):
+            _last_pos[_kname(key)] = X[j].copy()
         _run_post(post)
         return ok
     except Exception:
@@ -148,7 +205,10 @@ def _run_post(post):
 
 def _write(keys, X0, X):
     touched = {}
-    for j, (o, si, pi) in enumerate(keys):
+    for j, key in enumerate(keys):
+        if key[0] == "@c":                     # sanal yay merkezi: yazılmaz
+            continue
+        o, si, pi = key
         d = X[j] - X0[j]
         if float(np.linalg.norm(d)) <= 1e-12:
             continue
@@ -210,6 +270,20 @@ def add(kind, refs, auto=False, value=None, solve=True, scene=None):
         elif kind == "SYMMETRIC":
             c.axis = int(np.argmax(np.abs(P[1] - P[0])))
             c.offset = 0.0
+        elif kind in ("PTLINE", "LINEDIST"):
+            c.length = solver.measure(kind, P) if value is None else float(value)
+        elif kind == "RADIUS":
+            R = radius_of(c)
+            if R is None:
+                owner.cad.constraints.remove(len(owner.cad.constraints) - 1)
+                return None
+            c.length = R if value is None else float(value)
+            g = arc_group(c.refs[0].obj, c.refs[0].spline, c.refs[0].index)
+            c.axis = 1 if g is not None and g["closed"] else 0      # 1: çap gösterilir
+        elif kind == "CONCENTRIC":
+            if centers_dist(c) is None:
+                owner.cad.constraints.remove(len(owner.cad.constraints) - 1)
+                return None
     finally:
         _flags["solving"] = False
     if solve:
@@ -226,8 +300,14 @@ def add(kind, refs, auto=False, value=None, solve=True, scene=None):
 
 def satisfied(c, tol_rel=1e-6):
     """Kısıt şu anki geometride sağlanıyor mu (oto kısıtları eklerken kontrol)."""
-    if c.kind == "TANGENT":
+    if c.kind in ("TANGENT", "SMOOTH"):
         return True
+    if c.kind == "RADIUS":
+        R = radius_of(c)
+        return R is not None and abs(R - c.length) <= tol_rel * (1.0 + R) + 1e-9
+    if c.kind == "CONCENTRIC":
+        d = centers_dist(c)
+        return d is not None and d <= 1e-6
     pts = _constraint_points(c)
     if pts is None:
         return False

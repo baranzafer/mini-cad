@@ -111,6 +111,7 @@ class RenderMixin:
                           "Gövde yüzü" if hov[0] == "FACE" else dm.PLANE_LABELS[hov[0]],
                           COL_SNAP, int(12 * self.ui_scale))
             if self.tool.startswith("C_"):
+                self._dim_draw2d(region)
                 for r, col in [(r, COL_DONE) for r in self.c_refs] + \
                         ([(self.c_hover, COL_RUBBER)] if self.c_hover else []):
                     if r[0] == "pt":

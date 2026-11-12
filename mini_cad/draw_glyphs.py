@@ -51,14 +51,29 @@ class ConstraintUIMixin:
 
     def _click_constraint(self, context):
         kind = self.tool[2:]
-        n, is_pt = constraints.needed(kind)
+        n = self._c_needed()
         if self.c_hover is None:
             return
         self.c_refs.append(self.c_hover)
         self.c_hover = None
-        if len(self.c_refs) < n:
-            self._status(context, f"{len(self.c_refs)}/{n} seçildi")
+        if kind == "DIM":
+            if len(self.c_refs) >= 2:
+                self._dim_create(context)
+            else:
+                self._status(context, self._c_status_text())
             return
+        if len(self.c_refs) < n:
+            self._status(context, self._c_status_text())
+            return
+        value = None
+        if kind in ("HORIZ", "VERT"):
+            ax = self._plane_axes()
+            if ax is None:
+                self.c_refs = []
+                self._status(context, "Yatay / Dikey: çizim düzlemi bir eksen düzlemi olmalı "
+                                      "(XY / XZ / YZ); diğerlerinde Eksen kısıtını kullan")
+                return
+            value = ax[0] if kind == "HORIZ" else ax[1]
         refs = []
         for r in self.c_refs:
             ob = bpy.data.objects.get(r[1])
@@ -67,19 +82,9 @@ class ConstraintUIMixin:
                 return
             refs.append((r[0], ob, r[2], r[3]))
         self.c_refs = []
-        c = constraints.add(kind, refs)
-        try:
-            bpy.ops.ed.undo_push(message="Mini CAD: Kısıt")
-        except Exception:
-            pass
-        self.dirty = True
-        if c is None:
-            self._status(context, "Kısıt eklenemedi (geçersiz referans)")
-        elif c.ok:
-            self._status(context, f"{constraints.NAMES[kind]} eklendi")
-        else:
-            self._status(context, f"{constraints.NAMES[kind]} eklendi ama sağlanamadı: "
-                                  f"{c.info}")
+        real = "AXIS" if kind in ("HORIZ", "VERT") else kind
+        c = constraints.add(real, refs, value=value)
+        self._c_done(context, c, real if kind not in ("HORIZ", "VERT") else kind)
 
     def _glyph_menu_open(self, mx, my):
         """Kısıt simgesine SAĞ tıklanınca: iki küçük simge (dondur / sil)."""
