@@ -105,6 +105,7 @@ _SA_Surface = _optional("OCP.ShapeAnalysis", "ShapeAnalysis_Surface")
 _PointsToBSpline = _optional("OCP.GeomAPI", "GeomAPI_PointsToBSpline")
 _GeomFill = _optional("OCP.GeomFill", "GeomFill")
 _GeomAbs_C2 = _optional("OCP.GeomAbs", "GeomAbs_C2")
+_PointsToBSplineSurface = _optional("OCP.GeomAPI", "GeomAPI_PointsToBSplineSurface")
 
 if _PntArray is None:
     raise CadError("OCP: TColgp_Array1OfPnt bulunamadı (OCP 7.9 gerekli)")
@@ -187,11 +188,18 @@ FILL_PREVIEW = dict(degree=3, nbpts=8, nbiter=1, maxdeg=6, maxseg=4)
 
 # Yüzey birleşimi: komşu yüzlerle ortak kenarda süreklilik (Keskin = G0, yalnızca konum)
 # (OCC 7.9 dolgu aracı kenar kısıtında G2'yi kabul etmiyor: yalnızca G1)
-BLEND_LABELS = {"TANGENT": "teğet (G1)"}
+BLEND_LABELS = {"TANGENT": "teğet (G1)", "TANGENT_FREE": "teğet (G1, serbest)"}
+
+# v0.24.0: Teğet (G1) 4 kenarlı yamada Hermite-Coons SINIR YÜZEYİ olarak kurulur (mühendislik
+# programlarındaki gibi gergin; teğetlik yapı gereği, teğet ağırlığı ayarlanır). Kurulamazsa
+# ya da yama 4 kenarlı değilse dolgu; 4 kenarlıda dolgu Coons yüzeyinden başlar.
+# Serbest: eski davranış (boş plakadan dolgu), dışa "balon" gibi taşabilir.
+BLEND_SEEDED = {"TANGENT"}
+HERMITE_GRID = {False: 25, True: 13}     # örnekleme (tam, önizleme)
 
 
 def _blend_order(blend):
-    return {"TANGENT": _GeomAbs_G1}.get(blend)
+    return {"TANGENT": _GeomAbs_G1, "TANGENT_FREE": _GeomAbs_G1}.get(blend)
 
 
 def _is_anchor(p):
@@ -322,9 +330,11 @@ class Builder:
         for k in ekeys:
             self.edge_owner.setdefault(k, (res[0], key))
 
-    def face(self, chain, sides, method, preview, blend="SHARP", holes=None):
+    def face(self, chain, sides, method, preview, blend="SHARP", holes=None, weight=1.0):
         ekeys = [_ekey(s["p"]) for s in chain]
         key = (tuple(ekeys), method, preview if method == "FILL" else False)
+        weight = float(weight) if blend in BLEND_SEEDED and method in ("AUTO", "FILL") and \
+            weight else 1.0
         if holes:
             return self._holed(chain, holes, ekeys, key)
         nbrs = []                    # [(segment, (komşu yüz, anahtarı))] — kaynaşma kısıtları
@@ -342,8 +352,9 @@ class Builder:
                 own = self.edge_owner.get(k)
                 if own is not None:
                     nbrs.append((s, own))
-            if nbrs:
-                key = key + (blend, preview, tuple(hash(o[1]) for _, o in nbrs))
+            if nbrs or weight != 1.0:
+                key = key + (blend, preview, tuple(hash(o[1]) for _, o in nbrs),
+                             round(weight, 4))
         self.face_keys.append(key)
         hit = self._get("faces", key)
         if hit is not None:
@@ -353,12 +364,12 @@ class Builder:
             self.faces[key] = hit
             self._own(ekeys, hit, key)
             return hit
-        res = self._make(chain, sides, method, preview, nbrs, blend)
+        res = self._make(chain, sides, method, preview, nbrs, blend, weight)
         self.faces[key] = res
         self._own(ekeys, res, key)
         return res
 
-    def _make(self, chain, sides, method, preview, nbrs=(), blend="SHARP"):
+    def _make(self, chain, sides, method, preview, nbrs=(), blend="SHARP", weight=1.0):
         """Yüzü kurar (önbellek / kayıt yok)."""
         wire = self._wire(chain)
         res = None
@@ -371,10 +382,19 @@ class Builder:
                 res = None
             if res is None and method == "PLANE":
                 raise CadError("Döngü düzlemsel değil")
+        if res is None and blend in BLEND_SEEDED and len(sides) in (3, 4) and \
+                (nbrs or weight != 1.0):
+            # Hermite-Coons sınır yüzeyi: komşulara teğet, teğet ağırlığıyla
+            try:
+                res = self._hermite(chain, sides, wire, preview, weight)
+                if res is not None and not face_usable(res[0]):
+                    res = None
+            except CadError:
+                res = None
         if res is None and nbrs:
             # Komşu yüzlere teğet / eğrilik sürekliliğiyle dolgu (ortak kenarda kaynaşır)
             try:
-                res = self._filling(chain, preview, nbrs, blend)
+                res = self._filling(chain, preview, nbrs, blend, sides=sides)
                 if not face_usable(res[0]):
                     res = None
             except CadError:
@@ -520,7 +540,32 @@ class Builder:
             raise CadError(f"Coons yüzeyi hesaplanamadı: {e}")
         if not mf.IsDone():
             raise CadError("Coons yüzeyi oluşturulamadı")
-        return _fix_face(mf.Face()), "Coons"
+        face = _fix_face(mf.Face())
+        if not face_usable(face):
+            # v0.24.0: yüzeyin parametre yönü tel yönünün tersiyse kırpılan yüz "ters" çıkıp
+            # geçersiz sayılıyordu (4 kenarlı eğri yamalar hep Dolgu'ya düşüyordu)
+            try:
+                mf2 = BRepBuilderAPI_MakeFace(fill.Surface(),
+                                              _static(TopoDS, "Wire")(wire.Reversed()), True)
+                if mf2.IsDone():
+                    f2 = _fix_face(mf2.Face())
+                    if face_usable(f2):
+                        face = f2
+            except Exception:
+                pass
+        return face, "Coons"
+
+    @staticmethod
+    def _coons_surface(sides):
+        """4 kenarlı yamanın Coons sınır yüzeyi (Geom) | None."""
+        if len(sides) != 4 or not coons_available():
+            return None
+        try:
+            curves = [_bspline_from_side(s) for s in sides]
+            return _GeomFill_BSplineCurves(curves[0], curves[1], curves[2], curves[3],
+                                           _GeomFill_CoonsStyle).Surface()
+        except Exception:
+            return None
 
     @staticmethod
     def _support_edge(face, edge, pts):
@@ -564,9 +609,13 @@ class Builder:
                 return e
         return None
 
-    def _filling(self, chain, preview, nbrs=None, blend=None):
+    def _filling(self, chain, preview, nbrs=None, blend=None, sides=None):
         """Dolgu yüzeyi. nbrs verilirse o kenarlar komşu yüze teğet (G1) sürekliliğiyle
-        bağlanır; diğer kenarlar yalnızca konumdan (C0)."""
+        bağlanır; diğer kenarlar yalnızca konumdan (C0).
+        v0.24.0: blend "TANGENT" ve 4 kenar: dolgu Coons sınır yüzeyinden başlar (balon
+        etkisi: yuvarlatılmış dikdörtgen → daire modelinde yama boyunun %1,3'ü → %0,5)."""
+        base = self._coons_surface(sides) if blend in BLEND_SEEDED and sides is not None \
+            else None
         prm = FILL_PREVIEW if preview else FILL_FINAL
         nbiter = prm["nbiter"]
         if nbrs and blend in BLEND_LABELS:
@@ -576,6 +625,11 @@ class Builder:
         sup = {id(s): own[0] for s, own in (nbrs or ())}
         order = _blend_order(blend) if sup else None
         n_cons = 0
+        if base is not None and blend in BLEND_SEEDED:
+            try:
+                filler.LoadInitSurface(BRepBuilderAPI_MakeFace(base, 1e-6).Face())
+            except Exception:
+                pass
         try:
             for s in chain:
                 e = self.edge(s["p"])
@@ -598,9 +652,258 @@ class Builder:
         if not exp.More():
             raise CadError("Dolgu yüz üretmedi")
         label = "Dolgu"
+        if base is not None and blend in BLEND_SEEDED and sides is not None and \
+                len(sides) == 4:
+            label = "Sınır dolgusu"
         if n_cons:
             label += f" · {n_cons} kenarda {BLEND_LABELS[blend]}"
         return _FACE_CAST(exp.Current()), label
+
+    # ------------------------------------------------------------ Hermite-Coons (v0.24.0)
+
+    def _side_plane(self, seg):
+        """Kenar segmentinde teğet düzlemini veren yüzler: [(yüz, ağırlık)] | None (serbest).
+        Kaynaşan komşu: iki yamanın keskin hâlleri (ortalanır); sabit komşu: onun yüzü."""
+        P = np.array(seg["p"], dtype=np.float64)
+        if float(np.linalg.norm(P - P[0], axis=1).max()) < 1e-12:
+            return None                                    # dejenere (üçgen tepesi)
+        k = _ekey(seg["p"])
+        pair = self.ribbon_pairs.get(k)
+        if pair:
+            try:
+                return [self._sharp(ch, sd, m, False) for ch, sd, m in pair]
+            except CadError:
+                return None
+        own = self.edge_owner.get(k)
+        if own is not None:
+            return [own[0]]
+        return None
+
+    def _hermite(self, chain, sides, wire, preview, weight=1.0):
+        """4 kenarlı yamanın teğet ağırlıklı (bikübik Hermite) Coons sınır yüzeyi.
+
+        Sınır eğrileri aynen geçilir. Her kenarda yüzeyin kenardan ayrılış türevi
+        (çapraz türev) doğrusal Coons yüzeyininkidir; komşusu olan kenarda bu türev ortak teğet
+        düzlemine yatırılır (komşu da aynı düzlemi kullandığı için G1 yapı gereği), büyüklüğü
+        kenar ortasında teğet ağırlığı kadar ölçeklenir (köşelerde 1: uyumluluk). Yüzey ızgarada
+        örneklenip B-spline'a uydurulur ve telle kırpılır. (yüz, etiket) | None"""
+        if None in (_PointsToBSplineSurface, _Pnt2Array, _GeomAbs_C2, _SA_Surface, _SLProps):
+            return None
+        sd = [[{"p": [tuple(map(float, q)) for q in sg["p"]]} for sg in side] for side in sides]
+        if len(sd) == 3:
+            sd = _tri_to_quad(sd)
+            if sd is None:
+                return None
+        # kenarları döngü yönünde sırala: side[i] sonu = side[i+1] başı
+        def ends(side):
+            return np.array(side[0]["p"][0]), np.array(side[-1]["p"][-1])
+
+        def rev(side):
+            return [{"p": list(reversed(sg["p"]))} for sg in reversed(side)]
+        a0, b0 = ends(sd[0])
+        a1, b1 = ends(sd[1])
+        if min(np.linalg.norm(a0 - a1), np.linalg.norm(a0 - b1)) < \
+                min(np.linalg.norm(b0 - a1), np.linalg.norm(b0 - b1)):
+            sd[0] = rev(sd[0])
+        for i in range(1, 4):
+            prev_end = ends(sd[i - 1])[1]
+            a, b = ends(sd[i])
+            if np.linalg.norm(b - prev_end) < np.linalg.norm(a - prev_end):
+                sd[i] = rev(sd[i])
+        B = np.array([q for side in sd for sg in side for q in sg["p"]], dtype=np.float64)
+        size = float(np.linalg.norm(np.ptp(B, axis=0)))
+        if size < 1e-9 or np.linalg.norm(ends(sd[3])[1] - ends(sd[0])[0]) > 1e-4 * size:
+            return None
+
+        def curve(side):
+            Ps = [_np(_cubic(_np(sg["p"]))) for sg in side]
+            n = len(Ps)
+
+            def f(t):
+                x = min(max(t, 0.0), 1.0) * n
+                i = min(int(x), n - 1)
+                tt = x - i
+                return _bez(Ps[i], tt), _bez_d(Ps[i], tt) * n, side[i]
+            return f
+        cs = [curve(side) for side in sd]
+        planes = [[self._side_plane(sg) for sg in side] for side in sd]
+
+        # c0(u)=S(u,0): kenar 0; d1(v)=S(1,v): kenar 1; c1(u)=S(u,1): kenar 2 ters;
+        # d0(v)=S(0,v): kenar 3 ters
+        def c0(u):
+            p, d, _ = cs[0](u)
+            return p, d
+
+        def d1(v):
+            p, d, _ = cs[1](v)
+            return p, d
+
+        def c1(u):
+            p, d, _ = cs[2](1.0 - u)
+            return p, -d
+
+        def d0(v):
+            p, d, _ = cs[3](1.0 - v)
+            return p, -d
+        P00, P10, P11, P01 = c0(0)[0], c0(1)[0], c1(1)[0], c1(0)[0]
+
+        def sv0(u):           # doğrusal Coons'un v=0'daki çapraz türevi
+            return c1(u)[0] - c0(u)[0] + (1 - u) * d0(0)[1] + u * d1(0)[1] - \
+                (1 - u) * (P01 - P00) - u * (P11 - P10)
+
+        def sv1(u):
+            return c1(u)[0] - c0(u)[0] + (1 - u) * d0(1)[1] + u * d1(1)[1] - \
+                (1 - u) * (P01 - P00) - u * (P11 - P10)
+
+        def su0(v):
+            return d1(v)[0] - d0(v)[0] + (1 - v) * c0(0)[1] + v * c1(0)[1] - \
+                (1 - v) * (P10 - P00) - v * (P11 - P01)
+
+        def su1(v):
+            return d1(v)[0] - d0(v)[0] + (1 - v) * c0(1)[1] + v * c1(1)[1] - \
+                (1 - v) * (P10 - P00) - v * (P11 - P01)
+        n_tan = [0]
+
+        def adj(side_i, t_side, vec, t_edge, compat=None):
+            """Çapraz türevi kenarın teğet düzlemine yatır, ağırlıkla ölçekle. compat:
+            kenarın iki ucundaki köşe-uyumlu türevler (komşu sınır eğrilerinin teğetleri);
+            uçlara yakın (%20) bunlara yumuşakça geçilir: köşede teğet düzlemi komşu eğriyi
+            içermiyorsa (üç yüzeye birden teğet olunamaz) hata köşede kalır, kenara yayılmaz."""
+            p, _d, sg = cs[side_i](t_side)
+            j = sd[side_i].index(sg)
+            faces = planes[side_i][j]
+            out = np.asarray(vec, dtype=np.float64)
+            if faces:
+                ns = []
+                for f in faces:
+                    try:
+                        nv = _face_normal(f, p)
+                    except Exception:
+                        nv = None
+                    if nv is not None and np.linalg.norm(nv) > 1e-12:
+                        ns.append(nv / np.linalg.norm(nv))
+                if ns:
+                    if len(ns) == 2 and float(np.dot(ns[0], ns[1])) < 0:
+                        ns[1] = -ns[1]
+                    n = sum(ns)
+                    n = n / max(float(np.linalg.norm(n)), 1e-15)
+                    m = float(np.linalg.norm(out))
+                    # teğet düzleminde: kenar boyu (T) bileşeni korunur, kenara dik (D) bileşen
+                    # yamanın içine doğru ve büyüklük korunacak şekilde; yüzey düzleme dik
+                    # yaklaşıyorsa izdüşüm sıfıra yakın çıkıp yön kenar boyuna dönmesin
+                    T = _d / max(float(np.linalg.norm(_d)), 1e-15)
+                    D = np.cross(n, T)
+                    nd = float(np.linalg.norm(D))
+                    if nd > 1e-12 and m > 1e-15:
+                        D = D / nd
+                        if float(np.dot(D, out)) < 0:
+                            D = -D
+                        vt = float(np.dot(out, T))
+                        vd = math.sqrt(max(m * m - vt * vt, (0.25 * m) ** 2))
+                        out = vt * T + vd * D
+                    else:
+                        out = out - float(np.dot(out, n)) * n
+                    out = out * (1.0 + (weight - 1.0) * math.sin(math.pi * t_edge) ** 2)
+                    if compat is not None:
+                        dl = 0.2
+                        for end, cv in ((0.0, compat[0]), (1.0, compat[1])):
+                            x = abs(t_edge - end) / dl
+                            if x < 1.0:
+                                beta = 1.0 - (3 * x * x - 2 * x * x * x)
+                                out = (1.0 - beta) * out + beta * np.asarray(cv)
+            return out
+
+        # köşe uyumlu türevler: S_v(0,0)=d0'(0) ... (komşu sınır eğrilerinin teğetleri)
+        cmp_t0 = (d0(0.0)[1], d1(0.0)[1])
+        cmp_t1 = (d0(1.0)[1], d1(1.0)[1])
+        cmp_s0 = (c0(0.0)[1], c1(0.0)[1])
+        cmp_s1 = (c0(1.0)[1], c1(1.0)[1])
+
+        def t0(u):
+            return adj(0, u, sv0(u), u, cmp_t0)
+
+        def t1(u):
+            return adj(2, 1.0 - u, sv1(u), u, cmp_t1)
+
+        def s0(v):
+            return adj(3, 1.0 - v, su0(v), v, cmp_s0)
+
+        def s1(v):
+            return adj(1, v, su1(v), v, cmp_s1)
+        for i, side in enumerate(sd):
+            n_tan[0] += 1 if any(planes[i]) else 0
+        h = 1e-4
+
+        def dd(f, t):
+            return (f(min(t + h, 1.0)) - f(max(t - h, 0.0))) / (min(t + h, 1.0) - max(t - h, 0.0))
+        # Köşe twist'leri Gregory biçiminde: köşede iki kenarın istediği değerler farklıysa
+        # twist hangi kenara yakınsa onunkine kayar; böylece iki kenarın çapraz türevi de tam
+        # sağlanır (ortalama twist teğet kenarlara ~2° kırılma sızdırıyordu)
+        tw = {(0, 0): (dd(s0, 0.0), dd(t0, 0.0)), (0, 1): (dd(s0, 1.0), dd(t1, 0.0)),
+              (1, 0): (dd(s1, 0.0), dd(t0, 1.0)), (1, 1): (dd(s1, 1.0), dd(t1, 1.0))}
+
+        def twist(cu, cv, u, v):
+            a, b = tw[(cu, cv)]               # a: v-kenarı (u sabit) için, b: u-kenarı için
+            du = u if cu == 0 else 1.0 - u
+            dv = v if cv == 0 else 1.0 - v
+            if du + dv < 1e-12:
+                return 0.5 * (a + b)
+            return (du * a + dv * b) / (du + dv)
+        Mfix = [[P00, P01, t0(0.0), t1(0.0)],
+                [P10, P11, t0(1.0), t1(1.0)],
+                [s0(0.0), s0(1.0), None, None],
+                [s1(0.0), s1(1.0), None, None]]
+
+        def H(t):
+            return (2 * t ** 3 - 3 * t ** 2 + 1, -2 * t ** 3 + 3 * t ** 2, t ** 3 - 2 * t ** 2 + t,
+                    t ** 3 - t ** 2)
+        N = HERMITE_GRID[bool(preview)]
+        ts = np.linspace(0.0, 1.0, N)
+        C0 = [c0(u)[0] for u in ts]
+        C1 = [c1(u)[0] for u in ts]
+        T0 = [t0(u) for u in ts]
+        T1 = [t1(u) for u in ts]
+        D0 = [d0(v)[0] for v in ts]
+        D1 = [d1(v)[0] for v in ts]
+        S0 = [s0(v) for v in ts]
+        S1 = [s1(v) for v in ts]
+        Hs = [H(t) for t in ts]
+        arr = _Pnt2Array(1, N, 1, N)
+        for i, u in enumerate(ts):
+            hu = Hs[i]
+            for j, v in enumerate(ts):
+                hv = Hs[j]
+                Lu = hu[0] * D0[j] + hu[1] * D1[j] + hu[2] * S0[j] + hu[3] * S1[j]
+                Lv = hv[0] * C0[i] + hv[1] * C1[i] + hv[2] * T0[i] + hv[3] * T1[i]
+                Bt = sum(hu[a] * hv[b] * Mfix[a][b] for a in range(4) for b in range(4)
+                         if Mfix[a][b] is not None)
+                Bt = Bt + hu[2] * hv[2] * twist(0, 0, u, v) + hu[2] * hv[3] * twist(0, 1, u, v) \
+                    + hu[3] * hv[2] * twist(1, 0, u, v) + hu[3] * hv[3] * twist(1, 1, u, v)
+                arr.SetValue(i + 1, j + 1, _pnt(Lu + Lv - Bt))
+        fit = _PointsToBSplineSurface(arr, 3, 8, _GeomAbs_C2, 1e-6 * max(size, 1e-3))
+        if not fit.IsDone():
+            return None
+        surf = fit.Surface()
+        face = None
+        for w in (wire, _static(TopoDS, "Wire")(wire.Reversed())):
+            try:
+                mf = BRepBuilderAPI_MakeFace(surf, w, True)
+                if not mf.IsDone():
+                    continue
+                f = _fix_face(mf.Face())
+                if face_usable(f):
+                    face = f
+                    break
+            except Exception:
+                continue
+        if face is None:
+            return None
+        label = "Sınır yüzeyi"
+        if n_tan[0]:
+            label += f" · {n_tan[0]} kenarda {BLEND_LABELS['TANGENT']}"
+        if abs(weight - 1.0) > 1e-9:
+            label += f" · teğet ağırlığı {weight:.2f}"
+        return face, label
 
 
 # ================================================================ birleştirme
@@ -717,10 +1020,21 @@ def _bez_d(P, t):
     return 3 * (m * m * (P[1] - P[0]) + 2 * m * t * (P[2] - P[1]) + t * t * (P[3] - P[2]))
 
 
+_SA_CACHE = {}
+
+
 def _face_normal(face, p):
     """Yüzün p noktasına en yakın yerdeki (yönelimli) normali | None."""
-    surf = _static(BRep_Tool, "Surface")(face)
-    uv = _SA_Surface(surf).ValueOfUV(_pnt(p), 1e-7)
+    hk = hash(face)
+    ent = _SA_CACHE.get(hk)
+    if ent is None or not ent[0].IsSame(face):
+        surf = _static(BRep_Tool, "Surface")(face)
+        ent = (face, surf, _SA_Surface(surf))
+        if len(_SA_CACHE) > 256:
+            _SA_CACHE.clear()
+        _SA_CACHE[hk] = ent
+    _f, surf, sa = ent
+    uv = sa.ValueOfUV(_pnt(p), 1e-7)
     pr = _SLProps(surf, uv.X(), uv.Y(), 1, 1e-9)
     if not pr.IsNormalDefined():
         return None
@@ -773,6 +1087,35 @@ def _make_ribbon(faces, pts, n_samples=17):
     if not mf.IsDone():
         return None
     return mf.Face()
+
+
+def _tri_to_quad(sd):
+    """3 kenarlı yamayı, bir köşesi noktaya inmiş 4 kenarlıya çevirir (Hermite-Coons için).
+    Taban: en eğri kenar (eğrilik eşitse en uzun); karşısındaki köşe tepe olur. Taban ve iki
+    yan kenar döngü sırasıyla [taban, yan1, (tepe), yan2]."""
+    def ends(side):
+        return np.array(side[0]["p"][0]), np.array(side[-1]["p"][-1])
+
+    def score(side):
+        P = np.array([q for sg in side for q in sg["p"]], dtype=np.float64)
+        a, b = P[0], P[-1]
+        ch = b - a
+        L = float(np.linalg.norm(ch))
+        if L < 1e-12:
+            return 0.0
+        ch = ch / L
+        dev = float(np.max(np.linalg.norm((P - a) - np.outer((P - a) @ ch, ch), axis=1)))
+        return dev + 1e-6 * L
+    k = int(np.argmax([score(x) for x in sd]))
+    sd = sd[k:] + sd[:k]
+    a0, b0 = ends(sd[0])
+    a1, b1 = ends(sd[1])
+
+    def gap(q):
+        return min(np.linalg.norm(q - a0), np.linalg.norm(q - b0))
+    apex = b1 if gap(b1) >= gap(a1) else a1                # tabanda olmayan köşe
+    ap = tuple(map(float, apex))
+    return [sd[0], sd[1], [{"p": [ap, ap, ap, ap]}], sd[2]]
 
 
 def _has_pcurve(edge, face):

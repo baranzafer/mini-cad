@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.23.1)
+# Mini CAD — Geliştirme Notları (v0.24.0)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -52,7 +52,7 @@ Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`
 **Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
 beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
 
-Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t60.py` ...),
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t61.py` ...),
 sürüm artırılır ve paketlenir (§8).
 
 ---
@@ -186,8 +186,41 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
     - Kaynaşan dolguda önizleme de 2 tur (`nbiter`) yapar.
     - Ölçüm (`devkit/tools/occ_blend_ring_check.py`, 4 biçim, 3 kurma sırası): keskin
       4.6–23.5° → teğet en kötü 0.65° (önizleme ≤ 1.9°). Süre: 8 yamada ~50 ms → ~270 ms.
-    - Not: bu modelde 4 kenarlı yamalarda Coons geçersiz çıkıyor, Dolgu'ya düşülüyor
-      (etiket "Coons geçersizdi"); keskin modda da böyleydi, ayrı konu.
+  - **v0.24.0: sınır yüzeyi ve teğet ağırlığı** (kullanıcı: "teğet yüzey balon gibi dışa
+    taşıyor, mühendislik programlarının sonucunu vermiyor, değer kontrolü olsun"):
+    - Ölçüm: Dolgu (OCC plaka) yamayı Coons sınır yüzeyine göre yama boyunun %1-2'si kadar
+      dışa itiyor. Dolgunun başlangıç yüzeyini değiştirmek ya da iç noktalar eklemek
+      denendi: dolgu aracı başlangıç biçimini korumuyor, iç noktalarla kenarlarda 80°'ye
+      varan salınım ve yine çökme (segfault) oldu → bırakıldı.
+    - **Coons düzeltmesi** (`_coons`): yüzeyin parametre yönü tel yönünün tersiyse kırpılan
+      yüz geçersiz çıkıyordu; ters tel denenir. Eğri 4 kenarlı yamalar artık (Keskin'de de)
+      gerçekten Coons olur (önce hep "Dolgu (Coons geçersizdi)").
+    - **Hermite-Coons sınır yüzeyi** (`Builder._hermite`, Teğet + 3 / 4 kenar): bikübik
+      Hermite harmanlı Coons. Sınır eğrileri aynen; her kenarda çapraz türev doğrusal
+      Coons'unki, komşulu kenarda teğet düzlemine yatırılır (`_side_plane`: kaynaşan çift →
+      iki keskin yüzün ortalama normali, sabit komşu → onun yüzü). Böylece G1 yapı gereği.
+      - Teğet düzleminde kenara dik bileşen yamanın içine doğru, büyüklük korunur (yüzey
+        düzleme dik yaklaşınca izdüşüm sıfıra inip yön kenar boyuna dönmesin).
+      - **Teğet ağırlığı**: çapraz türev büyüklüğü kenar ortasında × ağırlık
+        (`1 + (w−1)·sin²(πt)`, köşelerde 1).
+      - Köşe twist'leri **Gregory** biçiminde (ortalama twist teğet kenarlara ~2° sızdırıyordu).
+      - Köşe uyumu: kenarın uçlarındaki %20'de çapraz türev komşu sınır eğrisinin teğetine
+        yumuşakça geçer. Köşede teğet düzlemi komşu eğriyi içermiyorsa (üç yüzeye birden
+        teğet olunamaz) hata köşede kalır; yoksa Coons harmanlaması hatayı kenarın tamamına
+        yayıyordu (kenar ortasında 16°).
+      - 3 kenar (`_tri_to_quad`): tepe köşesi noktaya inmiş 4 kenarlı; taban = en eğri kenar.
+      - Izgarada örneklenir (25×25, önizleme 13×13), `GeomAPI_PointsToBSplineSurface` ile
+        uydurulur, telle kırpılır (ters tel de denenir). Kurulamazsa Coons'tan başlayan
+        teğet dolgusuna düşülür (`_filling(..., sides)`: `LoadInitSurface`).
+    - Seçenekler: `TANGENT` (sınır yüzeyi, yeni), `TANGENT_FREE` ("Teğet – serbest dolgu",
+      v0.23 davranışı). Gövde `tangent_weight` (0.2–2, varsayılan 1), yüzey `own_weight` +
+      `tangent_weight`; gather `entry["weight"]` (yalnızca ≠ 1), motor `weight=` gönderir,
+      ikisi de imzada. 2.5 üstünde küçük yamalar katlanmaya başlıyor (ölçüldü) → üst sınır 2.
+    - Ölçüm (`occ_blend_ring_check.py`): 4 biçim × dörtgen yamalar, Teğet kırılma ≤ 0.02°
+      (önizleme ≤ 0.17°), Coons'a göre taşma %±1.7; ağırlık 0.5 / 1 / 2 → ortalama taşma
+      içe → ~0 → dışa. Üçgenli model: Keskin 85° → Teğet ≤ 0.41° (kenar ortaları).
+      `occ_blend_check.py` (kare → daire): Teğet 3.82° → 0.33°.
+    - Süre: 8 yamada tam ~0.8 s, önizleme ~0.5 s (arka plan süreci).
 
 ---
 
@@ -201,8 +234,8 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `engine_host.py` | 52 | Alt süreç girişi; paketi sahte `minicad_engine` paketi olarak yükler |
 | `jobs.py` | 337 | Süreç istemcisi (ensure / submit / call / control / poll / stop / describe) |
 | `errors.py` | 2 | `CadError` |
-| `geometry.py` | 2374 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
-| `core.py` | 1855 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
+| `geometry.py` | 2717 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
+| `core.py` | 1879 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
 | `solver.py` | 185 | numpy kısıt çözücü: ağırlıklı Gauss-Newton, en az hareket; `residual`, `evaluate`, `solve`, `measure` |
 | `constraints.py` | 590 | Kısıt çözümünü çalıştırma (`solve_all`), ekleme / kontrol / silme, canlı tetikleme, operatörler, kayıt |
 | `constraints_refs.py` | 100 | Kısıt veri erişimi: referans noktaları, dünya konumu, `all_constraints` |
@@ -730,7 +763,8 @@ Betiğin yaptıkları:
 | t55 | Eksikler 1. parti: referans ölçü (kuru çözüm), merkez mesafesi, yaylarda eşit, otomatik ölçü, ölçü çizgileri ve çizimi, ayrı doğrularda köşe, X / Y hassas giriş, merkez noktalı yay kanal, düzenle araçlarında noktalar |
 | t52 | Oluştur modal: R / O döngüleri, yazarak şekiller, çokgen D, kanallar, teğet daire, Nokta (yakalama, geri al, Bitir), Yansıt, Bitir |
 | tools/occ_blend_check.py | GERÇEK OCC ile teğet birleşim ölçümü (test koşucusunda değil, OCP gerekir) |
-| tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme) |
+| tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme, Coons'a göre taşma, teğet ağırlığı, üçgenli model) |
+| t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |
 
 **Test yazma kalıbı:**
 - t41–t43, `exec(open("t.py")...)` ile stub'ları yükler. Üstten ortografik görünüm
@@ -764,7 +798,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - Geçici zemin: U ile girilir, U ile asıl düzleme dönülür. Seçilirken Esc aracı kapatmaz.
 - Geçici zeminde her nokta zeminde kalır: eski çizimin noktalarına yapışılır ama izdüşürülür.
 - Düzlem / zemin seçilirken taslak görünür kalır.
-- Yüzey birleşimi varsayılanı Keskin'dir; mevcut modeller aynı hesaplanır.
+- Yüzey birleşimi varsayılanı Keskin'dir. v0.24'ten beri Keskin'de eğri 4 kenarlı yamalar
+  (önce hatayla Dolgu'ya düşen) Coons olur; geçerli Coons'lar ve diğer yamalar aynı kalır.
+- Teğet (G1) eski dolgu davranışı "Teğet – serbest dolgu" seçeneğinde korunur (v0.24).
 - Değiştir araçları kaydedilmiş eğrilere dokunmaz; yalnızca taslağı değiştirir.
 - Kısıt / ölçü araçları taslağı Bitir'lemez (v0.22).
 - Çizimi Düzenle: Bitir'de spline'lar aynı göreli sırayla geri yazılır, bağlı yüzey / kısıt
@@ -790,7 +826,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - GPU görselleri (palet, pivot, kılavuzlar, simgeler) yalnızca stub'larla test edildi.
   Görünüşe dair geri bildirim kullanıcıdan gelir.
 - t6 / t14 bayat testler; istenirse güncellenebilir.
-- `core.py` (1855) ve `geometry.py` (2180) hâlâ büyük; bölünmemesinin nedeni §4'te.
+- `core.py` (1879) ve `geometry.py` (2717) hâlâ büyük; bölünmemesinin nedeni §4'te.
 - Aşama 2 kısıtları çalışıyor. Simetrik / açı gibi kısıtların Inventor'daki tüm etkileşimleri
   henüz incelenmedi.
 
@@ -903,3 +939,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - Yüzey birleşimi Teğet: komşusu da kaynaşan yamalarda motor çöküyordu (segfault) ve
     teğetlik kurma sırasına bağlıydı; artık ortak teğet şeridi (kırılma ≤ 0.65°).
   - Araç `occ_blend_ring_check.py`.
+- **0.24.0:** sınır yüzeyi ve teğet ağırlığı.
+  - Teğet (G1): 3 / 4 kenarlı yamalar Hermite-Coons sınır yüzeyi (balon etkisi yok, G1
+    yapı gereği); "Teğet Ağırlığı" (gövde ve yüzey başına) ile dolgunluk ayarı.
+  - "Teğet – serbest dolgu" seçeneği (eski davranış).
+  - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
+  - Test t60; araçlar genişletildi.

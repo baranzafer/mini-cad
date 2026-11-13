@@ -59,8 +59,16 @@ BLEND_ITEMS = [
     ("SHARP", "Keskin (G0)", "Yüzeyler ortak kenarda sadece buluşur; kenar / köşe çizgisi "
      "görünür (önceki davranış)"),
     ("TANGENT", "Teğet (G1)", "Yüzey komşu yüzlere ortak kenar boyunca teğet bağlanır; kenar "
-     "çizgisi kaybolur, yüzeyler kaynaşır"),
+     "çizgisi kaybolur, yüzeyler kaynaşır. 4 kenarlı yüzeyler mühendislik programlarındaki gibi "
+     "sınır yüzeyi olarak kurulur (gergin; Teğet Ağırlığı ile dolgunluk ayarlanır)"),
+    ("TANGENT_FREE", "Teğet – serbest dolgu", "Teğet (G1), yüzeyler serbest dolgu (plaka) "
+     "olarak kurulur (v0.23 davranışı): dışa doğru balon gibi taşabilir"),
 ]
+
+TANGENT_WEIGHT_DESC = ("Teğet (G1) birleşimde yüzeyin kenardan ne kadar \"uzun\" teğet "
+                       "ayrıldığı (mühendislik programlarındaki teğet ağırlığı). 1: doğal "
+                       "(gergin sınır yüzeyi); büyük: komşuya teğet daha uzun devam eder, yüzey "
+                       "dolgunlaşır; küçük: yüzey içe gerilir. 4 kenarlı yüzeylerde geçerli")
 
 
 class MINICAD_Patch(bpy.types.PropertyGroup):
@@ -76,6 +84,12 @@ class MINICAD_Patch(bpy.types.PropertyGroup):
         "sabit kalır",
         items=[("BODY", "Gövde ayarı", "Gövdenin Yüzey Birleşimi ayarını kullan")] + BLEND_ITEMS,
         default="BODY", update=_on_setting_change)
+    own_weight: bpy.props.BoolProperty(
+        name="Kendi Teğet Ağırlığı", description="Gövdenin Teğet Ağırlığı yerine bu yüzeye özel "
+        "değer kullan", default=False, update=_on_setting_change)
+    tangent_weight: bpy.props.FloatProperty(
+        name="Teğet Ağırlığı", description=TANGENT_WEIGHT_DESC, default=1.0, min=0.2, max=2.0,
+        step=5, precision=2, update=_on_setting_change)
     info: bpy.props.StringProperty(default="")
     ok: bpy.props.BoolProperty(default=True)
 
@@ -334,6 +348,9 @@ class MINICAD_ObjectProps(bpy.types.PropertyGroup):
         "Teğet: eğri yüzeyler komşularına kaynaşır (kenar çizgisi kaybolur); "
         "düzlemsel yüzler sabit kalır. Yüzey başına ayrıca değiştirilebilir",
         items=BLEND_ITEMS, default="SHARP", update=_on_setting_change)
+    tangent_weight: bpy.props.FloatProperty(
+        name="Teğet Ağırlığı", description=TANGENT_WEIGHT_DESC, default=1.0, min=0.2, max=2.0,
+        step=5, precision=2, update=_on_setting_change)
 
     mirror_x: bpy.props.BoolProperty(name="X", default=False, update=_on_setting_change)
     mirror_y: bpy.props.BoolProperty(name="Y", default=False, update=_on_setting_change)
@@ -1067,12 +1084,17 @@ def gather(obj, preview, allow_ghost=True):
         blend = getattr(patch, "blend", "BODY")
         if blend == "BODY":
             blend = getattr(props, "surface_blend", "SHARP")
+        weight = float(getattr(patch, "tangent_weight", 1.0)) if getattr(patch, "own_weight",
+                                                                           False) \
+            else float(getattr(props, "tangent_weight", 1.0))
         for sub, (chain, holes, sides) in enumerate(groups):
             pc = [_plain_seg(s) for s in chain]
             look = {id(s): pc[i] for i, s in enumerate(chain)}
             ps = [[look.get(id(s)) or _plain_seg(s) for s in side] for side in sides]
             entry = {"idx": idx, "name": patch.name, "chain": pc, "sides": ps,
                      "method": patch.method, "blend": blend}
+            if blend != "SHARP" and abs(weight - 1.0) > 1e-9:
+                entry["weight"] = weight
             if holes:
                 entry["holes"] = [[_plain_seg(s) for s in h] for h in holes]
             if len(groups) > 1:
@@ -1558,7 +1580,8 @@ def _signature_parts(props):
     struct, bev = [], []
     for p in props.patches:
         struct.append(("P", p.enabled, p.method, len(p.segs), len(p.curves),
-                       getattr(p, "blend", "BODY")))
+                       getattr(p, "blend", "BODY"), getattr(p, "own_weight", False),
+                       round(float(getattr(p, "tangent_weight", 1.0)), 4)))
     for f in props.features:
         if f.op == "BOOLEAN":
             struct.append(("B", f.uid, f.enabled, f.bool_type,
@@ -1573,7 +1596,8 @@ def _signature_parts(props):
                    props.smooth_corners, round(props.transition_factor, 4),
                    round(props.lin_defl, 9), round(props.ang_defl, 6),
                    round(props.join_tol, 9), props.preview_bevel, props.ghost_bevel,
-                   getattr(props, "surface_blend", "SHARP")))
+                   getattr(props, "surface_blend", "SHARP"),
+                   round(float(getattr(props, "tangent_weight", 1.0)), 4)))
     return tuple(curve), tuple(struct), tuple(bev)
 
 

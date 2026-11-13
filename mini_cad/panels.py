@@ -315,7 +315,17 @@ class MINICAD_PT_surfaces(_Sub, bpy.types.Panel):
             op = row.operator("minicad.remove_patch", text="Sil", icon="TRASH")
             op.index = i
             box.prop(patch, "blend")
+            eff = p.surface_blend if patch.blend == "BODY" else patch.blend
+            if eff == "TANGENT":
+                row = box.row(align=True)
+                row.prop(patch, "own_weight", text="", icon="DECORATE_OVERRIDE")
+                sub = row.row(align=True)
+                sub.active = patch.own_weight
+                sub.prop(patch, "tangent_weight")
         layout.prop(p, "surface_blend")
+        if p.surface_blend == "TANGENT" or any(
+                pt.blend == "TANGENT" for pt in p.patches):
+            layout.prop(p, "tangent_weight", slider=True)
         layout.prop(p, "make_solid")
 
 

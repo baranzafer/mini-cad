@@ -7,9 +7,10 @@ BLENDS = []
 HOLES = []
 class Builder:
     def __init__(s, prev=None): s.face_keys = []
-    def face(s, chain, sides, method, preview, blend="SHARP", holes=None):
+    def face(s, chain, sides, method, preview, blend="SHARP", holes=None, weight=1.0):
         s.face_keys.append(len(chain))
-        BLENDS.append((len(chain), method, blend))
+        BLENDS.append((len(chain), method, blend) if weight == 1.0 else
+                      (len(chain), method, blend, weight))
         HOLES.append((len(chain), [len(h) for h in (holes or ())]))
         if method == "BAD": raise CadError("kötü yüz")
         if method == "CRASH": os._exit(3)

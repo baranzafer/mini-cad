@@ -183,6 +183,8 @@ def _build(job, res, geometry):
             kw = {"blend": p["blend"]} if p.get("blend", "SHARP") != "SHARP" else {}
             if p.get("holes"):
                 kw["holes"] = p["holes"]
+            if kw.get("blend") and p.get("weight") is not None:
+                kw["weight"] = p["weight"]             # teğet ağırlığı (v0.24.0)
             face, label = builder.face(p["chain"], p["sides"], p["method"], preview, **kw)
             info = f"{label} · {len(p['sides'])} kenar · {len(p['chain'])} segment"
             if p.get("holes"):
