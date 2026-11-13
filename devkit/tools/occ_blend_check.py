@@ -80,8 +80,36 @@ def run(blend, preview=False):
     return worst_mid
 
 r0 = run("SHARP"); r1 = run("TANGENT"); r1p = run("TANGENT", preview=True)
-assert r1 < 0.5 * r0 and r1 < 3.0, "teğet birleşim kırılmayı gidermedi"
+# v0.24.1: köşe yamaları Keskin'de de koni (3 kenarlı Coons) ve bu modelde koni düzlemsel
+# üçgenlere zaten teğet: Keskin de ~0° olabilir. Teğet ondan kötü olmamalı.
+assert r1 < max(0.5 * r0, 0.5) and r1 < 3.0, "teğet birleşim kırılmayı gidermedi"
 print("SONUÇ: teğet birleşim çalışıyor")
+
+# v0.24.1 (kullanıcı videosu): köşe yaması geometrik olarak tam bir KONİ olmalı (kare köşesinden
+# yaya giden düz doğrular; düzlemsel üçgenlere zaten teğet). Dolgu %3-5 dışa taşıyordu, köşe
+# uyumu yumuşatması da tepede büzülme yapıyordu.
+from OCP.GeomAPI import GeomAPI_ProjectPointOnSurf
+def cone_dev(face, k):
+    c = np.array(corners[k]); surf = BRep_Tool.Surface_s(face); worst = 0.0
+    for t in np.linspace(k*math.pi/2 + 0.05, (k+1)*math.pi/2 - 0.05, 9):
+        a = np.array([R*math.cos(t), R*math.sin(t), H])
+        for s_ in np.linspace(0.1, 0.9, 9):
+            pr = GeomAPI_ProjectPointOnSurf(gp_Pnt(*(c + (a - c) * s_)), surf)
+            if pr.NbPoints(): worst = max(worst, pr.LowerDistance())
+    return worst
+print("Köşe yamasının koniden sapması (R = 0.6):")
+for blend in ("SHARP", "TANGENT", "TANGENT_FREE"):
+    for p in patches: p["blend"] = blend
+    b = g.Builder(); built = {}
+    order = g.blend_order(patches) if blend != "SHARP" else patches
+    if blend != "SHARP": g.blend_prepare(b, order)
+    for p in order:
+        built[p["idx"]] = b.face(p["chain"], p["sides"], p["method"], False, **({"blend": blend} if blend != "SHARP" else {}))[0]
+    dev = max(cone_dev(built[4 + k], k) for k in range(4))
+    print(f"   [{blend}] {dev:.4f}")
+    if blend != "TANGENT_FREE":
+        assert dev < 1e-3, "köşe yaması koni değil"
+print("SONUÇ: köşe yamaları koni")
 
 print("Blender'a giden mesh normalleri (kenar boyunca, 0.2<z<0.8):")
 for blend in ("SHARP", "TANGENT"):

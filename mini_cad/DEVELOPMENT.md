@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.24.0)
+# Mini CAD — Geliştirme Notları (v0.24.1)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -221,6 +221,23 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
       içe → ~0 → dışa. Üçgenli model: Keskin 85° → Teğet ≤ 0.41° (kenar ortaları).
       `occ_blend_check.py` (kare → daire): Teğet 3.82° → 0.33°.
     - Süre: 8 yamada tam ~0.8 s, önizleme ~0.5 s (arka plan süreci).
+  - **v0.24.1** (kullanıcı videosu: kare taban → daire, 4 düzlem üçgen + 4 köşe yaması;
+    köşede büzülme, dalgalı siluet). Doğru sonuç: köşe yaması tam KONİ (sac geçiş parçası).
+    - Köşe uyumu artık yalnızca uçtaki FARKI (uyumlu − ham) yumuşakça ekler; önce türevin
+      kendisi uç değerine çekiliyordu → koni %2 bozuluyordu. Şimdi koniden sapma 1e-4.
+    - Eğri 3 kenarlı yama Otomatik'te (Keskin dahil) "Coons (3 kenar)": `_hermite(...,
+      tangent=False)` (tepesi noktaya inmiş Coons). Önce Dolgu, koniden %5 sapma.
+    - Teğet düzlemi normalleri kenarın tam ucundan değil biraz içeriden alınır (uç komşunun
+      tekil noktası olabilir: koni tepesi → normal çöp → twist −1123 → yüzey patladı).
+      Twist türevi uca dokunmayan tek yönlü farkla.
+    - İçeri yönü (D işareti): türev kenara paralelleşince yamanın merkezinden (u=1 / v=1
+      kenarlarında türev dışarı bakar: `inward`).
+    - `_grid_sane`: sınırların çok dışına taşan ya da katlanan ızgara reddedilir (Dolgu
+      yedeğine düşülür). Patlamış bir yüzey OCC üçgenleyicisini **sonsuz döngüye** sokmuştu
+      (Blender senkron hesapta donardı).
+    - Izgara 25 → 33 (önizleme 13 → 17): ağırlık 2'de uydurma kenar yakınındaki türevi
+      kaçırıyordu (6° → ≤ 0.5°). Süre ~%15 arttı.
+    - `occ_blend_check.py`: köşe yamasının koniden sapması (Keskin ve Teğet < 1e-3).
 
 ---
 
@@ -234,7 +251,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `engine_host.py` | 52 | Alt süreç girişi; paketi sahte `minicad_engine` paketi olarak yükler |
 | `jobs.py` | 337 | Süreç istemcisi (ensure / submit / call / control / poll / stop / describe) |
 | `errors.py` | 2 | `CadError` |
-| `geometry.py` | 2717 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
+| `geometry.py` | 2792 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
 | `core.py` | 1879 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
 | `solver.py` | 185 | numpy kısıt çözücü: ağırlıklı Gauss-Newton, en az hareket; `residual`, `evaluate`, `solve`, `measure` |
 | `constraints.py` | 590 | Kısıt çözümünü çalıştırma (`solve_all`), ekleme / kontrol / silme, canlı tetikleme, operatörler, kayıt |
@@ -826,7 +843,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - GPU görselleri (palet, pivot, kılavuzlar, simgeler) yalnızca stub'larla test edildi.
   Görünüşe dair geri bildirim kullanıcıdan gelir.
 - t6 / t14 bayat testler; istenirse güncellenebilir.
-- `core.py` (1879) ve `geometry.py` (2717) hâlâ büyük; bölünmemesinin nedeni §4'te.
+- `core.py` (1879) ve `geometry.py` (2792) hâlâ büyük; bölünmemesinin nedeni §4'te.
 - Aşama 2 kısıtları çalışıyor. Simetrik / açı gibi kısıtların Inventor'daki tüm etkileşimleri
   henüz incelenmedi.
 
@@ -945,3 +962,5 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - "Teğet – serbest dolgu" seçeneği (eski davranış).
   - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
   - Test t60; araçlar genişletildi.
+- **0.24.1:** köşe yaması tam koni (köşe uyumu düzeltmesi), eğri 3 kenarlı yama Coons,
+  tekil köşede patlayan yüzey ve üçgenleyici donması düzeltildi, ızgara 33.

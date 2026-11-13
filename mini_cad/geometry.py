@@ -195,7 +195,9 @@ BLEND_LABELS = {"TANGENT": "teğet (G1)", "TANGENT_FREE": "teğet (G1, serbest)"
 # ya da yama 4 kenarlı değilse dolgu; 4 kenarlıda dolgu Coons yüzeyinden başlar.
 # Serbest: eski davranış (boş plakadan dolgu), dışa "balon" gibi taşabilir.
 BLEND_SEEDED = {"TANGENT"}
-HERMITE_GRID = {False: 25, True: 13}     # örnekleme (tam, önizleme)
+# örnekleme (tam, önizleme). 25'te ağırlık 2'de uydurma kenar yakınındaki türevi kaçırıyordu
+# (kenar ortasında 6°); 33'te ≤ 0.5° (41: ≤ 0.2° ama süre 2 katı)
+HERMITE_GRID = {False: 33, True: 17}
 
 
 def _blend_order(blend):
@@ -413,6 +415,15 @@ class Builder:
             except CadError:
                 if method == "COONS":
                     raise
+        if res is None and method == "AUTO" and len(sides) == 3 and coons_available():
+            # v0.24.1: eğri 3 kenarlı yama: tepesi noktaya inmiş Coons (ör. kare→daire köşe
+            # yaması tam koni olur; Dolgu %3-5 dışa taşıyordu)
+            try:
+                r3 = self._hermite(chain, sides, wire, preview, 1.0, tangent=False)
+                if r3 is not None and face_usable(r3[0]):
+                    res = (r3[0], "Coons (3 kenar)")
+            except CadError:
+                pass
         if res is None:
             res = self._filling(chain, preview)
             if not face_usable(res[0]):
@@ -679,7 +690,7 @@ class Builder:
             return [own[0]]
         return None
 
-    def _hermite(self, chain, sides, wire, preview, weight=1.0):
+    def _hermite(self, chain, sides, wire, preview, weight=1.0, tangent=True):
         """4 kenarlı yamanın teğet ağırlıklı (bikübik Hermite) Coons sınır yüzeyi.
 
         Sınır eğrileri aynen geçilir. Her kenarda yüzeyin kenardan ayrılış türevi
@@ -726,7 +737,8 @@ class Builder:
                 return _bez(Ps[i], tt), _bez_d(Ps[i], tt) * n, side[i]
             return f
         cs = [curve(side) for side in sd]
-        planes = [[self._side_plane(sg) for sg in side] for side in sd]
+        Cg = B.mean(axis=0)                     # yamanın ağırlık merkezi (içeri yönü)
+        planes = [[self._side_plane(sg) if tangent else None for sg in side] for side in sd]
 
         # c0(u)=S(u,0): kenar 0; d1(v)=S(1,v): kenar 1; c1(u)=S(u,1): kenar 2 ters;
         # d0(v)=S(0,v): kenar 3 ters
@@ -764,6 +776,9 @@ class Builder:
                 (1 - v) * (P10 - P00) - v * (P11 - P01)
         n_tan = [0]
 
+        # türev yönü: u=0 / v=0 kenarında (kenar 0, 3) içeri, u=1 / v=1 kenarında (1, 2) dışarı
+        inward = {0: 1.0, 3: 1.0, 1: -1.0, 2: -1.0}
+
         def adj(side_i, t_side, vec, t_edge, compat=None):
             """Çapraz türevi kenarın teğet düzlemine yatır, ağırlıkla ölçekle. compat:
             kenarın iki ucundaki köşe-uyumlu türevler (komşu sınır eğrilerinin teğetleri);
@@ -774,10 +789,13 @@ class Builder:
             faces = planes[side_i][j]
             out = np.asarray(vec, dtype=np.float64)
             if faces:
+                # normaller kenarın tam ucundan değil biraz içeriden: uç komşu yüzün tekil
+                # noktası olabilir (ör. koni tepesi), normal tanımsız / çöp (v0.24.1)
+                pn = cs[side_i](min(max(t_side, 2e-3), 1.0 - 2e-3))[0]
                 ns = []
                 for f in faces:
                     try:
-                        nv = _face_normal(f, p)
+                        nv = _face_normal(f, pn)
                     except Exception:
                         nv = None
                     if nv is not None and np.linalg.norm(nv) > 1e-12:
@@ -796,7 +814,15 @@ class Builder:
                     nd = float(np.linalg.norm(D))
                     if nd > 1e-12 and m > 1e-15:
                         D = D / nd
-                        if float(np.dot(D, out)) < 0:
+                        # içeri yönü yamanın merkezinden (türev kenara paralelleşince türevin
+                        # işareti rastgeleleşiyor, uç düzeltmesi yüzeyi katlıyordu — v0.24.1)
+                        inn = Cg - p
+                        inn = inn - float(np.dot(inn, T)) * T
+                        ref = out
+                        if abs(float(np.dot(D, out))) < 0.2 * m and \
+                                float(np.linalg.norm(inn)) > 1e-9 * size:
+                            ref = inward[side_i] * inn
+                        if float(np.dot(D, ref)) < 0:
                             D = -D
                         vt = float(np.dot(out, T))
                         vd = math.sqrt(max(m * m - vt * vt, (0.25 * m) ** 2))
@@ -804,13 +830,16 @@ class Builder:
                     else:
                         out = out - float(np.dot(out, n)) * n
                     out = out * (1.0 + (weight - 1.0) * math.sin(math.pi * t_edge) ** 2)
-                    if compat is not None:
-                        dl = 0.2
-                        for end, cv in ((0.0, compat[0]), (1.0, compat[1])):
-                            x = abs(t_edge - end) / dl
-                            if x < 1.0:
-                                beta = 1.0 - (3 * x * x - 2 * x * x * x)
-                                out = (1.0 - beta) * out + beta * np.asarray(cv)
+            if compat is not None:
+                # yalnızca uçtaki FARK (uyumlu − ham) yumuşakça eklenir: uç zaten uyumluysa
+                # (ör. koni) türev hiç değişmez (v0.24.1; önce türevin kendisi uç değerine
+                # çekiliyordu, kare→daire köşe konisi ~%2 bozuluyor, tepede büzülme oluyordu)
+                dl = 0.2
+                for end, cv, raw in compat:
+                    x = abs(t_edge - end) / dl
+                    if x < 1.0:
+                        beta = 1.0 - (3 * x * x - 2 * x * x * x)
+                        out = out + beta * (np.asarray(cv) - raw)
             return out
 
         # köşe uyumlu türevler: S_v(0,0)=d0'(0) ... (komşu sınır eğrilerinin teğetleri)
@@ -818,6 +847,15 @@ class Builder:
         cmp_t1 = (d0(1.0)[1], d1(1.0)[1])
         cmp_s0 = (c0(0.0)[1], c1(0.0)[1])
         cmp_s1 = (c0(1.0)[1], c1(1.0)[1])
+
+        def with_raw(side_i, tside, vec, cmp):
+            # (uç, uyumlu değer, o uçtaki ham düzeltilmiş türev)
+            return [(0.0, cmp[0], adj(side_i, tside(0.0), vec(0.0), 0.0)),
+                    (1.0, cmp[1], adj(side_i, tside(1.0), vec(1.0), 1.0))]
+        cmp_t0 = with_raw(0, lambda u: u, sv0, cmp_t0)
+        cmp_t1 = with_raw(2, lambda u: 1.0 - u, sv1, cmp_t1)
+        cmp_s0 = with_raw(3, lambda v: 1.0 - v, su0, cmp_s0)
+        cmp_s1 = with_raw(1, lambda v: v, su1, cmp_s1)
 
         def t0(u):
             return adj(0, u, sv0(u), u, cmp_t0)
@@ -832,10 +870,15 @@ class Builder:
             return adj(1, v, su1(v), v, cmp_s1)
         for i, side in enumerate(sd):
             n_tan[0] += 1 if any(planes[i]) else 0
-        h = 1e-4
+        h = 2e-3
 
         def dd(f, t):
-            return (f(min(t + h, 1.0)) - f(max(t - h, 0.0))) / (min(t + h, 1.0) - max(t - h, 0.0))
+            # uçta tek yönlü, uca dokunmayan fark (uç değeri tekil olabilir)
+            if t <= 0.0:
+                return (f(2 * h) - f(h)) / h
+            if t >= 1.0:
+                return (f(1.0 - h) - f(1.0 - 2 * h)) / h
+            return (f(t + h) - f(t - h)) / (2 * h)
         # Köşe twist'leri Gregory biçiminde: köşede iki kenarın istediği değerler farklıysa
         # twist hangi kenara yakınsa onunkine kayar; böylece iki kenarın çapraz türevi de tam
         # sağlanır (ortalama twist teğet kenarlara ~2° kırılma sızdırıyordu)
@@ -868,7 +911,7 @@ class Builder:
         S0 = [s0(v) for v in ts]
         S1 = [s1(v) for v in ts]
         Hs = [H(t) for t in ts]
-        arr = _Pnt2Array(1, N, 1, N)
+        G = np.zeros((N, N, 3))
         for i, u in enumerate(ts):
             hu = Hs[i]
             for j, v in enumerate(ts):
@@ -879,7 +922,13 @@ class Builder:
                          if Mfix[a][b] is not None)
                 Bt = Bt + hu[2] * hv[2] * twist(0, 0, u, v) + hu[2] * hv[3] * twist(0, 1, u, v) \
                     + hu[3] * hv[2] * twist(1, 0, u, v) + hu[3] * hv[3] * twist(1, 1, u, v)
-                arr.SetValue(i + 1, j + 1, _pnt(Lu + Lv - Bt))
+                G[i, j] = Lu + Lv - Bt
+        if not _grid_sane(G, B):
+            return None                          # güvenli yedek: Coons'tan başlayan dolgu
+        arr = _Pnt2Array(1, N, 1, N)
+        for i in range(N):
+            for j in range(N):
+                arr.SetValue(i + 1, j + 1, _pnt(G[i, j]))
         fit = _PointsToBSplineSurface(arr, 3, 8, _GeomAbs_C2, 1e-6 * max(size, 1e-3))
         if not fit.IsDone():
             return None
@@ -1087,6 +1136,32 @@ def _make_ribbon(faces, pts, n_samples=17):
     if not mf.IsDone():
         return None
     return mf.Face()
+
+
+def _grid_sane(G, B):
+    """Hermite ızgarası makul mü? Sınır noktalarının kutusunun çok dışına taşan ya da katlanan
+    (komşu hücre normalleri ters) yüzey reddedilir. Böyle bir yüzey OCC'nin üçgenleyicisini
+    sonsuz döngüye sokabiliyor (v0.24.1, bozuk twist ile görüldü)."""
+    if not np.all(np.isfinite(G)):
+        return False
+    lo, hi = B.min(axis=0), B.max(axis=0)
+    ext = float(np.max(hi - lo))
+    pad = 0.75 * ext
+    P = G.reshape(-1, 3)
+    if np.any(P < lo - pad) or np.any(P > hi + pad):
+        return False
+    du = G[1:, :-1] - G[:-1, :-1]
+    dv = G[:-1, 1:] - G[:-1, :-1]
+    n = np.cross(du, dv)
+    a = np.linalg.norm(n, axis=2)
+    ok = a > 1e-9 * max(a.max(), 1e-300)
+    nu = np.where(ok[..., None], n / np.maximum(a, 1e-300)[..., None], 0.0)
+    for x, y, mx, my in ((nu[1:], nu[:-1], ok[1:], ok[:-1]),
+                         (nu[:, 1:], nu[:, :-1], ok[:, 1:], ok[:, :-1])):
+        d = np.einsum("ijk,ijk->ij", x, y)
+        if np.any((d < 0.0) & mx & my):
+            return False
+    return True
 
 
 def _tri_to_quad(sd):
