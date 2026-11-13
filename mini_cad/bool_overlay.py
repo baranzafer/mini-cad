@@ -161,8 +161,72 @@ def _draw_ghosts():
         print("[Mini CAD] hayalet fillet çizilemedi:", e)
 
 
+COL_ERR = (1.0, 0.38, 0.32, 1.0)
+COL_ERR_BG = (0.0, 0.0, 0.0, 0.55)
+
+
+def error_lines(scene, limit=5):
+    """Görünür CAD gövdelerinde başarısız yüzey / işlemler: ['gövde · ad: sebep'] (v0.25.4).
+    Önce bu hatalar yalnızca panelde ve durum satırında yazıyordu, gözden kaçıyordu."""
+    out = []
+    for ob in getattr(scene, "objects", ()):
+        try:
+            props = ob.cad
+            if not props.is_cad or not ob.visible_get():
+                continue
+        except Exception:
+            continue
+        for p in props.patches:
+            if p.enabled and not p.ok:
+                out.append(f"{ob.name} · {p.name}: {p.info}")
+        for f in props.features:
+            if f.enabled and not f.ok:
+                out.append(f"{ob.name} · {f.name}: {f.info}")
+    if len(out) > limit:
+        out = out[:limit - 1] + [f"… ve {len(out) - limit + 1} hata daha (N paneli)"]
+    return [t if len(t) <= 140 else t[:137] + "…" for t in out]
+
+
+def _draw_errors():
+    try:
+        import blf
+        region = bpy.context.region
+        lines = error_lines(bpy.context.scene)
+        if not lines or region is None:
+            return
+        sc = bpy.context.preferences.system.ui_scale
+        size = int(13 * sc)
+        x = 20 * sc
+        y = region.height - 70 * sc
+        blf.size(0, size)
+        w = max(blf.dimensions(0, "⚠ " + t)[0] for t in lines) + 16 * sc
+        h = (len(lines) + 1) * size * 1.45
+        try:
+            sh = gpu.shader.from_builtin("UNIFORM_COLOR")
+            co = [(x - 8 * sc, y + size * 1.2), (x - 8 * sc + w, y + size * 1.2),
+                  (x - 8 * sc + w, y - h + size), (x - 8 * sc, y - h + size)]
+            gpu.state.blend_set("ALPHA")
+            b = batch_for_shader(sh, "TRI_FAN", {"pos": co})
+            sh.bind()
+            sh.uniform_float("color", COL_ERR_BG)
+            b.draw(sh)
+        except Exception:
+            pass
+        blf.color(0, *COL_ERR)
+        blf.position(0, x, y, 0)
+        blf.draw(0, "Mini CAD: hesaplanamayanlar")
+        for i, t in enumerate(lines):
+            blf.position(0, x, y - (i + 1) * size * 1.45, 0)
+            blf.draw(0, "⚠ " + t)
+        gpu.state.blend_set("NONE")
+    except Exception as e:
+        print("[Mini CAD] hata uyarısı çizilemedi:", e)
+
+
 def register():
     _handles.append(bpy.types.SpaceView3D.draw_handler_add(_draw, (), "WINDOW", "POST_VIEW"))
+    _handles.append(bpy.types.SpaceView3D.draw_handler_add(_draw_errors, (), "WINDOW",
+                                                           "POST_PIXEL"))
     _handles.append(bpy.types.SpaceView3D.draw_handler_add(_draw_ghosts, (), "WINDOW",
                                                            "POST_VIEW"))
 

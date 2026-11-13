@@ -2505,13 +2505,58 @@ def safe_boolean(op, a, b, fuzzy=0.0):
                    "olabilir ya da yüzeyler çakışıyor")
 
 
+def area(shape):
+    if _GProps is None or _BRepGProp is None:
+        return None
+    try:
+        g = _GProps()
+        _static(_BRepGProp, "SurfaceProperties")(shape, g)
+        return float(g.Mass())
+    except Exception:
+        return None
+
+
+def _boolean_open_shell(shape, tools, op, preview=False):
+    """v0.25.4: ana gövde açık kabuk (yüzey) iken boolean — yüzey katı araçla budanır
+    (Inventor "yüzeyi buda"): Kesim aracın dışında kalan, Kesişim içinde kalan yüzeyleri
+    bırakır. Birleşim yüzeyle katı arasında tanımsız. Önce 'Ana gövde kapalı katı değil'
+    hatası veriliyordu (yalnızca panelde görünüyordu). (gövde, başarılı mı, bilgi)"""
+    if op == "UNION":
+        raise CadError("Ana gövde açık kabuk (yüzey): katıyla birleştirilemez. Gövdenin bütün "
+                       "yüzeylerini tamamla ya da Kesim / Kesişim kullan")
+    tools = [prepare_solid(t) for t in tools]
+    for t in tools:
+        if not _has_solid(t):
+            raise CadError("Araç kapalı bir hacim değil")
+    a0 = area(shape)
+    cur = shape
+    fuzzy = 1e-5 * max(_bbox_diag(shape), 1e-9) if preview else 0.0
+    for t in tools:
+        res = safe_boolean(op, cur, t, fuzzy)
+        if res is None or res.IsNull() or not _shape_faces(res):
+            if op == "INTERSECT":
+                raise CadError("Kesişim boş: yüzeyin hiçbir parçası aracın içinde değil")
+            raise CadError("Kesim sonrası yüzey kalmadı (araç bütün yüzeyi kaplıyor)")
+        cur = res
+    cur = unify(cur)
+    if not _shape_faces(cur):
+        raise CadError("Boolean sonucu boş")
+    a1 = area(cur)
+    if a0 is not None and a1 is not None and abs(a1 - a0) <= 1e-9 * max(1.0, abs(a0)):
+        raise CadError("Araç yüzeye değmiyor (alan değişmedi); aracı yüzeyin üzerine taşı")
+    txt = ""
+    if a0 and a1 is not None:
+        txt = f" · alan {(a1 - a0) / abs(a0) * 100:+.1f}%"
+    return cur, True, "uygulandı (açık kabuk: yüzey budandı)" + txt
+
+
 def apply_boolean(shape, tools, op, edge_size, edge_mode, tol, smooth=True, preview=False):
     """Gövdeye boolean uygular; istenirse oluşan yeni kenarları yuvarlar.
     (gövde, başarılı mı, bilgi) döndürür. Boolean başarısızsa CadError."""
     if op not in _BOOL_ALGOS or _BOOL_ALGOS[op] is None:
         raise CadError("Bu OCP sürümünde boolean desteği yok")
     if not _has_solid(shape):
-        raise CadError("Ana gövde kapalı katı değil; boolean için önce bütün yüzeyleri tamamla")
+        return _boolean_open_shell(shape, tools, op, preview)
     shape = prepare_solid(shape)
     tools = [prepare_solid(t) for t in tools]
     for t in tools:

@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.3)
+# Mini CAD — Geliştirme Notları (v0.25.4)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -52,7 +52,7 @@ Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`
 **Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
 beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
 
-Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t63.py` ...),
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t64.py` ...),
 sürüm artırılır ve paketlenir (§8).
 
 ---
@@ -150,6 +150,15 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
     delik kenarı ortak, iki dönüş yönünde de geçerli.
   - Çizim aracında F: son kapalı çizgiyle iç içe olan (aynı düzlemdeki) bütün kapalı taslak
     çizgileri birlikte gönderilir (`_nested_group`). Delik en son çizilmiş olabilir.
+- **Açık kabukta boolean** (v0.25.4, `geometry._boolean_open_shell`): ana gövde kapalı katı
+  değilse (kullanıcı: 5 yüzlü, alt yüzü eksik gövde · "Açık kabuk · 4 serbest kenar") önce
+  "Ana gövde kapalı katı değil" hatası veriliyordu. Artık yüzey katı araçla budanır: Kesim
+  aracın dışındaki, Kesişim içindeki yüzeyleri bırakır (alan değişimiyle denetlenir);
+  Birleşim açıklayıcı hatayla reddedilir; yeni kenar yuvarlama yapılmaz. Araç kapalı katı
+  olmalı. Ölçüm `devkit/tools/occ_shell_bool_check.py` (delik alanı π·r²).
+- **Hata uyarısı** (v0.25.4, `bool_overlay.error_lines` / `_draw_errors`, POST_PIXEL): görünür
+  CAD gövdelerinde başarısız yüzey / işlemler 3D görünümün sol üstünde kırmızı yazılır (en
+  fazla 5 satır). Önce yalnız panelde ve durum satırında ("Hatalı: Kesim 1") görünüyordu.
 - **Ortak topoloji ilkesi** (geometry.py): tel kafesteki her segment tek bir OCC kenarı, her
   köşe tek bir OCC köşesi olur. Yüzeyler aynı kenar nesnesini paylaşır.
 - **Yüzey birleşimi** (v0.15.5): gövde ayarı `surface_blend` (Keskin / Teğet), yüzey başına
@@ -855,6 +864,8 @@ Betiğin yaptıkları:
 | tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme, Coons'a göre taşma, teğet ağırlığı, üçgenli model) |
 | t62 | Ölçü girişi: 3 noktalı yay (kiriş, yarıçap, 180° / 270°), merkezli yay (merkez → başlangıç → bitiş, zincirden, 200°), teğet yay (R + açı, yalnız R), doğru, daire, dikdörtgen, CV, spline, kalem; yeni eğrinin gizli koleksiyon / yerel görünüm bağlanması |
 | t61 | (F–H: v0.25.2 çok yüzeyli bıçak: üç kareyi tek çizgiyle kesme, boşluktan geçen çizgi, gizli kenarlar) Yüzeyi Böl: iki kare yüzeyde halka döngü kesimi (nokta ekleme, referans / kısıt / fillet eşleme, 4 parça), bıçak (köşe → kenar ortası, aynı kenar reddi), yarım silindirde kesimin yüzeyde kalması, ilişkili spline reddi (değişiklik yok), modal araç (hover, tekerlek, oran, tık, bıçak, Esc) |
+| t63 | Hesaplanamayan yüzey / işlem uyarı satırları (gizli gövde, kapalı / başarılı işlem yok, kısaltma, en fazla 5 satır) |
+| tools/occ_shell_bool_check.py | GERÇEK OCC ile açık kabukta Kesim / Kesişim / Birleşim reddi / değmeyen araç |
 | tools/occ_coons_check.py | GERÇEK OCC ile Coons sınır yüzeyi: iki kemer + iki düz kenar düz çizgili (regle) olmalı (Keskin / Teğet / serbest) |
 | tools/occ_split_check.py | GERÇEK OCC ile bölünen eğri yüzeyin biçimi ve yeni dikişteki teğetlik |
 | t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |
@@ -1046,6 +1057,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - "Teğet – serbest dolgu" seçeneği (eski davranış).
   - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
   - Test t60; araçlar genişletildi.
+- **0.25.4:** açık kabuk (yüzey) gövdede boolean: Kesim / Kesişim yüzeyi budar; başarısız
+  yüzey / işlemler 3D görünümde kırmızı uyarı olarak görünür. Test t63.
 - **0.25.3:** yay araçlarında ölçü girişi (3 noktalı, merkezli, teğet; her adım); yeni eğri
   gizli koleksiyon / yerel görünümde de görünür; kayıt raporuna koleksiyon bilgisi. Test t62.
 - **0.25.2:** Bıçak birden çok yüzeyi tek çizgiyle keser (görünüş izdüşümü, gizli kenarlar

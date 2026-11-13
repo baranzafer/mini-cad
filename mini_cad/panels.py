@@ -401,7 +401,10 @@ class MINICAD_PT_boolean(_Sub, bpy.types.Panel):
         if tool is not None and tool.cad.is_cad and "Kapalı katı" not in tool.cad.status:
             box.label(text="İkincil gövde kapalı katı değil", icon="ERROR")
         if "Kapalı katı" not in p.status:
-            box.label(text="Ana gövde kapalı katı değil", icon="ERROR")
+            col = box.column(align=True)
+            col.scale_y = 0.8
+            col.label(text="Ana gövde açık kabuk (yüzey):", icon="INFO")
+            col.label(text="Kesim yüzeyi deler, Kesişim içte kalanı bırakır; Birleşim olmaz")
 
         if not any(f.op == "BOOLEAN" for f in p.features):
             return
