@@ -28,6 +28,115 @@ class SnapMixin:
             return self.segs[-1]["p"][3]
         return self.start
 
+    # ------------------------------------------------------------ yay ölçü girişi (v0.25.3)
+
+    def _arc_phase(self):
+        """Yay araçlarının adımı: ARC3_END (bitiş noktası), ARC3_BULGE (eğrilik), CARC_CENTER,
+        CARC_END, TAN (teğet yay) ya da None."""
+        t = self.tool
+        if t == "TARC" and self._prev_tangent() is not None:
+            return "TAN"
+        if t in ("ARC3", "TARC"):
+            return "ARC3_BULGE" if self.stage else "ARC3_END"
+        if t == "CARC":
+            if self._anchor() is None:           # önce merkez, sonra başlangıç
+                return "CARC_START" if self.stage else None
+            return "CARC_END" if self.stage else "CARC_CENTER"   # zincirden: merkez, bitiş
+        return None
+
+    ARC_FIELDS = {"ARC3_END": ("Uzunluk", "Açı"), "ARC3_BULGE": ("Yarıçap", "Yay açısı"),
+                  "CARC_CENTER": ("Yarıçap", "Açı"), "CARC_START": ("Yarıçap", "Açı"),
+                  "CARC_END": ("Yay açısı", None),
+                  "TAN": ("Yarıçap", "Yay açısı")}
+
+    def _fields(self):
+        """Etkin aracın (ve adımının) ölçü alanları."""
+        ph = self._arc_phase()
+        if ph is not None:
+            return self.ARC_FIELDS[ph]
+        return FIELDS.get(self.tool, ("Uzunluk", "Açı"))
+
+    def _point_lock_fields(self):
+        """Noktayı (uzunluk / açıyla) kilitleyen alanlar; yayın kendi ölçüleri değil."""
+        if self._arc_phase() in ("ARC3_BULGE", "CARC_END", "TAN"):
+            return (None, None)
+        return self._fields()
+
+    def _arc_typed(self, plane):
+        """Yazılan yarıçap / yay açısıyla yayı kur (imleç yalnızca yönü / yanı seçer)."""
+        ph = self._arc_phase()
+        if ph not in ("ARC3_BULGE", "CARC_END", "TAN") or not any(self.typed):
+            return
+        anchor = self._anchor()
+        cur = self.cursor
+        n = plane.n
+        f0, _f1 = self.ARC_FIELDS[ph]
+        R = parse_length(self.typed[0]) if f0 == "Yarıçap" and self.typed[0] else None
+        th_txt = self.typed[0] if f0 == "Yay açısı" else self.typed[1]
+        th = parse_angle(th_txt) if th_txt else None
+        if R is not None and R <= 1e-12:
+            R = None
+        if th is not None:
+            th = math.radians(th % 360.0) if abs(th) % 360.0 > 1e-9 else None
+        if R is None and th is None:
+            return
+        if ph == "ARC3_BULGE":
+            A, E = anchor, self.stage[0]
+            c = E - A
+            L = float(np.linalg.norm(c))
+            perp = dm.unit(np.cross(n, c))
+            if L < 1e-12 or perp is None:
+                return
+            M0 = 0.5 * (A + E)
+            side = 1.0 if float(np.dot(cur - M0, perp)) >= 0 else -1.0
+            if R is not None:
+                R = max(R, 0.5 * L)
+                th = 2.0 * math.asin(min(1.0, L / (2.0 * R)))
+            else:
+                R = L / (2.0 * math.sin(th / 2.0))
+            h = R * (1.0 - math.cos(th / 2.0))
+            arc = dm.arc_3pt(A, M0 + side * perp * h, E)
+        elif ph == "CARC_END":
+            C, A = self.stage[0], anchor
+            v = A - C
+            v = v - np.dot(v, n) * n
+            R0 = float(np.linalg.norm(v))
+            if th is None or R0 < 1e-12:
+                return
+            e1 = v / R0
+            e2 = np.cross(n, e1)
+            d = 1.0
+            if self.arc_info is not None and self.preview:     # yön: imlecin önizlemesi
+                q = self.preview[0]["p"][1] - A
+                d = 1.0 if float(np.dot(q, e2)) >= 0 else -1.0
+            segs = dm._arc_from_basis(C, R0, e1, d * e2, th, A, None)
+            arc = {"segs": segs, "radius": R0, "angle": th, "center": C}
+        else:                                                   # TAN
+            t0 = dm.unit(self._prev_tangent() - np.dot(self._prev_tangent(), n) * n)
+            side_v = dm.unit(np.cross(n, t0)) if t0 is not None else None
+            if side_v is None:
+                return
+            if float(np.dot(cur - anchor, side_v)) < 0:
+                side_v = -side_v
+            if R is None:
+                R = (self.arc_info or {}).get("radius")
+                if not R:
+                    return
+            ctr = anchor + side_v * R
+            if th is None:
+                w = cur - ctr
+                th = math.atan2(float(np.dot(w, t0)), float(np.dot(w, -side_v))) % (2 * math.pi)
+                if th < 1e-6:
+                    return
+            segs = dm._arc_from_basis(ctr, R, -side_v, t0, th, anchor, None)
+            arc = {"segs": segs, "radius": R, "angle": th, "center": ctr,
+                   "end_tangent": -math.sin(th) * (-side_v) + math.cos(th) * t0}
+            if not self.segs:
+                for sg in segs:
+                    sg["tan_start"] = True
+        if arc is not None:
+            self.preview, self.arc_info = arc["segs"], arc
+
     def _prev_tangent(self):
         if self.segs:
             return dm.end_tangent(self.segs[-1])
@@ -113,6 +222,8 @@ class SnapMixin:
             return self.stage[0]
         if self.tool in ("CV", "FIT") and self.stage:
             return self.stage[-1]
+        if self.tool == "CARC" and self.stage and self._anchor() is None:
+            return self.stage[0]                 # merkezli yay: başlangıç merkeze göre (v0.25.3)
         return self._anchor()
 
     def _point_snap(self, mx, my, ro, rd):
@@ -281,7 +392,7 @@ class SnapMixin:
         anchor = self._lock_anchor()
         no_snap = self.ctrl or not self.snap_on
         snap = None if no_snap else self._point_snap(mx, my, ro, rd)
-        f0, f1 = FIELDS.get(self.tool, ("Uzunluk", "Açı"))
+        f0, f1 = self._point_lock_fields()
         v0 = (parse_length(self.typed[0]) if f0 else None) if anchor is not None else None
         v1 = None
         if anchor is not None and f1:
@@ -447,6 +558,10 @@ class SnapMixin:
         return dm.apply_locks(plane, anchor, p, v0, v1)
 
     def _make_preview(self, plane):
+        self._make_preview_base(plane)
+        self._arc_typed(plane)                   # yazılan yarıçap / yay açısı (v0.25.3)
+
+    def _make_preview_base(self, plane):
         self.preview = []
         self.arc_info = None
         anchor = self._anchor()

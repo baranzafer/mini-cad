@@ -132,6 +132,7 @@ class SketchMixin:
         tarc3 = t == "TARC" and self._prev_tangent() is None
         if (t in ("ARC3", "CARC") or tarc3) and not self.stage:
             self.stage = [cur]
+            self.typed, self.field = ["", ""], 0    # sonraki adımın ölçüleri ayrı (v0.25.3)
             return
         if t in ("CV", "FIT"):
             if np.linalg.norm(cur - (self.stage[-1] if self.stage else anchor)) > 1e-12:
@@ -236,11 +237,7 @@ class SketchMixin:
                         return w
         except Exception:
             pass
-        cu = bpy.data.curves.new("CAD_TelKafes", "CURVE")
-        cu.dimensions = "3D"
-        ob = bpy.data.objects.new("CAD_TelKafes", cu)
-        context.collection.objects.link(ob)
-        return ob
+        return self._new_curve(context)
 
     def _write_spline(self, context, ob, segs, cyclic):
         pts = dm.bezier_points(segs, cyclic)
@@ -366,8 +363,40 @@ class SketchMixin:
         cu = bpy.data.curves.new("CAD_TelKafes", "CURVE")
         cu.dimensions = "3D"
         ob = bpy.data.objects.new("CAD_TelKafes", cu)
-        context.collection.objects.link(ob)
+        self._link_visible(context, ob)
         return ob
+
+    def _link_visible(self, context, ob):
+        """Yeni eğri objesini görünür bir koleksiyona bağlar (v0.25.3). Etkin koleksiyon gizli /
+        hariçse sahne koleksiyonu; görünüm yerel görünümdeyse (numpad /) obje oraya da eklenir.
+        Yoksa eğri Outliner'da görünür ama 3D görünümde görünmezdi."""
+        coll = getattr(context, "collection", None)
+        try:
+            vl = context.view_layer
+
+            def find(lc):
+                if lc.collection == coll:
+                    return lc
+                for ch in lc.children:
+                    r = find(ch)
+                    if r is not None:
+                        return r
+                return None
+            lc = find(vl.layer_collection) if coll is not None else None
+            if coll is None or lc is None or lc.exclude or lc.hide_viewport or \
+                    getattr(coll, "hide_viewport", False):
+                coll = context.scene.collection
+        except Exception:
+            pass
+        if coll is None:
+            coll = context.scene.collection
+        coll.objects.link(ob)
+        try:
+            space = self.area.spaces.active
+            if getattr(space, "local_view", None) is not None:
+                ob.local_view_set(space, True)
+        except Exception:
+            pass
 
     def _finish_sketch(self, context):
         """Taslaktaki bütün çizgileri eğri objesine yazar (Inventor'daki Bitir gibi).

@@ -165,9 +165,21 @@ def _curve_lines(context):
         except Exception:
             vis = "?"
         sps = ob.data.splines
+        try:
+            colls = [c.name for c in ob.users_collection]
+        except Exception:
+            colls = "?"
+        lv = ""
+        try:
+            sp3d = next((a.spaces.active for a in bpy.context.screen.areas
+                         if a.type == "VIEW_3D"), None)
+            if sp3d is not None and sp3d.local_view is not None:
+                lv = f" · yerel görünümde={ob.local_view_get(sp3d)}"
+        except Exception:
+            pass
         out.append(f"- {ob.name} · ebeveyn={ob.parent.name if ob.parent else None} · "
-                   f"mod={ob.mode} · görünür={vis} · {ob.data.dimensions} · "
-                   f"{len(sps)} spline")
+                   f"mod={ob.mode} · görünür={vis} · koleksiyon={colls}{lv} · "
+                   f"{ob.data.dimensions} · {len(sps)} spline")
         for si, sp in enumerate(list(sps)[:16]):
             if sp.type == "BEZIER":
                 bp = sp.bezier_points

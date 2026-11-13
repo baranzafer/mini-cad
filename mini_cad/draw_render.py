@@ -224,7 +224,8 @@ class RenderMixin:
         L = float(np.linalg.norm(self.cursor - anchor))
         ang = dm.seg_angle(pl, anchor, self.cursor)
         rows = []
-        if t in ("LINE", "CV", "FIT", "PEN") or (t == "TARC" and arc is None):
+        tail = []
+        if t in ("LINE", "CV", "FIT", "PEN"):
             mid = self._px(0.5 * (anchor + self.cursor))
             if mid is not None:
                 _text(mid[0] + 6 * sc, mid[1] + 6 * sc, core.fmt_len(L), COL_TEXT, size)
@@ -246,20 +247,31 @@ class RenderMixin:
             a, q = pl.uv(anchor), pl.uv(self.cursor)
             names = (("Genişlik", core.fmt_len(abs(q[0] - a[0]))),
                      ("Yükseklik", core.fmt_len(abs(q[1] - a[1]))))
+        elif self._arc_phase() is not None:
+            # yay araçları: her adımın yazılabilir ölçüleri (v0.25.3)
+            ph = self._arc_phase()
+            f0, f1 = self._fields()
+            live = {"Uzunluk": core.fmt_len(L), "Açı": f"{ang:.1f}°",
+                    "Yarıçap": core.fmt_len(arc["radius"]) if arc and "radius" in arc
+                    else core.fmt_len(L),
+                    "Yay açısı": f"{math.degrees(arc['angle']):.1f}°" if arc and "angle" in arc
+                    else "—"}
+            names = tuple((f, live[f]) for f in (f0, f1) if f)
+            step = {"ARC3_END": "bitiş noktası", "ARC3_BULGE": "eğrilik noktası",
+                    "CARC_CENTER": "merkez", "CARC_START": "başlangıç", "CARC_END": "bitiş",
+                    "TAN": None}[ph]
+            if step:
+                tail = [("Sıradaki", step, False)]
         else:
             names = ()
             if arc is not None and "angle" in arc:
                 rows = [("R", core.fmt_len(arc["radius"]), False),
                         ("Yay", f"{math.degrees(arc['angle']):.1f}°", False)]
-            elif t in ("ARC3", "CARC"):
-                step = {"ARC3": ["bitiş noktası", "eğrilik noktası"],
-                        "CARC": ["merkez", "bitiş"]}[t][min(len(self.stage), 1)]
-                rows = [("Sıradaki", step, False)]
         for i, (name, live) in enumerate(names):
             txt = self.typed[i]
             val = (txt + ("_" if i == self.field else "")) if txt else live
             rows.append((name, val, i == self.field))
-        self._draw_rows(cur, rows)
+        self._draw_rows(cur, rows + tail)
 
     def _draw_rows(self, cur, rows):
         """İmleç yanında ölçü kutusu: [(ad, değer, etkin alan mı)]."""

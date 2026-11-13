@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.2)
+# Mini CAD — Geliştirme Notları (v0.25.3)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -52,7 +52,7 @@ Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`
 **Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
 beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
 
-Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t62.py` ...),
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t63.py` ...),
 sürüm artırılır ve paketlenir (§8).
 
 ---
@@ -655,6 +655,24 @@ Diğer kısayollar:
 - Izgara yakalaması da zayıftır. Görünürlüğü `minicad_grid_alpha` ile ayarlanır; yakalama yine
   çalışır.
 
+**Yay ölçü girişi** (v0.25.3; önce yay araçlarında `FIELDS = (None, None)` idi: ölçü kutusu R /
+açı gösteriyor ama yazılan hiçbir yere uygulanmıyordu). `_arc_phase` adımı, `_fields` alanları
+verir; `_point_lock_fields` noktayı kilitleyen (uzunluk / açı) alanlar, `_arc_typed` yayı
+yazılan yarıçap / yay açısıyla yeniden kurar (`_make_preview` → `_make_preview_base` + bu):
+- 3 noktalı yay: bitiş noktası Uzunluk / Açı (kiriş); eğrilik Yarıçap (küçük yay; kirişin
+  yarısından küçükse yarım daire) / Yay açısı (180° üstü büyük yay). Yan: imleç.
+- Merkezli yay: merkez (zincirden: önceki uca göre) Yarıçap / Açı; başlangıç (merkez önce
+  seçildiyse merkeze göre, `_lock_anchor` merkez) Yarıçap / Açı; bitiş Yay açısı (yön:
+  imlecin önizlemesi).
+- Teğet yay: Yarıçap / Yay açısı (yalnız biri yazılırsa öbürü imleçten). Yan: imleç.
+- Adım değişince (2. tık) yazılan sıfırlanır. Ölçü kutusu adımın alanlarını ve "Sıradaki"
+  satırını gösterir.
+
+**Yeni eğri hedefi** (v0.25.3, `_link_visible`): etkin koleksiyon gizli / hariçse yeni eğri sahne
+koleksiyonuna bağlanır; yerel görünümdeyse (numpad /) objeye `local_view_set` yapılır.
+Kullanıcı: "Yeni eğri ile Bitir: Outliner'a geliyor ama görünümde yok". Kayıt raporu artık
+eğrinin koleksiyonunu ve yerel görünüm durumunu yazar.
+
 **Teğet yay:** ilk tıklamadan çalışır (Inventor gibi). Bir çizginin ucundan başlayınca ona teğet
 devam eder; boşlukta başlarsa 3 noktalı yay gibi davranır. `start_tan` iki kaynaktan alınır:
 - Kaydedilmiş eğri ucu: `_end_tangent_of(snap_id)`.
@@ -835,6 +853,7 @@ Betiğin yaptıkları:
 | t52 | Oluştur modal: R / O döngüleri, yazarak şekiller, çokgen D, kanallar, teğet daire, Nokta (yakalama, geri al, Bitir), Yansıt, Bitir |
 | tools/occ_blend_check.py | GERÇEK OCC ile teğet birleşim ölçümü (test koşucusunda değil, OCP gerekir) |
 | tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme, Coons'a göre taşma, teğet ağırlığı, üçgenli model) |
+| t62 | Ölçü girişi: 3 noktalı yay (kiriş, yarıçap, 180° / 270°), merkezli yay (merkez → başlangıç → bitiş, zincirden, 200°), teğet yay (R + açı, yalnız R), doğru, daire, dikdörtgen, CV, spline, kalem; yeni eğrinin gizli koleksiyon / yerel görünüm bağlanması |
 | t61 | (F–H: v0.25.2 çok yüzeyli bıçak: üç kareyi tek çizgiyle kesme, boşluktan geçen çizgi, gizli kenarlar) Yüzeyi Böl: iki kare yüzeyde halka döngü kesimi (nokta ekleme, referans / kısıt / fillet eşleme, 4 parça), bıçak (köşe → kenar ortası, aynı kenar reddi), yarım silindirde kesimin yüzeyde kalması, ilişkili spline reddi (değişiklik yok), modal araç (hover, tekerlek, oran, tık, bıçak, Esc) |
 | tools/occ_coons_check.py | GERÇEK OCC ile Coons sınır yüzeyi: iki kemer + iki düz kenar düz çizgili (regle) olmalı (Keskin / Teğet / serbest) |
 | tools/occ_split_check.py | GERÇEK OCC ile bölünen eğri yüzeyin biçimi ve yeni dikişteki teğetlik |
@@ -877,6 +896,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - Teğet (G1) eski dolgu davranışı "Teğet – serbest dolgu" seçeneğinde korunur (v0.24).
 - Değiştir araçları kaydedilmiş eğrilere dokunmaz; yalnızca taslağı değiştirir.
 - Kısıt / ölçü araçları taslağı Bitir'lemez (v0.22).
+- Bütün çizim araçlarında (yaylar dahil) her adımda ölçü yazılabilir (v0.25.3).
 - Yüzeyi Böl: kenara eklenen nokta biçimi değiştirmez; bölünemeyecek kesimde hiçbir şey
   değişmez (önce doğrulama). Bölünen segmentteki ölçü kısıtları devre dışı kalır (v0.25).
 - Çizimi Düzenle: Bitir'de spline'lar aynı göreli sırayla geri yazılır, bağlı yüzey / kısıt
@@ -1026,6 +1046,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - "Teğet – serbest dolgu" seçeneği (eski davranış).
   - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
   - Test t60; araçlar genişletildi.
+- **0.25.3:** yay araçlarında ölçü girişi (3 noktalı, merkezli, teğet; her adım); yeni eğri
+  gizli koleksiyon / yerel görünümde de görünür; kayıt raporuna koleksiyon bilgisi. Test t62.
 - **0.25.2:** Bıçak birden çok yüzeyi tek çizgiyle keser (görünüş izdüşümü, gizli kenarlar
   sayılmaz).
 - **0.25.1:** Coons yüzeyi gerçek (doğrusal) Coons: OCC'nin "CoonsStyle"ı kübik harmanlamayla
