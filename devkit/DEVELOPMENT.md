@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.0)
+# Mini CAD — Geliştirme Notları (v0.25.1)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -221,6 +221,14 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
       içe → ~0 → dışa. Üçgenli model: Keskin 85° → Teğet ≤ 0.41° (kenar ortaları).
       `occ_blend_check.py` (kare → daire): Teğet 3.82° → 0.33°.
     - Süre: 8 yamada tam ~0.8 s, önizleme ~0.5 s (arka plan süreci).
+  - **v0.25.1: Coons düzeltmesi** (kullanıcı: küçük ön kemer + büyük arka kemer + iki düz
+    kenar; sırt S biçimli). OCC'nin `GeomFill_CoonsStyle`'ı adına rağmen KÜBİK harmanlama
+    kullanıyor: yüzey kenarlardan sıfır eğimle ayrılıyor, ortada dikleşiyor. Klasik
+    (doğrusal) Coons `GeomFill_StretchStyle` (`_GeomFill_CoonsStyle` adı korundu). Doğru
+    yüzeyden (kemerleri birleştiren doğrular) sapma 0.12 → 0.0004. Bütün Coons yolları
+    etkilenir: Keskin 4 kenarlı yüzey, Teğet dolgusunun başlangıcı, teğet şeritlerinin
+    dayandığı keskin yüzeyler (Teğet'in Coons'a göre taşması %±1.7 → %±0.4).
+    Araç `devkit/tools/occ_coons_check.py`.
   - **v0.24.1** (kullanıcı videosu: kare taban → daire, 4 düzlem üçgen + 4 köşe yaması;
     köşede büzülme, dalgalı siluet). Doğru sonuç: köşe yaması tam KONİ (sac geçiş parçası).
     - Köşe uyumu artık yalnızca uçtaki FARKI (uyumlu − ham) yumuşakça ekler; önce türevin
@@ -818,6 +826,7 @@ Betiğin yaptıkları:
 | tools/occ_blend_check.py | GERÇEK OCC ile teğet birleşim ölçümü (test koşucusunda değil, OCP gerekir) |
 | tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme, Coons'a göre taşma, teğet ağırlığı, üçgenli model) |
 | t61 | Yüzeyi Böl: iki kare yüzeyde halka döngü kesimi (nokta ekleme, referans / kısıt / fillet eşleme, 4 parça), bıçak (köşe → kenar ortası, aynı kenar reddi), yarım silindirde kesimin yüzeyde kalması, ilişkili spline reddi (değişiklik yok), modal araç (hover, tekerlek, oran, tık, bıçak, Esc) |
+| tools/occ_coons_check.py | GERÇEK OCC ile Coons sınır yüzeyi: iki kemer + iki düz kenar düz çizgili (regle) olmalı (Keskin / Teğet / serbest) |
 | tools/occ_split_check.py | GERÇEK OCC ile bölünen eğri yüzeyin biçimi ve yeni dikişteki teğetlik |
 | t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |
 
@@ -1006,6 +1015,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - "Teğet – serbest dolgu" seçeneği (eski davranış).
   - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
   - Test t60; araçlar genişletildi.
+- **0.25.1:** Coons yüzeyi gerçek (doğrusal) Coons: OCC'nin "CoonsStyle"ı kübik harmanlamayla
+  S biçimli yüzey veriyordu; StretchStyle'a geçildi. Araç `occ_coons_check.py`.
 - **0.25.0:** Yüzeyi Böl.
   - Döngü kesimi (Ctrl+R gibi halka, adet / oran) ve bıçak (iki sınır noktası, yüzey ya da
     görünüş izdüşümü); kesim gerçek yüzeye izdüşürülüp tel kafese eğri olarak yazılır.

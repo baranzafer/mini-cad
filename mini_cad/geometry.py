@@ -64,7 +64,10 @@ _PntArray = _optional("OCP.TColgp", "TColgp_Array1OfPnt")
 _RealArray = _optional("OCP.TColStd", "TColStd_Array1OfReal")
 _IntArray = _optional("OCP.TColStd", "TColStd_Array1OfInteger")
 _GeomFill_BSplineCurves = _optional("OCP.GeomFill", "GeomFill_BSplineCurves")
-_GeomFill_CoonsStyle = _optional("OCP.GeomFill", "GeomFill_CoonsStyle")
+# v0.25.1: Coons yüzeyi için OCC'nin "StretchStyle"ı (doğrusal harmanlama = klasik Coons).
+# "CoonsStyle" adına rağmen kübik harmanlama kullanıyor: yüzey kenarlardan sıfır eğimle ayrılıp
+# S biçimli oluyordu (iki kemer + iki düz kenar: düz çizgili yüzeyden 0.12 sapma → 0.0004)
+_GeomFill_CoonsStyle = _optional("OCP.GeomFill", "GeomFill_StretchStyle")
 _ToolTri = _optional("OCP.BRepLib", "BRepLib_ToolTriangulatedShape")
 _BRepLib = _optional("OCP.BRepLib", "BRepLib")
 _ShapeFix_Face = _optional("OCP.ShapeFix", "ShapeFix_Face")
