@@ -164,6 +164,13 @@ class MINICAD_PT_select(_Sub, bpy.types.Panel):
             row = layout.row(align=True)
             row.operator("minicad.edit_sketch", text=f"Çizimi Düzenle: {act.name}",
                          icon="GREASEPENCIL")
+        from . import split
+        row = layout.row(align=True)
+        if split.is_running():
+            row.alert = True
+            row.operator("minicad.split_surface", text="Yüzeyi Böl: Kapat", icon="CANCEL")
+        else:
+            row.operator("minicad.split_surface", text="Yüzeyi Böl", icon="MOD_EDGESPLIT")
         col = layout.column(align=True)
         col.scale_y = 0.8
         col.label(text="Tık: zincir · Alt+tık: tek parça")

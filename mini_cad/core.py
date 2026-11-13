@@ -1775,6 +1775,77 @@ def remap_splines(curve_ob, fn, seg_count=None):
     return n
 
 
+# Bölünen segmentin ilk yarısında da anlamı korunan kısıtlar (yön / çember kısıtları)
+SPLIT_SAFE_KINDS = {"AXIS", "PARALLEL", "PERP", "COLLINEAR", "RADIUS", "CONCENTRIC"}
+
+
+def remap_insert(curve_ob, si, k):
+    """v0.25.0: eğri objesinin si. spline'ının k. segmentine yeni nokta eklendi (yeni nokta
+    k+1. sırada). Bağlı referanslar güncellenir:
+      - yüzey / özellik / bevel segmentleri: j > k → j+1; j == k → k ve k+1 (iki yarı)
+      - kısıt noktaları: indeks > k → +1; kısıt segmentleri: j > k → j+1; j == k: yön /
+        çember kısıtları (SPLIT_SAFE_KINDS) ilk yarıda kalır, diğerleri (uzunluk, eşit,
+        teğet...) devre dışı bırakılır (bilgi notuyla).
+    (güncellenen referans sayısı, devre dışı kalan kısıt sayısı)"""
+    n = 0
+    off = 0
+
+    def seg_coll(coll, copy_attrs=()):
+        nonlocal n
+        extra = []
+        for r in list(coll):
+            if r.obj != curve_ob or r.spline != si:
+                continue
+            if r.seg > k:
+                r.seg += 1
+                n += 1
+            elif r.seg == k:
+                extra.append({a: getattr(r, a) for a in copy_attrs})
+        for attrs in extra:
+            x = coll.add()
+            x.obj, x.spline, x.seg = curve_ob, si, k + 1
+            for a_, v in attrs.items():
+                setattr(x, a_, v)
+            n += 1
+
+    for ob in bpy.data.objects:
+        try:
+            props = ob.cad
+        except Exception:
+            continue
+        for p in getattr(props, "patches", ()):
+            seg_coll(p.segs)
+        for f in getattr(props, "features", ()):
+            seg_coll(f.segs)
+        if hasattr(props, "bevels"):
+            seg_coll(props.bevels, ("kind", "size"))
+        for c in getattr(props, "constraints", ()):
+            kill = False
+            for r in c.refs:
+                if r.obj != curve_ob or r.spline != si:
+                    continue
+                if r.point:
+                    if r.index > k:
+                        r.index += 1
+                        n += 1
+                elif r.index > k:
+                    r.index += 1
+                    n += 1
+                elif r.index == k and c.kind not in SPLIT_SAFE_KINDS:
+                    kill = True
+            if kill and c.enabled:
+                c.enabled = False
+                c.info = "Kenar bölündü: kısıt devre dışı (yeniden ekle)"
+                off += 1
+    try:
+        from . import constraints
+        for key in [key for key in constraints._last_pos if key[0] == curve_ob.name]:
+            del constraints._last_pos[key]
+    except Exception:
+        pass
+    return n, off
+
+
 def register():
     for c in classes:
         bpy.utils.register_class(c)

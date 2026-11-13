@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.24.1)
+# Mini CAD — Geliştirme Notları (v0.25.0)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -52,7 +52,7 @@ Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`
 **Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
 beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
 
-Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t61.py` ...),
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t62.py` ...),
 sürüm artırılır ve paketlenir (§8).
 
 ---
@@ -245,14 +245,14 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 
 | Dosya | Satır | Görev |
 |---|---:|---|
-| `__init__.py` | 35 | Kayıt sırası: recorder → kernel → core → constraints → links → ui → panels → pick → draw → wire → bool_overlay |
+| `__init__.py` | 37 | Kayıt sırası: recorder → kernel → core → constraints → links → ui → panels → pick → draw → split → wire → bool_overlay |
 | `kernel.py` | 150 | OCP kurulumu / yükleme |
 | `engine.py` | 391 | bpy'siz OCC motoru (komut işleyici, önbellekler) |
 | `engine_host.py` | 52 | Alt süreç girişi; paketi sahte `minicad_engine` paketi olarak yükler |
 | `jobs.py` | 337 | Süreç istemcisi (ensure / submit / call / control / poll / stop / describe) |
 | `errors.py` | 2 | `CadError` |
 | `geometry.py` | 2792 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
-| `core.py` | 1879 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
+| `core.py` | 1950 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
 | `solver.py` | 185 | numpy kısıt çözücü: ağırlıklı Gauss-Newton, en az hareket; `residual`, `evaluate`, `solve`, `measure` |
 | `constraints.py` | 590 | Kısıt çözümünü çalıştırma (`solve_all`), ekleme / kontrol / silme, canlı tetikleme, operatörler, kayıt |
 | `constraints_refs.py` | 100 | Kısıt veri erişimi: referans noktaları, dünya konumu, `all_constraints` |
@@ -279,6 +279,8 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `drawmath.py` | 627 | bpy'siz çizim matematiği: düzlemler, doğru / yay / daire / dikdörtgen, B-spline→Bézier (Boehm), Catmull-Rom, kalem, kılavuz rafinesi |
 | `snapmath.py` | 410 | FORGE snap_math (GPL başlıklı kopya) |
 | `palette.py` | 615 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
+| `split.py` | 1001 | **Yüzeyi Böl** (v0.25): kenara nokta ekleme (`insert_point`), yüzey sınırı (`PatchGeom`), döngü kesimi halkası (`ring_cuts`), bıçak (`knife_cut`), uygulama (`apply_cuts`, `split_patch`), modal araç `minicad.split_surface` |
+| `surfmath.py` | 313 | bpy'siz bölme matematiği: bezier bölme / en yakın parametre, kenar parametresi, Coons (3 / 4 kenar), üçgen ağda en yakın nokta ve ışın (`Mesh`), izdüşüm, bezier zinciri uydurma (`fit_chain`) |
 | `pick.py` | 579 | Kenar seçim modu (hover + tık), sarı gövde kenarları, B ile fillet |
 | `ui.py` | 590 | Operatörler, tercihler (`background`), `add_feature` (BODY ref) |
 | `panels.py` | 566 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
@@ -448,6 +450,40 @@ Diğer kısayollar:
   - Blender FONT nesnesi geçici olarak oluşturulup `to_curve` ile eğriye çevrilir, her
     spline kapalı taslak çizgisi olur (`_font_splines`).
   - Testte `_font_splines` taklit edilir; gerçek dönüşüm yalnızca Blender'da denenebilir.
+
+**v0.25.0: Yüzeyi Böl** (`split.py`, `surfmath.py`; Gövde paneli "Yüzeyi Böl"):
+- Mevcut yüzeylere yeni kenar ekleyip onları böler (kullanıcı isteği: Blender Ctrl+R / bıçak
+  gibi; ya da noktadan noktaya çekilen eğrinin yüzeye izdüşümü).
+- **Döngü kesimi (R, varsayılan):** bir yüzey kenarının üzerine gelinir. Kesim o kenardan karşı
+  kenara gider (4 kenarlı yüzeyin Coons parametre doğrusu, `ring_cuts`). Karşı kenarı paylaşan
+  4 kenarlı komşuda sürer: halka (kapanınca ya da 4 kenarlı olmayan / serbest kenarda durur).
+  - Konum: fare (kenar boyunca); yazılan oran (`0.3` ya da `30` = %30); C: ortala.
+  - Tekerlek / + −: kesim sayısı (eşit aralıklı; imleç bir kenardayken tekerlek görünümü
+    yakınlaştırmaz). Tık / Enter: uygula.
+- **Bıçak (K):** sınırda iki nokta (köşe > kenar ortası > kenar üstü yakalama). Nokta çifti aynı
+  yüzeyin farklı kenarlarında olmalı (köşe iki kenara birden sayılır). 3 / 4 kenarlı yüzeyde
+  kesim Coons (u, v) düzleminde düz çizgi; V ile "Görünüş": ekrandaki düz çizginin görünüş
+  yönünde yüzeye izdüşümü (diğer yüzeylerde her zaman). Sağ tık: noktaları bırak.
+- **Kesim eğrisi:** önizlemede Coons; uygularken gövde mesh'ine (`body_mesh`,
+  `surfmath.Mesh`) en yakın noktaya / ışınla izdüşürülür, `fit_chain` ile bezier zincirine
+  çevrilir (tolerans: `max(join_tol/2, boyut·5e-4, 2·lin_defl)`; mesh'in köşeliliğine
+  uydurulmaz) ve kesimin ucundaki kenarın eğri objesine yeni spline olarak yazılır.
+- **Kenara nokta ekleme** (`insert_point`): uç kenar ortasına düşüyorsa segment de Casteljau
+  ile bölünür (biçim değişmez; düz kenar VECTOR kalır, AUTO / VECTOR tutamaçlar ALIGNED / FREE
+  olur). `core.remap_insert`: bağlı yüzey / özellik / bevel segmentleri iki yarıyı alır,
+  sonrakiler kayar; kısıtlarda nokta indeksleri kayar, bölünen segmentteki yön / çember
+  kısıtları (`SPLIT_SAFE_KINDS`) kalır, ölçü kısıtları devre dışı (bilgi notu). Poly spline ve
+  desen / yansıtma ilişkisindeki spline bölünmez (`validate_cuts` önce denetler: hiçbir şey
+  değişmeden hata).
+- **Yüzeyi ayırma** (`split_patch`): döngü kesim uçlarından ikiye ayrılır; ilk yarı mevcut
+  yüzeyde kalır, ikinci yarı ayarları kopyalanmış yeni yüzey (`Ad.2`) olur. Eski "eğrinin
+  tamamı" yüzeyleri önce segment referanslarına çevrilir. Halkada sıradaki kesim, önceki
+  bölmeden çıkan parçalardan uçları köşe olan parçaya uygulanır (`lineage`).
+- Araç açıkken Ctrl / Alt'lı tuşlar (Ctrl+Z dahil) ve tanınmayan tuşlar Blender'a gider; veri
+  bir sonraki fare hareketinde yeniden okunur. Eğri düzenleme modundaysa obje moduna geçilir.
+- Ölçüm (`devkit/tools/occ_split_check.py`, gerçek OCC): halka modelinin yan yaması ortadan
+  bölünüp Teğet ile yeniden kurulunca yeni dikişte kırılma 0.03°, orijinal yüzeyden sapma
+  0.0043 (yama boyunun ~%0.14'ü).
 
 **v0.23.0: Çizimi Düzenle** (Inventor "Edit Sketch", bütün çizim):
 - Kaydedilmiş (Bitir'lenmiş, "2. aşama") bir çizim, yani eğri objesinin tamamı yeniden taslağa
@@ -781,6 +817,8 @@ Betiğin yaptıkları:
 | t52 | Oluştur modal: R / O döngüleri, yazarak şekiller, çokgen D, kanallar, teğet daire, Nokta (yakalama, geri al, Bitir), Yansıt, Bitir |
 | tools/occ_blend_check.py | GERÇEK OCC ile teğet birleşim ölçümü (test koşucusunda değil, OCP gerekir) |
 | tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme, Coons'a göre taşma, teğet ağırlığı, üçgenli model) |
+| t61 | Yüzeyi Böl: iki kare yüzeyde halka döngü kesimi (nokta ekleme, referans / kısıt / fillet eşleme, 4 parça), bıçak (köşe → kenar ortası, aynı kenar reddi), yarım silindirde kesimin yüzeyde kalması, ilişkili spline reddi (değişiklik yok), modal araç (hover, tekerlek, oran, tık, bıçak, Esc) |
+| tools/occ_split_check.py | GERÇEK OCC ile bölünen eğri yüzeyin biçimi ve yeni dikişteki teğetlik |
 | t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |
 
 **Test yazma kalıbı:**
@@ -820,6 +858,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - Teğet (G1) eski dolgu davranışı "Teğet – serbest dolgu" seçeneğinde korunur (v0.24).
 - Değiştir araçları kaydedilmiş eğrilere dokunmaz; yalnızca taslağı değiştirir.
 - Kısıt / ölçü araçları taslağı Bitir'lemez (v0.22).
+- Yüzeyi Böl: kenara eklenen nokta biçimi değiştirmez; bölünemeyecek kesimde hiçbir şey
+  değişmez (önce doğrulama). Bölünen segmentteki ölçü kısıtları devre dışı kalır (v0.25).
 - Çizimi Düzenle: Bitir'de spline'lar aynı göreli sırayla geri yazılır, bağlı yüzey / kısıt
   referansları korunur; düzenleme sürerken Blender Ctrl+Z'si engellenir (v0.23).
 - Tek döngülü yüzeyler eskisi gibi hesaplanır. Çoklu döngü desteği yalnızca eskiden hata
@@ -840,10 +880,14 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 
 ## 10. Bilinen sınırlar / açık konular
 
+- Yüzeyi Böl sınırları (v0.25): döngü kesimi yalnızca 4 kenarlı yüzeylerde ilerler (3 kenarlı
+  ya da çok kenarlıda halka durur; bıçak her yüzeyde çalışır). Delikli yüzey bölünmez. Kesim
+  eğrisi gövde mesh'inden (sapma ayarı kadar doğrulukla) uydurulur; aynalı gövdede yalnızca
+  asıl yarı bölünür (ayna kopyası kendiliğinden gelir).
 - GPU görselleri (palet, pivot, kılavuzlar, simgeler) yalnızca stub'larla test edildi.
   Görünüşe dair geri bildirim kullanıcıdan gelir.
 - t6 / t14 bayat testler; istenirse güncellenebilir.
-- `core.py` (1879) ve `geometry.py` (2792) hâlâ büyük; bölünmemesinin nedeni §4'te.
+- `core.py` (1950) ve `geometry.py` (2792) hâlâ büyük; bölünmemesinin nedeni §4'te.
 - Aşama 2 kısıtları çalışıyor. Simetrik / açı gibi kısıtların Inventor'daki tüm etkileşimleri
   henüz incelenmedi.
 
@@ -962,5 +1006,10 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - "Teğet – serbest dolgu" seçeneği (eski davranış).
   - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
   - Test t60; araçlar genişletildi.
+- **0.25.0:** Yüzeyi Böl.
+  - Döngü kesimi (Ctrl+R gibi halka, adet / oran) ve bıçak (iki sınır noktası, yüzey ya da
+    görünüş izdüşümü); kesim gerçek yüzeye izdüşürülüp tel kafese eğri olarak yazılır.
+  - Kenara biçim bozmadan nokta ekleme ve bütün referansların eşlenmesi (`core.remap_insert`).
+  - Yeni modüller `split.py` ve `surfmath.py`; test t61; araç `occ_split_check.py`.
 - **0.24.1:** köşe yaması tam koni (köşe uyumu düzeltmesi), eğri 3 kenarlı yama Coons,
   tekil köşede patlayan yüzey ve üçgenleyici donması düzeltildi, ızgara 33.

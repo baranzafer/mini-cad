@@ -212,7 +212,19 @@ def _tool_lines():
                        f"{(getattr(op, 'temp', None) or {}).get('label')}")
     except Exception as e:
         out.append(f"Çiz durumu okunamadı: {e}")
-    return out or ["(Kenar Seç ve Çiz kapalı)"]
+    try:
+        from . import split
+        op = split._STATE["active"]
+        if op is not None:
+            hov = op.edges[op.hover[0]][0] if op.hover is not None else None
+            out.append(f"Yüzeyi Böl AÇIK · yöntem={op.mode} · kesim sayısı={op.count} · "
+                       f"yazılan={op.typed!r} · ortala={op.center} · üzerinde={hov} · "
+                       f"bıçak noktaları={len(op.knife)} · önizleme={len(op.preview)} kesim · "
+                       f"görünüş izdüşümü={op.view_proj} · {len(op.edges)} kenar · "
+                       f"mesh={'var' if op.mesh else 'yok'} · bölünen={op.done}")
+    except Exception as e:
+        out.append(f"Yüzeyi Böl durumu okunamadı: {e}")
+    return out or ["(Kenar Seç, Çiz ve Yüzeyi Böl kapalı)"]
 
 
 def snapshot(context):

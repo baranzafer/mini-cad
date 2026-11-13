@@ -3,8 +3,8 @@
 Tel kafes -> yüzeyler (ortak topoloji) -> katı gövde -> bevel.
 """
 
-from . import (bool_overlay, constraints, core, draw, kernel, links, panels, pick, recorder, ui,
-               wire)
+from . import (bool_overlay, constraints, core, draw, kernel, links, panels, pick, recorder,
+               split, ui, wire)
 
 
 def register():
@@ -18,6 +18,7 @@ def register():
     panels.register()
     pick.register()
     draw.register()
+    split.register()
     wire.register()
     bool_overlay.register()
 
@@ -25,6 +26,7 @@ def register():
 def unregister():
     bool_overlay.unregister()
     wire.unregister()
+    split.unregister()
     draw.unregister()
     pick.unregister()
     panels.unregister()
