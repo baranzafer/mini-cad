@@ -7,9 +7,10 @@
                     Konum: fare (kenar boyunca); yazılan oran (0.3 / %30); C: ortala.
                     Tekerlek / + −: kesim sayısı (eşit aralıklı). Tık: uygula.
   Bıçak (K)         Yüzey sınırında iki nokta seç (köşelere ve kenar ortalarına yapışır).
-                    Kesim yüzeyin üzerinde yatar: 3 / 4 kenarlı yüzeyde yüzeyin parametre doğrusu
-                    (V ile Görünüş: ekrandaki düz çizginin yüzeye izdüşümü), diğerlerinde görünüş
-                    yönünde izdüşüm. Sağ tık: noktaları bırak.
+                    İki nokta aynı 3 / 4 kenarlı yüzeydeyse kesim yüzeyin parametre doğrusu.
+                    Farklı yüzeylerdeyse (ya da V ile Görünüş) ekrandaki düz çizgi görünüş
+                    yönünde gövdeye izdüşürülür ve aradaki BÜTÜN yüzeyler kesilir (v0.25.2).
+                    Sağ tık: noktaları bırak.
 
 Kesim eğrisi önce sınır eğrilerinden (Coons) hesaplanır, sonra gövdenin mesh'ine izdüşürülür
 ve tel kafese gerçek bir bezier spline olarak yazılır. Kesimin uçları kenar ortasına düşüyorsa
@@ -230,6 +231,102 @@ def knife_cut(geoms, A, B, mesh=None, view_dir=None, mode="SURFACE", tol=1e-6, r
         if best is None or score < best[0]:
             best = (score, {"patch": g.idx, "pts": pts})
     return best[1], ""
+
+
+def _front_hit(mesh, o, d):
+    """Işının kameraya en yakın (önde) ağ kesişimi | None."""
+    hits = [h for h in mesh.ray(o, d) if h[0] > 1e-9]
+    return hits[0][1] if hits else None
+
+
+def knife_path(geoms, edges, A, B, to_px, ray_at, mesh, tol, size, samples=96):
+    """v0.25.2 — çok yüzeyli bıçak: ekrandaki A→B düz çizgisi görünüş yönünde gövdeye
+    izdüşürülür; yolun kestiği (önde görünen) bütün yüzey kenarlarında parçalara ayrılır, her
+    parça kendi yüzeyinin kesimi olur. edges: [(anahtar, (4,3) spline yönünde, örnekler)].
+    to_px(X) → (piksel, görünür mü); ray_at(xy) → (köken, yön). (kesimler, hata metni)."""
+    if mesh is None or not mesh:
+        return [], "Gövde mesh'i yok (önce hesaplat)"
+    A, B = np.asarray(A, float), np.asarray(B, float)
+    pa, oka = to_px(np.array([A, B]))
+    if not oka.all():
+        return [], "Noktalar görünüşte değil"
+    a2, b2 = pa[0], pa[1]
+    L2 = float(np.linalg.norm(b2 - a2))
+    if L2 < 2.0:
+        return [], "İki nokta ekranda çok yakın"
+    # yalnızca çizginin çevresindeki üçgenler (hız)
+    vp, okv = to_px(mesh.V)
+    lo, hi = np.minimum(a2, b2) - 4.0, np.maximum(a2, b2) + 4.0
+    tp = vp[mesh.T]                                        # (m, 3, 2)
+    keep = (tp.max(axis=1) >= lo).all(axis=1) & (tp.min(axis=1) <= hi).all(axis=1)
+    keep &= okv[mesh.T].all(axis=1)
+    sub = sm.Mesh(mesh.V, mesh.T[keep]) if keep.any() else None
+    if sub is None:
+        return [], "Kesim çizgisi gövdenin üzerinden geçmiyor"
+    ss = np.linspace(0.0, 1.0, samples)
+    H = [A]
+    for t in ss[1:-1]:
+        o, d = ray_at(tuple(a2 + (b2 - a2) * t))
+        q = _front_hit(sub, o, d)
+        if q is None:
+            return [], "Kesim çizgisi yüzeyin dışına çıkıyor (iki nokta arası boşluk)"
+        H.append(q)
+    H.append(B)
+    H = np.array(H)
+    # kenar kesişimleri (ekranda), önde görünenler (derinlik: yüzey izi o noktadan geçmeli)
+    eps = 3.0 / L2
+    dtol = max(10.0 * tol, 0.02 * size)
+    cross = []
+    ab = b2 - a2
+    for key, P, S in edges:
+        px, ok = to_px(S)
+        for j in range(len(S) - 1):
+            if not (ok[j] and ok[j + 1]):
+                continue
+            c, e = px[j], px[j + 1]
+            ce = e - c
+            den = ab[0] * ce[1] - ab[1] * ce[0]
+            if abs(den) < 1e-12:
+                continue
+            w = c - a2
+            sv = (w[0] * ce[1] - w[1] * ce[0]) / den
+            uv = (w[0] * ab[1] - w[1] * ab[0]) / den
+            if not (eps < sv < 1.0 - eps and -1e-9 <= uv <= 1.0 + 1e-9):
+                continue
+            t0 = (j + min(max(uv, 0.0), 1.0)) / (len(S) - 1)
+            E0 = sm.bez(P, t0)
+            hs = H[min(int(round(sv * (samples - 1))), samples - 1)]
+            if float(np.linalg.norm(E0 - hs)) > dtol:
+                continue                                  # arkada kalan (gizli) kenar
+            cross.append((sv, E0))
+    cross.sort(key=lambda c_: c_[0])
+    pts_b = [(0.0, A)]
+    for sv, E in cross:                                   # köşede birden çok kenar: tek nokta
+        if float(np.linalg.norm(E - pts_b[-1][1])) > 10 * tol:
+            pts_b.append((sv, E))
+    if float(np.linalg.norm(B - pts_b[-1][1])) <= 10 * tol:
+        pts_b.pop()
+    pts_b.append((1.0, B))
+    cuts = []
+    for (s0, P0), (s1, P1) in zip(pts_b[:-1], pts_b[1:]):
+        inner = [H[i] for i in range(1, samples - 1) if s0 + eps < ss[i] < s1 - eps]
+        if len(inner) < 2:
+            o, d = ray_at(tuple(a2 + ab * (0.5 * (s0 + s1))))
+            q = _front_hit(sub, o, d)
+            inner = [q] if q is not None else []
+        pts = [P0] + list(inner) + [P1]
+        cand = None
+        for g in geoms:
+            if not g.ok:
+                continue
+            na, nb = g.near_boundary(P0, 10 * tol), g.near_boundary(P1, 10 * tol)
+            if any(x[0] != y[0] for x in na for y in nb):
+                cand = g
+                break
+        if cand is None:
+            return [], "Kesimin bir parçası tek bir yüzeyin içinde kalmıyor"
+        cuts.append({"patch": cand.idx, "pts": pts})
+    return cuts, ""
 
 
 # ================================================================ uygulama
@@ -778,12 +875,30 @@ class MINICAD_OT_split_surface(bpy.types.Operator):
                 out += ring_cuts(self.geoms, plan[1], tt, mesh)
             return out
         _m, A, B, (o, d) = plan
-        if mesh is None and self.view_proj:
-            mesh = self.mesh                 # görünüş izdüşümü önizlemede de gerekli
-        cut, _err = knife_cut(self.geoms, A, B, mesh, view_dir=d,
-                              mode="VIEW" if self.view_proj else "SURFACE", tol=self.tol,
-                              ray=(o, d))
-        return [cut] if cut is not None else []
+        self.knife_err = ""
+        if not self.view_proj:
+            # iki nokta aynı yüzeydeyse yüzeyin akışını izleyen kesim
+            cut, _err = knife_cut(self.geoms, A, B, mesh, view_dir=d, mode="SURFACE",
+                                  tol=self.tol, ray=(o, d))
+            if cut is not None:
+                return [cut]
+        # farklı yüzeyler ya da Görünüş: ekrandaki çizgi bütün yüzeylere izdüşürülür
+        from bpy_extras import view3d_utils as vu
+        M = self._M()
+
+        def to_px(X):
+            from .draw_common import _project
+            px, ok, _z = _project(X, M, self.region)
+            return px, ok
+
+        def ray_at(xy):
+            oo = np.array(tuple(vu.region_2d_to_origin_3d(self.region, self.rv3d, xy)))
+            dd = np.array(tuple(vu.region_2d_to_vector_3d(self.region, self.rv3d, xy)))
+            return oo, dd / max(float(np.linalg.norm(dd)), 1e-15)
+        cuts, err = knife_path(self.geoms, self.edges, A, B, to_px, ray_at, self.mesh,
+                               self.tol, _size(self.geoms))
+        self.knife_err = err
+        return cuts
 
     # ------------------------------------------------------------ uygula
 
@@ -916,7 +1031,7 @@ class MINICAD_OT_split_surface(bpy.types.Operator):
                     if self.preview:
                         self._apply(context, list(self.preview))
                     else:
-                        msg = "Bu iki nokta aynı yüzeyin farklı kenarlarında değil"
+                        msg = getattr(self, "knife_err", "") or "Bu iki noktadan kesim olmuyor"
         else:
             self.dirty = True
             return {"PASS_THROUGH"}

@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.1)
+# Mini CAD — Geliştirme Notları (v0.25.2)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -472,6 +472,16 @@ Diğer kısayollar:
   yüzeyin farklı kenarlarında olmalı (köşe iki kenara birden sayılır). 3 / 4 kenarlı yüzeyde
   kesim Coons (u, v) düzleminde düz çizgi; V ile "Görünüş": ekrandaki düz çizginin görünüş
   yönünde yüzeye izdüşümü (diğer yüzeylerde her zaman). Sağ tık: noktaları bırak.
+- **v0.25.2: çok yüzeyli bıçak** (`knife_path`; kullanıcı: aradaki kenarlarda duruyordu).
+  İki nokta aynı 3 / 4 kenarlı yüzeyde değilse (ya da V ile Görünüş açıksa) ekrandaki A→B
+  çizgisi boyunca (96 örnek) görünüş ışınları gövde mesh'ine atılır (önde ilk kesişim; hız
+  için yalnızca çizginin ekran kutusundaki üçgenler). Çizginin ekranda kestiği tel kafes
+  kenarları kesişim noktası olur; derinlik denetimi: kenar noktası yüzey izine
+  `max(10·tol, %2 boyut)` kadar yakın değilse arkada kalan gizli kenardır, sayılmaz. Köşeden
+  geçişte aynı noktadaki kesişimler birleşir. Ardışık iki kesişim arası parça, iki ucu farklı
+  kenarlarında olan yüzeyin kesimidir; `apply_cuts` hepsini birlikte uygular. Işın boşluğa
+  düşerse ("yüzeyin dışına çıkıyor") ya da bir parça tek yüzeye sığmazsa kesim yok, durum
+  satırında sebebi yazar (`knife_err`).
 - **Kesim eğrisi:** önizlemede Coons; uygularken gövde mesh'ine (`body_mesh`,
   `surfmath.Mesh`) en yakın noktaya / ışınla izdüşürülür, `fit_chain` ile bezier zincirine
   çevrilir (tolerans: `max(join_tol/2, boyut·5e-4, 2·lin_defl)`; mesh'in köşeliliğine
@@ -825,7 +835,7 @@ Betiğin yaptıkları:
 | t52 | Oluştur modal: R / O döngüleri, yazarak şekiller, çokgen D, kanallar, teğet daire, Nokta (yakalama, geri al, Bitir), Yansıt, Bitir |
 | tools/occ_blend_check.py | GERÇEK OCC ile teğet birleşim ölçümü (test koşucusunda değil, OCP gerekir) |
 | tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme, Coons'a göre taşma, teğet ağırlığı, üçgenli model) |
-| t61 | Yüzeyi Böl: iki kare yüzeyde halka döngü kesimi (nokta ekleme, referans / kısıt / fillet eşleme, 4 parça), bıçak (köşe → kenar ortası, aynı kenar reddi), yarım silindirde kesimin yüzeyde kalması, ilişkili spline reddi (değişiklik yok), modal araç (hover, tekerlek, oran, tık, bıçak, Esc) |
+| t61 | (F–H: v0.25.2 çok yüzeyli bıçak: üç kareyi tek çizgiyle kesme, boşluktan geçen çizgi, gizli kenarlar) Yüzeyi Böl: iki kare yüzeyde halka döngü kesimi (nokta ekleme, referans / kısıt / fillet eşleme, 4 parça), bıçak (köşe → kenar ortası, aynı kenar reddi), yarım silindirde kesimin yüzeyde kalması, ilişkili spline reddi (değişiklik yok), modal araç (hover, tekerlek, oran, tık, bıçak, Esc) |
 | tools/occ_coons_check.py | GERÇEK OCC ile Coons sınır yüzeyi: iki kemer + iki düz kenar düz çizgili (regle) olmalı (Keskin / Teğet / serbest) |
 | tools/occ_split_check.py | GERÇEK OCC ile bölünen eğri yüzeyin biçimi ve yeni dikişteki teğetlik |
 | t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |
@@ -891,7 +901,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 
 - Yüzeyi Böl sınırları (v0.25): döngü kesimi yalnızca 4 kenarlı yüzeylerde ilerler (3 kenarlı
   ya da çok kenarlıda halka durur; bıçak her yüzeyde çalışır). Delikli yüzey bölünmez. Kesim
-  eğrisi gövde mesh'inden (sapma ayarı kadar doğrulukla) uydurulur; aynalı gövdede yalnızca
+  eğrisi gövde mesh'inden (sapma ayarı kadar doğrulukla) uydurulur; çok yüzeyli bıçak ekrandaki
+  düz çizginin görünüş izdüşümüdür (yüzeyin akışını izlemez); aynalı gövdede yalnızca
   asıl yarı bölünür (ayna kopyası kendiliğinden gelir).
 - GPU görselleri (palet, pivot, kılavuzlar, simgeler) yalnızca stub'larla test edildi.
   Görünüşe dair geri bildirim kullanıcıdan gelir.
@@ -1015,6 +1026,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - "Teğet – serbest dolgu" seçeneği (eski davranış).
   - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
   - Test t60; araçlar genişletildi.
+- **0.25.2:** Bıçak birden çok yüzeyi tek çizgiyle keser (görünüş izdüşümü, gizli kenarlar
+  sayılmaz).
 - **0.25.1:** Coons yüzeyi gerçek (doğrusal) Coons: OCC'nin "CoonsStyle"ı kübik harmanlamayla
   S biçimli yüzey veriyordu; StretchStyle'a geçildi. Araç `occ_coons_check.py`.
 - **0.25.0:** Yüzeyi Böl.
