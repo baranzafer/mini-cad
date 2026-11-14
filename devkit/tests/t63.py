@@ -24,4 +24,7 @@ many = body("Çok", feats=[(f"İşlem {i}", True, False, "e") for i in range(9)]
 L = bo.error_lines(NS(objects=[many]), limit=5)
 check(len(L) == 5 and "5 hata daha" in L[-1], f"en fazla 5 satır: {L[-1]}")
 check(bo.error_lines(NS(objects=[body("Temiz")])) == [], "hata yoksa uyarı yok")
+w = body("Uyarılı", patches=[("Yüzey 1", True, True, "Coons · UYARI: yüzey kendi üzerine katlanıyor (karşılıklı kenar parçaları birbirine uymuyor olabilir)")])
+L = bo.error_lines(NS(objects=[w]))
+check(len(L) == 1 and L[0].startswith("Uyarılı · Yüzey 1: UYARI: yüzey kendi üzerine katlanıyor"), f"katlanma uyarısı da görünür: {L}")
 print("t63 bitti")

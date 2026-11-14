@@ -177,8 +177,9 @@ def error_lines(scene, limit=5):
         except Exception:
             continue
         for p in props.patches:
-            if p.enabled and not p.ok:
-                out.append(f"{ob.name} · {p.name}: {p.info}")
+            if p.enabled and (not p.ok or "UYARI" in (p.info or "")):
+                info = p.info if not p.ok else p.info[p.info.index("UYARI"):]
+                out.append(f"{ob.name} · {p.name}: {info}")
         for f in props.features:
             if f.enabled and not f.ok:
                 out.append(f"{ob.name} · {f.name}: {f.info}")
@@ -214,7 +215,7 @@ def _draw_errors():
             pass
         blf.color(0, *COL_ERR)
         blf.position(0, x, y, 0)
-        blf.draw(0, "Mini CAD: hesaplanamayanlar")
+        blf.draw(0, "Mini CAD: hata / uyarı")
         for i, t in enumerate(lines):
             blf.position(0, x, y - (i + 1) * size * 1.45, 0)
             blf.draw(0, "⚠ " + t)

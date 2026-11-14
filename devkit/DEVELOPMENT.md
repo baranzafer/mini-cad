@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.6)
+# Mini CAD — Geliştirme Notları (v0.25.7)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -156,6 +156,14 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
   aracın dışındaki, Kesişim içindeki yüzeyleri bırakır (alan değişimiyle denetlenir);
   Birleşim açıklayıcı hatayla reddedilir; yeni kenar yuvarlama yapılmaz. Araç kapalı katı
   olmalı. Ölçüm `devkit/tools/occ_shell_bool_check.py` (delik alanı π·r²).
+- **Katlanma denetimi** (v0.25.7, `geometry.face_folded`): tam hesapta her yüz için 13×13
+  parametre ızgarasında komşu normaller ters dönüyorsa etikete "UYARI: yüzey kendi üzerine
+  katlanıyor" eklenir (yüz yine kurulur; 3D görünüm uyarısında da görünür). Noktaya inen
+  kenarlar (koni tepesi) için yalnızca o yandan %5 içeriden örneklenir (yanlış alarm olmasın).
+  Tipik sebep: iki uçtaki kenar parçaları birbirine karşılık gelmiyor (bir uçta profilin üst,
+  öbüründe alt yarısı) ya da raylar çapraz. Kullanıcı raporu: damla profilli tüp, ortada
+  çapraz kırışık. Araç `devkit/tools/occ_fold_check.py`. Kayıt raporu artık her yüzeyin sınırını
+  kenar kenar (segment referansları, uç ve orta noktalar) yazar (`recorder._patch_geometry`).
 - **Hata uyarısı** (v0.25.4, `bool_overlay.error_lines` / `_draw_errors`, POST_PIXEL): görünür
   CAD gövdelerinde başarısız yüzey / işlemler 3D görünümün sol üstünde kırmızı yazılır (en
   fazla 5 satır). Önce yalnız panelde ve durum satırında ("Hatalı: Kesim 1") görünüyordu.
@@ -889,6 +897,7 @@ Betiğin yaptıkları:
 | t65 | Eksen kilidi: X / Y (dünya ekseni), yakalama eksene izdüşer (kilit bozulmaz), sonraki noktada sürer, tekrar basınca kapanır, üstten Z ile dikey, otomatik AXIS, Shift+X düzlem, sürüklemede yakalama izdüşümü |
 | t64 | Taslakta Teğet / Pürüzsüz: doğru + 3 noktalı yay (doğru aynı, yay uçları yerinde, gerçek yay, kırılma 15.8° → 0), sürükleme sonrası, G2 doğru–yay açıklaması, doğru + spline (yalnız tutamaç), yay + spline G2 (eğrilik eşit), daireye teğet doğru, Bitir |
 | t63 | Hesaplanamayan yüzey / işlem uyarı satırları (gizli gövde, kapalı / başarılı işlem yok, kısaltma, en fazla 5 satır) |
+| tools/occ_fold_check.py | GERÇEK OCC ile katlanma denetimi (zıt yarılar, kelebek; doğru yüzeyde yanlış alarm yok) |
 | tools/occ_shell_bool_check.py | GERÇEK OCC ile açık kabukta Kesim / Kesişim / Birleşim reddi / değmeyen araç |
 | tools/occ_coons_check.py | GERÇEK OCC ile Coons sınır yüzeyi: iki kemer + iki düz kenar düz çizgili (regle) olmalı (Keskin / Teğet / serbest) |
 | tools/occ_split_check.py | GERÇEK OCC ile bölünen eğri yüzeyin biçimi ve yeni dikişteki teğetlik |
@@ -1081,6 +1090,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - "Teğet – serbest dolgu" seçeneği (eski davranış).
   - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
   - Test t60; araçlar genişletildi.
+- **0.25.7:** katlanan yüzey uyarısı (panel + 3D görünüm); kayıt raporunda yüzey sınırları.
 - **0.25.6:** X / Y / Z Blender gibi eksen kilidi (dünya ekseni, yakalama bozmaz, tekrar
   basana kadar); düzlem Shift+X/Y/Z; geçici zemin U → G. Test t65.
 - **0.25.5:** taslakta Teğet / Pürüzsüz anında ve biçimi bozmadan (yay yeniden kurulur, doğru

@@ -137,6 +137,8 @@ def _cad_lines(context):
                        f"{'OK' if pt.ok else 'HATA'} · {len(pt.segs)} segment "
                        f"{'+ ' + str(len(pt.curves)) + ' eğri objesi ' if len(pt.curves) else ''}"
                        f"· kaynak {src} · {_short(pt.info)}")
+            if i < 16:
+                out += _patch_geometry(pt, p.join_tol)
         for i, f in enumerate(p.features):
             if f.op == "BOOLEAN":
                 desc = (f"BOOLEAN {f.bool_type} araç={f.tool.name if f.tool else None} "
@@ -191,6 +193,40 @@ def _curve_lines(context):
                            f"kapalı={sp.use_cyclic_u}")
         if len(sps) > 16:
             out.append(f"    … {len(sps) - 16} spline daha")
+    return out
+
+
+def _patch_geometry(pt, tol):
+    """v0.25.7: yüzeyin sınırı — kenar kenar segment referansları ve köşe / orta noktaların
+    dünya koordinatları (yüzey biçimi sorunlarını yeniden kurabilmek için)."""
+    try:
+        from . import core
+        segs = core.patch_segments(pt)
+        loops = core.chain_loops(segs, max(min(tol, 1e-3), 1e-6))
+    except Exception as e:
+        return [f"      sınır okunamadı: {e}"]
+    out = []
+
+    def f3(v):
+        return "(" + ", ".join(f"{float(x):.4g}" for x in v) + ")"
+
+    def mid(sg):
+        P = [tuple(q) for q in sg["p"]]
+        if len(P) == 2:
+            return tuple((a + b) / 2 for a, b in zip(*P))
+        return tuple(0.125 * a + 0.375 * b + 0.375 * c + 0.125 * d for a, b, c, d in zip(*P))
+    for li, chain in enumerate(loops):
+        try:
+            sides = core.split_sides(chain)
+        except Exception:
+            sides = [[s_] for s_ in chain]
+        out.append(f"      döngü {li}: {len(sides)} kenar")
+        for j, side in enumerate(sides):
+            refs = [s_.get("ref") for s_ in side]
+            refs = [f"{r[0]}:{r[1]}.{r[2]}" for r in refs if r]
+            pts = " → ".join(f3(mid(s_)) for s_ in side)
+            out.append(f"        kenar {j}: {f3(side[0]['p'][0])} … {f3(side[-1]['p'][-1])} · "
+                       f"{len(side)} seg {refs} · ortalar {pts}")
     return out
 
 

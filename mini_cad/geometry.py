@@ -266,6 +266,50 @@ def _fix_face(face):
         return face
 
 
+_BRepToolsUV = _optional("OCP.BRepTools", "BRepTools")
+
+
+def face_folded(face, n=13):
+    """v0.25.7: yüz kendi üzerine katlanıyor mu? Parametre ızgarasında komşu normaller ters
+    dönüyorsa (kenar eşleşmesi çaprazsa ya da iki uçtaki eğri parçaları birbirine karşılık
+    gelmiyorsa) True. Kullanıcıya uyarı içindir; yüz yine kurulur."""
+    if _BRepToolsUV is None or _SLProps is None:
+        return False
+    try:
+        surf = _static(BRep_Tool, "Surface")(face)
+        u0, u1, v0, v1 = _static(_BRepToolsUV, "UVBounds")(face)
+        N = np.full((n, n, 3), np.nan)
+        def iso_len(fixed_u, val):
+            P = []
+            for t in np.linspace(0.0, 1.0, 7):
+                q = surf.Value(val, v0 + (v1 - v0) * t) if fixed_u else \
+                    surf.Value(u0 + (u1 - u0) * t, val)
+                P.append((q.X(), q.Y(), q.Z()))
+            P = np.array(P)
+            return float(np.sum(np.linalg.norm(np.diff(P, axis=0), axis=1)))
+        size = max(iso_len(True, 0.5 * (u0 + u1)), iso_len(False, 0.5 * (v0 + v1)), 1e-12)
+        e = 0.05                          # yalnızca noktaya inen kenardan (koni tepesi) içeride
+        a_u0 = e if iso_len(True, u0) < 1e-6 * size else 0.0
+        a_u1 = e if iso_len(True, u1) < 1e-6 * size else 0.0
+        a_v0 = e if iso_len(False, v0) < 1e-6 * size else 0.0
+        a_v1 = e if iso_len(False, v1) < 1e-6 * size else 0.0
+        us = np.linspace(u0 + a_u0 * (u1 - u0), u1 - a_u1 * (u1 - u0), n)
+        vs = np.linspace(v0 + a_v0 * (v1 - v0), v1 - a_v1 * (v1 - v0), n)
+        for i, u in enumerate(us):
+            for j, v in enumerate(vs):
+                pr = _SLProps(surf, float(u), float(v), 1, 1e-9)
+                if pr.IsNormalDefined():
+                    q = pr.Normal()
+                    N[i, j] = (q.X(), q.Y(), q.Z())
+        for A, B in ((N[1:], N[:-1]), (N[:, 1:], N[:, :-1])):
+            d = np.einsum("ijk,ijk->ij", A, B)
+            if np.any(np.nan_to_num(d, nan=1.0) < -0.2):
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def face_usable(face):
     """Yüz geçerli mi ve üçgenlenebiliyor mu? (görünmeyen yüz kalmasın)"""
     try:
@@ -370,6 +414,9 @@ class Builder:
             self._own(ekeys, hit, key)
             return hit
         res = self._make(chain, sides, method, preview, nbrs, blend, weight)
+        if not preview and face_folded(res[0]):
+            res = (res[0], res[1] + " · UYARI: yüzey kendi üzerine katlanıyor (karşılıklı kenar "
+                                    "parçaları birbirine uymuyor olabilir)")
         self.faces[key] = res
         self._own(ekeys, res, key)
         return res
