@@ -1292,6 +1292,10 @@ def _apply(obj, job, res, cmd="build"):
 def rebuild(obj, preview=False):
     """Senkron yeniden hesaplama (operatörler için). Başarılıysa True."""
     props = obj.cad
+    if frozen(props):
+        _frozen_skip.add(obj.name)
+        props.status = "Çizim düzenleniyor: gövde Bitir'de güncellenecek"
+        return False
     if not kernel.kernel_available():
         props.status = "Çekirdek yüklü değil"
         return False
@@ -1484,6 +1488,10 @@ def _next_job():
         if ob is None or not ob.cad.is_cad:
             _pending_final.discard(name)
             continue
+        if frozen(ob.cad):
+            _pending_final.discard(name)
+            _frozen_skip.add(name)
+            continue
         if prev:
             # Girdi son tam kalite hesaptan farklı değilse önizleme yapma
             # (fillet'li gövdenin üstüne fillet'siz önizleme yazılmasın)
@@ -1503,6 +1511,9 @@ def _next_job():
             name = _pending_final.pop()
             ob = bpy.data.objects.get(name)
             if ob is not None and ob.cad.is_cad:
+                if frozen(ob.cad):
+                    _frozen_skip.add(name)
+                    continue
                 return ob, False
     return None
 
@@ -1651,6 +1662,50 @@ def _watched_objects(props):
         yield props.mirror_center
 
 
+_frozen_skip = set()   # düzenleme sürerken ertelenen gövdeler (Bitir'de hesaplanır)
+
+
+def edited_curves():
+    """Çizim aracında taslağa alınmış (Çizimi Düzenle) eğri objelerinin adları."""
+    try:
+        from . import draw_common
+        return draw_common.edited_curves()
+    except Exception:
+        return set()
+
+
+def frozen(props, names=None):
+    """Gövde, şu an taslakta düzenlenen bir çizime bağlı mı? (Inventor: taslak düzenlenirken
+    model güncellenmez; spline'lar objeden çıktığı için hesap yüzeyleri kaybederdi.)"""
+    names = edited_curves() if names is None else names
+    if not names:
+        return False
+    return any(w.name in names for w in _watched_objects(props))
+
+
+def thaw_edited():
+    """Düzenleme bitti: ertelenen ya da girdisi değişen gövdeler yeniden hesaplanır."""
+    names = edited_curves()
+    try:
+        objs = list(bpy.context.scene.objects)
+    except Exception:
+        objs = [bpy.data.objects.get(n) for n in list(_frozen_skip)]
+    for ob in objs:
+        if ob is None:
+            continue
+        p = getattr(ob, "cad", None)
+        if p is None or not p.is_cad or not p.live or frozen(p, names):
+            continue
+        if ob.name not in _frozen_skip:
+            try:
+                if input_signature(p) == _last_sig.get(ob.name):
+                    continue
+            except Exception:
+                pass
+        _frozen_skip.discard(ob.name)
+        schedule(ob, preview=p.preview)
+
+
 @persistent
 def on_depsgraph_update(scene, depsgraph):
     if _flags["building"]:
@@ -1673,12 +1728,16 @@ def on_depsgraph_update(scene, depsgraph):
         ptrs.add(idd.original.as_pointer())
     if not ptrs:
         return
+    names = edited_curves()
     for ob in scene.objects:
         p = ob.cad
         if not p.is_cad or not p.live:
             continue
         for w in _watched_objects(p):
             if w.as_pointer() in ptrs or (w.data is not None and w.data.as_pointer() in ptrs):
+                if names and frozen(p, names):
+                    _frozen_skip.add(ob.name)    # çizim düzenleniyor: Bitir'de hesaplanır
+                    break
                 try:
                     sig = input_signature(p)
                 except Exception:

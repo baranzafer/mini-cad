@@ -9,6 +9,7 @@ import bpy
 import gpu
 import math
 import numpy as np
+import traceback
 from gpu_extras.batch import batch_for_shader
 
 from . import core
@@ -288,13 +289,51 @@ def _remove_handle(h):
     if h in _HANDLES:
         _HANDLES.remove(h)
 
-def cleanup_all():
+def edited_curves():
+    """Çizim aracında şu an taslağa alınmış (Çizimi Düzenle) eğri objelerinin adları.
+    core bu çizimlere bağlı gövdeleri düzenleme sürerken yeniden hesaplamaz (dondurur)."""
+    op = _STATE["active"]
+    if op is None or getattr(op, "stop_request", False):
+        return set()
+    names = set()
+    for st in getattr(op, "sketch", None) or ():
+        src = st.get("edit_src")
+        if src:
+            names.add(src.get("obj"))
+    return names
+
+def save_sketch(op, context=None):
+    """Açık çizim aracının taslağını kaydeder (Bitir). Taslağa alınmış (Çizimi Düzenle)
+    çizgiler objeden çıkmış olduğu için kapatmadan önce mutlaka geri yazılmalı; yoksa
+    çizim görünümden kaybolur. Yazılan bir şey olduysa True."""
+    if op is None:
+        return False
+    if not (getattr(op, "sketch", None) or getattr(op, "segs", None) or
+            getattr(op, "stage", None) or getattr(op, "sk_points", None)):
+        return False
+    try:
+        out = op._finish_sketch(context if context is not None else bpy.context)
+    except Exception:
+        traceback.print_exc()
+        return False
+    return bool(out) or not op.sketch
+
+def cleanup_all(save=True):
+    """Çizim aracını kapatır. save: taslak önce kaydedilir (Çizimi Kapat düğmesi, başka bir
+    modun açılması). Dosya yüklenirken (load_pre) save=False: eski sahne gidiyor."""
+    op = _STATE["active"]
+    if op is not None and save and not getattr(op, "stop_request", False):
+        save_sketch(op)
     for h in list(_HANDLES):
         _remove_handle(h)
-    op = _STATE["active"]
     if op is not None:
         op.stop_request = True
     _STATE["active"] = None
+    try:
+        if core._frozen_skip:                    # Bitir'lenmeden kapandı: ertelenenler hesaplansın
+            core.thaw_edited()
+    except Exception:
+        traceback.print_exc()
     try:
         for win in bpy.context.window_manager.windows:
             for area in win.screen.areas:

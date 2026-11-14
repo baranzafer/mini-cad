@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.10)
+# Mini CAD — Geliştirme Notları (v0.25.11)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -52,7 +52,7 @@ Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`
 **Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
 beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
 
-Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t67.py` ...),
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t68.py` ...),
 sürüm artırılır ve paketlenir (§8).
 
 ---
@@ -318,7 +318,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `jobs.py` | 337 | Süreç istemcisi (ensure / submit / call / control / poll / stop / describe) |
 | `errors.py` | 2 | `CadError` |
 | `geometry.py` | 2792 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
-| `core.py` | 1950 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
+| `core.py` | 2028 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
 | `solver.py` | 185 | numpy kısıt çözücü: ağırlıklı Gauss-Newton, en az hareket; `residual`, `evaluate`, `solve`, `measure` |
 | `constraints.py` | 590 | Kısıt çözümünü çalıştırma (`solve_all`), ekleme / kontrol / silme, canlı tetikleme, operatörler, kayıt |
 | `constraints_refs.py` | 100 | Kısıt veri erişimi: referans noktaları, dünya konumu, `all_constraints` |
@@ -327,7 +327,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `draw_dims.py` | 414 | DimMixin: genel Ölçü aracı, ölçü değeri düzenleme, Yatay / Dikey, karışık referanslı seçim |
 | `constraints_glyphs.py` | 268 | Kısıt simgesi çizimi, `glyph_at` |
 | `draw.py` | 946 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt; **MINICAD_OT_edit_sketch** (Çizimi Düzenle) ve menü girişleri |
-| `draw_common.py` | 481 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
+| `draw_common.py` | 520 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
 | `draw_plane.py` | 537 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (G) |
 | `draw_snap.py` | 663 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
 | `draw_sketch.py` | 848 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
@@ -630,6 +630,21 @@ Diğer kısayollar:
   Blender'a gitmez. Gitseydi spline'lar objeye geri gelir, Bitir'de çiftlenirdi.
 - Yalnızca düzenlenen çizgilerin olduğu Bitir artık geri alma adımı yazar (`created` artar)
   ve taslak geçmişini temizler.
+- **v0.25.11: sınırsız düzenleme** (kullanıcı: "Çizimi Düzenle'den sonra Çizimi Kapat'a basınca
+  çizim görünümden kayboluyor"). Sebep: `cleanup_all` aracı yalnızca durduruyordu; taslağa
+  alınmış spline'lar objeden silinmiş olduğu için taslakla birlikte gidiyordu.
+  - `draw_common.cleanup_all(save=True)`: kapatmadan önce `save_sketch` → `_finish_sketch`
+    (Bitir). Paneldeki Çizimi Kapat, Kenar Seç ve Yüzeyi Böl'ün açılması, eklenti kapatma
+    bu yoldan geçer. Dosya yüklenirken (`load_pre`) `save=False`.
+  - `save_pre`: taslakta `edit_src`'li çizgi varken dosya kaydedilirse önce Bitir'lenir
+    (dosyada çizim eksik kalmasın); araç açık kalır. Yalnız yeni çizgiler taslağa dokunulmaz.
+  - **Gövde dondurma** (`core.frozen`, `core.edited_curves`, `core._frozen_skip`,
+    `core.thaw_edited`): düzenlenen çizime bağlı gövde düzenleme sürerken yeniden
+    hesaplanmaz (depsgraph, kuyruk, senkron `rebuild`); son hâli görünür kalır, panelde
+    "Çizim düzenleniyor" yazar. Bitir / kapatma sonrası girdi değiştiyse ya da ertelenen iş
+    varsa yeniden hesaplanır: yüzeyler tel kafesin yeni hâlini izler. Önce düzenleme
+    sürerken yüzeyler "referans kayboldu" hatasıyla kayboluyordu.
+  - Düzenle → yüzey (F) → tekrar düzenle → kapat döngüsü sınırsız tekrarlanabilir (t67).
 
 **Oluştur araçları** (v0.18.0; `draw_shapes` + `shapemath`):
 - **Çok tıklamalı şekiller** `CLICK_SHAPES` ⊂ `SHAPE_TOOLS` (RECT3, RECTC, RECT3C, POLYGON,
@@ -958,6 +973,7 @@ Betiğin yaptıkları:
 | tools/occ_coons_check.py | GERÇEK OCC ile Coons sınır yüzeyi: iki kemer + iki düz kenar düz çizgili (regle) olmalı (Keskin / Teğet / serbest) |
 | tools/occ_split_check.py | GERÇEK OCC ile bölünen eğri yüzeyin biçimi ve yeni dikişteki teğetlik |
 | t66 | Kenar Seç düzenleme modunda bekler (tık / Enter / F / B / Esc Blender'a), Tab tel kafesi düzenlemeye alır, gövde mesh'i düzenleme modundayken sonuç yazılmaz ve çıkınca yeniden hesaplanır |
+| t67 | Çizimi Düzenle → Çizimi Kapat geri yazma, 4 kez düzenle / kapat / Bitir döngüsü (referanslar, konumlar), gövde dondurma (depsgraph / kuyruk / rebuild, yüzey referansı, çözülünce yeniden hesap, değişiklik yoksa hesap yok), save_pre, load_pre |
 | t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |
 
 **Test yazma kalıbı:**
@@ -1014,6 +1030,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - Taslakta Ctrl+Z / Ctrl+Shift+Z aracın kendi geçmişini kullanır.
 - Izgara yakalaması sürüklemede de geçerlidir, Ctrl ile kapanır.
 - `pick` modu açılınca çizim aracı kapatılır (`draw.cleanup_all`); ikisi aynı anda çalışmaz.
+- Çizim aracı hangi yoldan kapanırsa kapansın (Çizimi Kapat, Esc, palet, başka mod) taslak
+  önce kaydedilir; taslağa alınmış çizim asla kaybolmaz (v0.25.11). Yalnız dosya yüklenirken
+  yazılmaz.
 - Motor süreci açılamazsa Blender içinde hesaplamaya düşülür, hata verip durmaz.
 
 ---

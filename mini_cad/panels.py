@@ -97,7 +97,10 @@ class MINICAD_PT_main(bpy.types.Panel):
             layout.label(text="Seçim modunda kenarları seç, Ctrl+Enter: yeni gövde", icon="INFO")
             return
         p = t.cad
-        if p.status:
+        if core.frozen(p):
+            layout.label(text="Çizim düzenleniyor: yüzeyler Bitir / Çizimi Kapat ile güncellenir",
+                         icon="GREASEPENCIL")
+        elif p.status:
             layout.label(text=p.status, icon=_status_icon(p.status))
         row = layout.row(align=True)
         st = core._stats

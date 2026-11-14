@@ -67,6 +67,7 @@ from .draw_common import (
     TOOL_KEYS, _HANDLES, _LAST, _Refs, _STATE, _UNIT_SUFFIX, _axis_col, _bezier, _dashed,
     _line_thirds, _marker, _move_handle, _move_node, _poly, _project, _rect, _remove_handle,
     _seg_px_dist, _shader, _text, cleanup_all, is_running, parse_angle, parse_length,
+    save_sketch,
 )
 from .draw_plane import PlaneMixin
 from .draw_snap import SnapMixin
@@ -107,8 +108,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
 
     def invoke(self, context, event):
         if _STATE["active"] is not None:
-            cleanup_all()
-            self.report({"INFO"}, "Çizim kapatıldı")
+            cleanup_all()                      # taslak (düzenlenen çizim dahil) önce kaydedilir
+            self.report({"INFO"}, "Çizim kaydedildi ve kapatıldı")
             return {"CANCELLED"}
         try:
             from . import pick
@@ -903,7 +904,23 @@ classes = (MINICAD_OT_draw, MINICAD_OT_edit_sketch)
 
 @bpy.app.handlers.persistent
 def _on_load_pre(_dummy):
-    cleanup_all()
+    cleanup_all(save=False)                    # eski sahne gidiyor: yazılacak yer yok
+
+
+@bpy.app.handlers.persistent
+def _on_save_pre(_dummy):
+    """Dosya kaydedilirken taslağa alınmış (Çizimi Düzenle) çizgiler objede yok: kaydetmeden
+    önce Bitir'lenir, yoksa dosyada çizim eksik kalırdı. Araç açık kalır."""
+    op = _STATE["active"]
+    if op is None or getattr(op, "stop_request", False):
+        return
+    if not any(st.get("edit_src") for st in (getattr(op, "sketch", None) or ())):
+        return
+    save_sketch(op)
+    try:
+        op._status(bpy.context, "Kaydetmeden önce düzenlenen çizim Bitir'lendi")
+    except Exception:
+        pass
 
 
 def register():
@@ -935,6 +952,8 @@ def register():
         name="Önce Düzlem Seç", description="Çizim açılınca önce çizim düzlemini seçtir "
         "(Inventor gibi)", default=True)
     bpy.app.handlers.load_pre.append(_on_load_pre)
+    if hasattr(bpy.app.handlers, "save_pre"):
+        bpy.app.handlers.save_pre.append(_on_save_pre)
     for m in _MENUS:
         mt = getattr(bpy.types, m, None)
         if mt is not None and hasattr(mt, "append"):
@@ -952,6 +971,9 @@ def unregister():
                 pass
     if _on_load_pre in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.remove(_on_load_pre)
+    sv = getattr(bpy.app.handlers, "save_pre", None)
+    if sv is not None and _on_save_pre in sv:
+        sv.remove(_on_save_pre)
     for name in ("minicad_grid_snap", "minicad_grid_alpha", "minicad_grid_fade",
                  "minicad_grid_size", "minicad_draw_target",
                  "minicad_look_at",

@@ -452,6 +452,7 @@ class SketchMixin:
                 self._status(context, f"Bitti: {len(edited)} çizgi geri yazıldı")
                 self.sk_sel = None
                 self._hist_reset()
+            self._thaw()
             return out
         try:
             if edit_ob is not None and edit_ob.type == "CURVE":
@@ -518,7 +519,16 @@ class SketchMixin:
             self.last_closed = out.get(self.last_closed[1])
         self.sk_sel = None
         self._hist_reset()                       # kaydedildi: geri alma artık Blender'da
+        self._thaw()
         return out
+
+    def _thaw(self):
+        """Düzenleme bitti: düzenleme sürerken dondurulan gövdeler tel kafesin yeni hâline
+        göre yeniden hesaplanır (yüzeyler çizimi izler)."""
+        try:
+            core.thaw_edited()
+        except Exception:
+            traceback.print_exc()
 
     # ------------------------------------------------------------ Bitir sonrası (v0.21)
 
