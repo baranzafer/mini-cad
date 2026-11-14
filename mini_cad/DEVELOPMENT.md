@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.8)
+# Mini CAD — Geliştirme Notları (v0.25.9)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -52,7 +52,7 @@ Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`
 **Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
 beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
 
-Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t66.py` ...),
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t67.py` ...),
 sürüm artırılır ve paketlenir (§8).
 
 ---
@@ -189,6 +189,22 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
   - Ölçüm `devkit/tools/occ_param_check.py` (yarım koni, 2/3, 1/2, 3/3, 4/2 segment): doğru
     yüzeyden sapma 0.09–0.51 → ≤ 0.004 (profil bezierinin kendi hatası düzeyi). Eski ölçümler
     değişmedi (Coons regle sapması 0.0004 → 0.0006, halka teğet kırılması aynı).
+- **Kenar Seç ve düzenleme modu** (v0.25.9; kullanıcı raporu: düzenleme moduna geçilemiyor,
+  tutamaçlar çoklu / kutuyla seçilemiyor, değişiklikten sonra gövde güncellenmiyor, Yenile de
+  üretmiyor). Raporda Kenar Seç açık, aktif obje yoktu.
+  - Kenar Seç modali (`pick.py`) düzenleme modunda da çalışıyordu: tutamaç her zaman bir kenarın
+    üstünde olduğundan tık kenar seçimi sayılıp yutuluyor, Enter / F / B / Backspace de
+    yutuluyordu. Artık `context.mode != "OBJECT"` iken **bekler** (`self.waiting`): her olay
+    (Esc dahil) Blender'a geçer, vurgu çizilmez, durum satırı "BEKLİYOR" der; obje moduna
+    dönünce seçimiyle birlikte sürer.
+  - Kenar Seç açıkken tıklar kenar seçtiği için eğri aktif yapılamıyor, Tab çalışmıyordu (ya da
+    tıklanan gövde mesh'i düzenleme moduna giriyordu). **Tab** (`_enter_edit`): üzerinde
+    durulan kenarın eğrisini, yoksa hedef gövdenin tel kafesini seçip düzenleme moduna alır.
+    Eğri zaten aktif ve seçiliyse Blender'ın kendi Tab'ı çalışır.
+  - Gövdenin kendisi (mesh) düzenleme modundayken `write_mesh` etkisiz kalıyor, sonuç sessizce
+    kayboluyordu. `_apply` bunu görür: durum "Gövde düzenleme modunda: sonuç yazılamıyor…",
+    `_edit_blocked`'a alınır; moddan çıkınca `on_depsgraph_update` tam hesap ister. Yenile
+    (`minicad.rebuild`) gövde düzenleme modundaysa önce obje moduna çıkar.
 - **Hata uyarısı** (v0.25.4, `bool_overlay.error_lines` / `_draw_errors`, POST_PIXEL): görünür
   CAD gövdelerinde başarısız yüzey / işlemler 3D görünümün sol üstünde kırmızı yazılır (en
   fazla 5 satır). Önce yalnız panelde ve durum satırında ("Hatalı: Kesim 1") görünüyordu.
@@ -927,6 +943,7 @@ Betiğin yaptıkları:
 | tools/occ_shell_bool_check.py | GERÇEK OCC ile açık kabukta Kesim / Kesişim / Birleşim reddi / değmeyen araç |
 | tools/occ_coons_check.py | GERÇEK OCC ile Coons sınır yüzeyi: iki kemer + iki düz kenar düz çizgili (regle) olmalı (Keskin / Teğet / serbest) |
 | tools/occ_split_check.py | GERÇEK OCC ile bölünen eğri yüzeyin biçimi ve yeni dikişteki teğetlik |
+| t66 | Kenar Seç düzenleme modunda bekler (tık / Enter / F / B / Esc Blender'a), Tab tel kafesi düzenlemeye alır, gövde mesh'i düzenleme modundayken sonuç yazılmaz ve çıkınca yeniden hesaplanır |
 | t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |
 
 **Test yazma kalıbı:**
@@ -1118,6 +1135,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - Test t60; araçlar genişletildi.
 - **0.25.7:** katlanan yüzey uyarısı (panel + 3D görünüm); kayıt raporunda yüzey sınırları.
 - **0.25.8:** karşılıklı kenarlar yay uzunluğuna göre eşleşir (iki uçta farklı parçalanmış profilde çapraz kırışık / katlanma düzeltmesi); sınır yüzeyi uydurma denetimi.
+- **0.25.9:** Kenar Seç düzenleme modunda bekler (tutamaç çoklu / kutu seçimi), Tab ile tel kafesi düzenleme, gövde düzenleme modundayken kaybolan güncelleme.
 - **0.25.6:** X / Y / Z Blender gibi eksen kilidi (dünya ekseni, yakalama bozmaz, tekrar
   basana kadar); düzlem Shift+X/Y/Z; geçici zemin U → G. Test t65.
 - **0.25.5:** taslakta Teğet / Pürüzsüz anında ve biçimi bozmadan (yay yeniden kurulur, doğru

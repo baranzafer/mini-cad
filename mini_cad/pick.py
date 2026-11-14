@@ -283,6 +283,11 @@ class MINICAD_OT_pick_edges(bpy.types.Operator):
                f"Backspace: temizle  |  Esc: çık")
         if msg:
             txt = f"{msg}   —   {txt}"
+        if getattr(self, "waiting", False):
+            txt = ("Kenar seçimi BEKLİYOR (düzenleme modu): seçim ve tuşlar Blender'ın  |  "
+                   "Tab: obje moduna dön, kenar seçimi sürer")
+        else:
+            txt += "  |  Tab: tel kafesi düzenle"
         try:
             context.workspace.status_text_set(txt)
         except Exception:
@@ -291,6 +296,8 @@ class MINICAD_OT_pick_edges(bpy.types.Operator):
     def _draw(self):
         if _STATE["active"] is not self or getattr(self, "stop_request", False):
             return
+        if getattr(self, "waiting", False):
+            return                       # düzenleme modunda: eğri değişiyor, çizim bayat
         try:
             sc = self.scene
             shader = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")
@@ -438,6 +445,36 @@ class MINICAD_OT_pick_edges(bpy.types.Operator):
     def _refs(self):
         return [self.scene.refs[self.scene.keys.index(k)] for k in self.selected]
 
+    def _enter_edit(self, context):
+        """Tab: tel kafes eğrisini düzenleme moduna al (v0.25.9). Kenar seçimi açıkken tıklar
+        kenar seçtiği için eğri aktif yapılamıyor, Tab çalışmıyordu (ya da tıklanan gövde
+        mesh'i düzenleme moduna giriyordu). Sıra: üzerinde durulan kenarın eğrisi, aktif
+        eğri, hedef gövdenin tel kafesi. Eğri zaten aktifse Blender'ın Tab'ı çalışır (False)."""
+        try:
+            ob = None
+            if self.hover is not None and self.scene.kinds[self.hover] == "wire":
+                ob = self.scene.refs[self.hover][0]
+            act = context.view_layer.objects.active
+            if ob is None and act is not None and act.type == "CURVE" and act.select_get():
+                return False
+            if ob is None:
+                t = core_target(context)
+                cands = [w for w in core.wire_objects(t.cad)] if t is not None else []
+                cands += [r[0] for r in self.scene.refs if r[0] != "BODY"]
+                ob = next((w for w in cands if w.type == "CURVE" and w.visible_get()), None)
+            if ob is None:
+                return False
+            if act is ob and ob.select_get():
+                return False
+            for o in list(context.selected_objects):
+                o.select_set(False)
+            ob.select_set(True)
+            context.view_layer.objects.active = ob
+            bpy.ops.object.mode_set(mode="EDIT")
+            return True
+        except Exception:
+            return False
+
     def _after_action(self, context, ok, msg, undo_msg):
         try:
             from . import recorder
@@ -469,9 +506,27 @@ class MINICAD_OT_pick_edges(bpy.types.Operator):
         inside, mx, my = self._mouse_in_region(event)
         press = event.value == "PRESS"
 
-        if event.type == "ESC" and press:
+        if event.type == "ESC" and press and getattr(context, "mode", "OBJECT") == "OBJECT":
             self._finish(context)
             return {"FINISHED"} if self.created else {"CANCELLED"}
+
+        # v0.25.9: obje modu dışında (eğri / mesh düzenleme) kenar seçimi BEKLER: her olay
+        # Blender'a geçer. Önce tutamaçlara tık kenar seçimi sayılıyor (tutamaç her zaman bir
+        # kenarın üstünde), çoklu seçim / kutu seçimi / Enter çalışmıyordu.
+        waiting = getattr(context, "mode", "OBJECT") != "OBJECT"
+        if waiting != getattr(self, "waiting", False):
+            self.waiting = waiting
+            self.hover, self.hover_set = None, []
+            self.dirty = True
+            self._status(context)
+            self.area.tag_redraw()
+        if waiting:
+            return {"PASS_THROUGH"}
+
+        if event.type == "TAB" and press and inside and not (event.ctrl or event.alt):
+            if self._enter_edit(context):
+                return {"RUNNING_MODAL"}
+            return {"PASS_THROUGH"}
 
         # Mod, Blender'ı kilitlemez: kendi işlemediği her olayı Blender'a bırakır
         if not inside or event.type in PASS_KEYS:

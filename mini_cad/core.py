@@ -976,6 +976,7 @@ _final_ver = {}     # obj_name -> tam kalite sayacı (araç imzaları için)
 _final_parts = {}   # obj_name -> (eğri imzası, yapı imzası) son tam kalitede
 _tool_sent = {}     # araç adı -> (oturum, imza): mesh verisi sürece gönderildi mi
 _force_full = set()  # hayalet yetmedi, tam önizleme gerekiyor
+_edit_blocked = set()  # gövde mesh'i düzenleme modundaydı, sonuç yazılamadı (v0.25.9)
 _gathering = set()  # döngüsel boolean koruması
 _result_hooks = []  # sonuç geldiğinde çağrılır (seçim modu yenilensin diye)
 
@@ -1235,6 +1236,17 @@ def _apply(obj, job, res, cmd="build"):
         if res.get("crashed"):
             _final_sig.pop(name, None)
         _display.setdefault(name, {})["ghost"] = None
+        _notify()
+        return False
+    if getattr(obj.data, "is_editmode", False) is True:
+        # v0.25.9: gövdenin kendisi (mesh) düzenleme modundayken Blender mesh verisini
+        # değiştirtmez; sonuç sessizce kayboluyordu ("güncellenmiyor, Yenile de üretmiyor").
+        # Moddan çıkılınca kendiliğinden yeniden hesaplanır (on_depsgraph_update).
+        _edit_blocked.add(name)
+        _final_sig.pop(name, None)
+        _last_sig.pop(name, None)
+        props.status = ("Gövde düzenleme modunda: sonuç yazılamıyor. Tab ile çıkınca "
+                        "kendiliğinden güncellenir (tel kafesi düzenlemek için eğriyi seç)")
         _notify()
         return False
     try:
@@ -1643,6 +1655,13 @@ def _watched_objects(props):
 def on_depsgraph_update(scene, depsgraph):
     if _flags["building"]:
         return
+    for nm in list(_edit_blocked):       # gövde düzenleme modundan çıktıysa şimdi hesapla
+        ob = scene.objects.get(nm)
+        if ob is None or not ob.cad.is_cad:
+            _edit_blocked.discard(nm)
+        elif getattr(ob.data, "is_editmode", False) is not True:
+            _edit_blocked.discard(nm)
+            schedule(ob, preview=False)
     ptrs = set()
     for u in depsgraph.updates:
         idd = u.id
