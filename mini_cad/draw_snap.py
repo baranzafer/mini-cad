@@ -465,8 +465,47 @@ class SnapMixin:
                             self.info["kind"] += " + Izgara"
             if locked:
                 p = self._apply_locks(plane, anchor, p, v0, v1)
+        ax_i = getattr(self, "axis_lock", None)
+        if ax_i is not None and anchor is not None and self.tool not in SHAPE_TOOLS and \
+                self.tool not in CLICK_SHAPES:
+            p = self._axis_point(anchor, ax_i, ro, rd, snap, no_snap)
+            self.cursor = np.asarray(p, dtype=np.float64)      # eksen kilidi zemine izdüşmez
+            self._make_preview(plane)
+            return
         self.cursor = self._on_temp(np.asarray(p, dtype=np.float64))
         self._make_preview(plane)
+
+    def _axis_point(self, anchor, i, ro, rd, snap, no_snap):
+        """Eksen kilidi (Blender G → X gibi): anchor'dan dünya ekseni i boyunca nokta.
+        Yazılan uzunluk eksen boyunca (imleç yönünde; '-' ile ters); yakalanan nokta eksene
+        izdüşürülür (kilit bozulmaz); yoksa ızgara adımı."""
+        ax = np.zeros(3)
+        ax[i] = 1.0
+        rdn = rd / max(float(np.linalg.norm(rd)), 1e-15)
+        w0 = ro - anchor
+        bb = float(np.dot(rdn, ax))
+        den = 1.0 - bb * bb
+        s = float(np.dot(w0, ax) - bb * np.dot(w0, rdn)) / den if den > 1e-9 else 0.0
+        name = "XYZ"[i]
+        kind = f"{name} ekseni"
+        txt = self.typed[0].strip() if self.typed[0] else ""
+        typed = parse_length(txt.lstrip("+-")) if txt else None
+        self.snap_kind = self.snap_id = None
+        if typed is not None:
+            s = -typed if txt.startswith("-") else math.copysign(typed, s if s else 1.0)
+            kind += " · yazılan"
+        elif snap is not None and not no_snap:
+            s = float(np.dot(np.asarray(snap[0], dtype=np.float64) - anchor, ax))
+            kind += f" · {snap[1]} hizası"
+        elif self.grid_on and not no_snap:
+            q = anchor + ax * s
+            gs = self._grid_step(q)
+            g = round(float(q[i]) / gs) * gs - float(anchor[i])
+            if abs(g - s) <= GRID_PX * self.ui_scale * self._px_size(q):
+                s = g
+                kind += " · Izgara"
+        self.info = {"kind": kind, "axis": i}
+        return anchor + ax * s
 
     def _temp_plane(self):
         """Geçici zemin açıksa o düzlem (çizim hep bu düzlemde kalır), değilse None."""

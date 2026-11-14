@@ -192,7 +192,8 @@ class MINICAD_PT_select(_Sub, bpy.types.Panel):
             box.label(text="Rakam yaz: ölçü · Tab: sonraki alan · C: kapat · F: yüzey")
             box.label(text="W seç · L doğru · A teğet yay · E 3 nokta yay · M merkezli")
             box.label(text="O daire · R dikdörtgen · S/K spline · P kalem · Q önceki araç")
-            box.label(text="Shift+Q düzlem seç · X/Y/Z/V düzlem · I ızgara · Shift 15°")
+            box.label(text="X/Y/Z eksen kilidi · Shift+X/Y/Z, V düzlem · G geçici zemin")
+            box.label(text="Shift+Q düzlem seç · I ızgara · Shift 15°")
             box.prop(context.scene, "minicad_grid_alpha", slider=True)
             if hasattr(context.scene, "minicad_grid_fade"):
                 box.prop(context.scene, "minicad_grid_fade", slider=True)

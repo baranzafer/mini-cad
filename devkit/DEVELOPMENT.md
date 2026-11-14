@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.5)
+# Mini CAD — Geliştirme Notları (v0.25.6)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -52,7 +52,7 @@ Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`
 **Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
 beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
 
-Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t65.py` ...),
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t66.py` ...),
 sürüm artırılır ve paketlenir (§8).
 
 ---
@@ -279,7 +279,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `constraints_glyphs.py` | 268 | Kısıt simgesi çizimi, `glyph_at` |
 | `draw.py` | 946 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt; **MINICAD_OT_edit_sketch** (Çizimi Düzenle) ve menü girişleri |
 | `draw_common.py` | 481 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
-| `draw_plane.py` | 537 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (U) |
+| `draw_plane.py` | 537 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (G) |
 | `draw_snap.py` | 663 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
 | `draw_sketch.py` | 848 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
 | `draw_edit.py` | 433 | EditMixin: taslak noktası / tutamaç sürükleme, pivot, sürüklerken yakalama, sürüklerken ölçü yardımcısı |
@@ -361,8 +361,17 @@ bpy.types.Operator)`. Mixin'lerde **aynı adlı metot olmamalı** (v0.16'da
 
 Diğer kısayollar:
 - **Araç geçişi:** Q son iki araç arasında geçiş yapar. Shift+Q düzlemi yeniden seçtirir.
-- **Düzlem:** X / Y / Z / V.
-- **Geçici zemin (U):** çizerken ızgaranın yönü ve yüksekliği değiştirilir (aşağıya bakın).
+- **Eksen kilidi (v0.25.6):** X / Y / Z — Blender'daki G → X gibi: son noktadan DÜNYA ekseni
+  boyunca (Blender gizmosuyla aynı yön, X kırmızı / Y yeşil / Z mavi çizgi). Tekrar basana kadar
+  sürer (noktadan noktaya da). Yakalama kilidi bozmaz: yakalanan nokta eksene izdüşer
+  ("Uç hizası", `snap_id` yazılmaz); ızgara eksen boyunca; yazılan uzunluk imleç yönünde ('-'
+  ile ters). Doğruya otomatik AXIS kısıtı. Şekil araçlarında (daire, dikdörtgen, çok
+  tıklamalılar) uygulanmaz. Önce X/Y/Z düzlem seçiyordu (X → YZ: X'e DİK düzlem, kullanıcıyı
+  şaşırtıyordu; yakalanan nokta düzlem dışındaysa kilit bozuluyordu). `_axis_point`.
+  Sürüklemede (draw_edit) eksen kilidi de artık yakalamayı eksene izdüşürür.
+- **Düzlem:** Shift+X / Shift+Y / Shift+Z (Blender'daki gibi: o eksen dışındaki düzlem), V.
+- **Geçici zemin (G; v0.25.6'ya kadar U):** çizerken ızgaranın yönü ve yüksekliği değiştirilir
+  (aşağıya bakın). Sol el ASD bölgesinde kalsın diye G (Ground).
 - **Çizerken:**
   - C: başlangıca dönüp kapatır. F: kapalı çizgiden yüzey (Ctrl+F: yeni gövde).
   - Shift: 15° adım. Ctrl: yakalama kapalı. I: ızgara yakalaması aç / kapa.
@@ -704,7 +713,7 @@ devam eder; boşlukta başlarsa 3 noktalı yay gibi davranır. `start_tan` iki k
 - v0.15.0–0.15.2'de ikinci kaynak yoktu. Sağ tıkla taslağa eklenen çizginin ucundan başlayan
   teğet yay 3 noktalı yaya düşüyordu (v0.15.3'te düzeltildi).
 
-**Geçici zemin (U)** (`draw_plane`: `_temp_begin`, `_temp_end`, `_temp_cancel`):
+**Geçici zemin (G)** (`draw_plane`: `_temp_begin`, `_temp_end`, `_temp_cancel`):
 - Çizim fazında **U**: süren çizgi taslağa eklenir, iki aşamalı düzlem seçimi açılır.
   - 1/2 yön: eksen düzlemi, yüz ya da X/Y/Z/V. **Sağ tık / Enter: mevcut yön**, sadece
     yükseklik değişir. Esc: iptal, araç açık kalır.
@@ -713,8 +722,8 @@ devam eder; boşlukta başlarsa 3 noktalı yay gibi davranır. `start_tan` iki k
     gösterilir. Yakalanan noktadan taban düzlemine hiza çizgisi çizilir.
 - Onaylanınca `plane_mode = "LOCK"` olur ve `self.temp = {"saved", "plane", "label", "grid_o"}`
   tutulur. Yükseklik bir noktadan alındıysa ızgara kökeni (`_grid_origin`) o noktaya taşınır.
-- Tekrar **U**'ya basılana kadar bütün yeni çizgiler bu zemine çizilir. U: asıl düzleme dönülür
-  (`saved`). **Shift+U:** başka bir geçici zemin seçilir, asıl düzlem korunur.
+- Tekrar **G**'ye basılana kadar bütün yeni çizgiler bu zemine çizilir. G: asıl düzleme dönülür
+  (`saved`). **Shift+G:** başka bir geçici zemin seçilir, asıl düzlem korunur.
 - Açık düzlem seçimi (X/Y/Z/V, palet, Shift+Q) geçici zemini bitirir ve kalıcı olur.
 - Ekranın sol altında "Geçici zemin: ..." etiketi görünür; durum çubuğunda da yazar.
 - **Zeminde kalma** (`_temp_plane`, `_on_temp`, `_temp_tangent`; v0.15.4):
@@ -856,7 +865,7 @@ Betiğin yaptıkları:
 | t41 | Palet, araçlar, kısıtlar, düzlem, ızgara, seç, simge menüsü, Q |
 | t42 | Teğet senaryoları (arcslide dahil) |
 | t43 | Taslak, sürükleme, T izi, geri al / yinele, pivot, tutamaç yakalama, yeni hedef |
-| t44 | Taslak çizgisinin ucundan teğet yay, sürüklerken ölçü yardımcısı, geçici zemin (U) |
+| t44 | Taslak çizgisinin ucundan teğet yay, sürüklerken ölçü yardımcısı, geçici zemin (G) |
 | t45 | Geçici zeminde eski çizime yapışınca zeminde kalma, seçim sırasında taslak görünürlüğü, noktadan zemin |
 | t46 | Yüzey birleşimi: gather → motor kurma sırası, gövde sırası, imza, eski dosya |
 | t47 | Değiştir araçları modal: Kırp (sürükleme, Shift), Uzat, Böl, Ötele, Köşe yuvarla, Pah, ayrı uçları birleştirme, Bitir, çizim |
@@ -877,6 +886,7 @@ Betiğin yaptıkları:
 | tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme, Coons'a göre taşma, teğet ağırlığı, üçgenli model) |
 | t62 | Ölçü girişi: 3 noktalı yay (kiriş, yarıçap, 180° / 270°), merkezli yay (merkez → başlangıç → bitiş, zincirden, 200°), teğet yay (R + açı, yalnız R), doğru, daire, dikdörtgen, CV, spline, kalem; yeni eğrinin gizli koleksiyon / yerel görünüm bağlanması |
 | t61 | (F–H: v0.25.2 çok yüzeyli bıçak: üç kareyi tek çizgiyle kesme, boşluktan geçen çizgi, gizli kenarlar) Yüzeyi Böl: iki kare yüzeyde halka döngü kesimi (nokta ekleme, referans / kısıt / fillet eşleme, 4 parça), bıçak (köşe → kenar ortası, aynı kenar reddi), yarım silindirde kesimin yüzeyde kalması, ilişkili spline reddi (değişiklik yok), modal araç (hover, tekerlek, oran, tık, bıçak, Esc) |
+| t65 | Eksen kilidi: X / Y (dünya ekseni), yakalama eksene izdüşer (kilit bozulmaz), sonraki noktada sürer, tekrar basınca kapanır, üstten Z ile dikey, otomatik AXIS, Shift+X düzlem, sürüklemede yakalama izdüşümü |
 | t64 | Taslakta Teğet / Pürüzsüz: doğru + 3 noktalı yay (doğru aynı, yay uçları yerinde, gerçek yay, kırılma 15.8° → 0), sürükleme sonrası, G2 doğru–yay açıklaması, doğru + spline (yalnız tutamaç), yay + spline G2 (eğrilik eşit), daireye teğet doğru, Bitir |
 | t63 | Hesaplanamayan yüzey / işlem uyarı satırları (gizli gövde, kapalı / başarılı işlem yok, kısaltma, en fazla 5 satır) |
 | tools/occ_shell_bool_check.py | GERÇEK OCC ile açık kabukta Kesim / Kesişim / Birleşim reddi / değmeyen araç |
@@ -913,7 +923,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - Belirsiz gövde kenarı eşleşmesi **reddedilir**, tahmin edilmez.
 - Teğet arcslide: yay geometrisi korunur, doğru uyum sağlar.
 - Teğet yay ilk tıklamadan çalışır; taslaktaki çizginin ucundan başlayınca da teğettir.
-- Geçici zemin: U ile girilir, U ile asıl düzleme dönülür. Seçilirken Esc aracı kapatmaz.
+- Geçici zemin: G ile girilir, G ile asıl düzleme dönülür (v0.25.6'ya kadar U). Seçilirken Esc aracı kapatmaz.
 - Geçici zeminde her nokta zeminde kalır: eski çizimin noktalarına yapışılır ama izdüşürülür.
 - Düzlem / zemin seçilirken taslak görünür kalır.
 - Yüzey birleşimi varsayılanı Keskin'dir. v0.24'ten beri Keskin'de eğri 4 kenarlı yamalar
@@ -1071,6 +1081,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - "Teğet – serbest dolgu" seçeneği (eski davranış).
   - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
   - Test t60; araçlar genişletildi.
+- **0.25.6:** X / Y / Z Blender gibi eksen kilidi (dünya ekseni, yakalama bozmaz, tekrar
+  basana kadar); düzlem Shift+X/Y/Z; geçici zemin U → G. Test t65.
 - **0.25.5:** taslakta Teğet / Pürüzsüz anında ve biçimi bozmadan (yay yeniden kurulur, doğru
   korunur, eğride yalnız tutamaç). Test t64.
 - **0.25.4:** açık kabuk (yüzey) gövdede boolean: Kesim / Kesişim yüzeyi budar; başarısız

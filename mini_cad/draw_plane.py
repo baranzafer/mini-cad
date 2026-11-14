@@ -313,7 +313,7 @@ class PlaneMixin:
             self.temp = {"saved": tp["saved"], "plane": plane, "label": label,
                          "grid_o": off.get("snap") if off.get("snap") is not None else None}
             self._status(context, f"Geçici zemin: {label} · yeni çizgiler bu zemine çizilir · "
-                                  "U: normal düzleme dön")
+                                  "G: normal düzleme dön")
             return
         if abs(t) > 1e-12:
             self._status(context, f"Çizim düzlemi: {dm.PLANE_LABELS.get(off['name'], off['name'])}"

@@ -14,7 +14,7 @@ def reset():
     op._set_plane("XY"); op._set_tool(ctx, "LINE"); op.dirty = True
 
 def to_temp(h):
-    key("U"); key("Z"); typ(h); key("RET")
+    key("G"); key("Z"); typ(h); key("RET")
     check(op.temp is not None and abs(op.locked.o[2] - float(h)) < 1e-12, f"geçici zemin z={h}")
 
 print("A) Eski çizimin ucuna yapışınca çizgi YENİ zeminde başlar ve sürer:")
@@ -59,7 +59,7 @@ print("C) Kaydedilmiş eğri ucuna yapışınca da zeminde kalır; U ile normale
 op._set_tool(ctx, "LINE"); op.dirty = True
 move((0, 0))
 check(op.snap_kind == "Uç" and abs(op.cursor[2] - 0.5) < 1e-12, "eğri ucu zemine izdüştü")
-key("U")
+key("G")
 op.dirty = True
 move((0, 0))
 check(op.snap_src is None and abs(op.cursor[2]) < 1e-12, "normal düzlemde eski davranış (nokta kendisi)")
@@ -83,7 +83,7 @@ sys.modules["gpu"].state = NS(blend_set=lambda *a: None, depth_test_set=lambda *
 dr = importlib.import_module("mini_cad.draw_render")
 for nm in ("_text", "_rect", "_dashed", "_poly", "_marker"):
     setattr(dr, nm, lambda *a, **k: (10, 10))
-key("U")
+key("G")
 check(op.phase == "PLANE", "yön seçimi")
 op._draw3d(); op._draw2d()
 check("3d" in drawn and "2d" in drawn, f"taslak yön seçiminde çiziliyor: {drawn}")
@@ -97,11 +97,11 @@ check(op.phase == "DRAW" and op.temp is None, "iptal")
 print("E) Yön seçerken noktaya tık: o noktadan geçen zemin (tek adım)")
 op.sketch[0]["segs"][0]["p"] = tuple(np.array(q) + np.array([0, 0, 0.7]) for q in op.sketch[0]["segs"][0]["p"])
 op.dirty = True
-key("U"); click((1.0, 1.0))
+key("G"); click((1.0, 1.0))
 check(op.phase == "DRAW" and op.temp is not None and abs(op.locked.o[2] - 0.7) < 1e-12,
       f"zemin noktanın yüksekliğinde: {op.temp and op.temp['label']}")
 check(np.allclose(op.temp["grid_o"], (1, 1, 0.7)), "ızgara kökeni o nokta")
-key("U")
+key("G")
 
 print("F) Normal düzlem seçiminde (Shift+Q) iki aşama korunur, nokta tek adımı yok")
 key("Q", shift=True)

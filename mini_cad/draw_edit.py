@@ -302,9 +302,14 @@ class EditMixin:
             den = 1.0 - bb * bb
             t = float(np.dot(w0, ax) - bb * np.dot(w0, rdn)) / den if den > 1e-9 else 0.0
             typed = self._signed_len(self.typed[0]) if self.typed[0] else None
+            snap = None if (typed is not None or no_snap) else \
+                self._point_snap_excluding(mx, my, ro, rd, p0)
             if typed is not None:
                 t = typed
                 self.info = {"kind": f"{'XYZ'[d['axis']]} · yazılan"}
+            elif snap is not None:                 # yakalama eksene izdüşer (v0.25.6)
+                t = float(np.dot(np.asarray(snap[0], dtype=np.float64) - p0, ax))
+                self.info = {"kind": f"{'XYZ'[d['axis']]} · {snap[1]} hizası"}
             elif self.grid_on and not no_snap:
                 q = p0 + ax * t
                 gs = self._grid_step(q)

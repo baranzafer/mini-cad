@@ -38,6 +38,11 @@ class SketchMixin:
         """Doğru parçası için çizerken yakalanan kısıtlar."""
         out = []
         info = self.info or {}
+        if info.get("axis") is not None:                  # eksen kilidi (X / Y / Z)
+            out.append(("AXIS", int(info["axis"])))
+            if typed_len is not None:
+                out.append(("DIST", typed_len))
+            return out
         kind = (info.get("kind") or "").split(" + ")[0]
         pl = info.get("plane") or self.plane
         if kind in AXIS_OF and pl is not None and pl.name in AXIS_OF[kind]:

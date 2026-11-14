@@ -41,6 +41,13 @@ class RenderMixin:
                 self._draw_modify3d(region)
             if self.grid_on and self.cursor is not None and not self.tool.startswith("C_"):
                 self._draw_grid(region)
+            ax_i = getattr(self, "axis_lock", None)
+            anc = self._lock_anchor() if ax_i is not None else None
+            if anc is not None and not self.tool.startswith("C_"):
+                ax = np.zeros(3)
+                ax[ax_i] = 1.0
+                L = max(float(self.rv3d.view_distance) * 4.0, 1.0)
+                _poly([tuple(anc - ax * L), tuple(anc + ax * L)], _axis_col(ax), 1.6, region)
             for s in self.segs:
                 _poly([tuple(p) for p in dm.sample(s, 2 if s["kind"] == "line" else 16)],
                       COL_DONE, 2.5, region)
@@ -177,7 +184,7 @@ class RenderMixin:
                   "sketch": len(self.sketch)}
             if self.phase == "DRAW" and getattr(self, "temp", None) is not None:
                 sc = self.ui_scale
-                txt = f"Geçici zemin: {self.temp['label']}  ·  U: normale dön"
+                txt = f"Geçici zemin: {self.temp['label']}  ·  G: normale dön"
                 _rect(10 * sc, 10 * sc, 10 * sc + 7.2 * sc * len(txt) + 14 * sc, 34 * sc, COL_BOX)
                 _text(17 * sc, 17 * sc, txt, COL_SNAP, int(12 * sc))
             if self.phase == "DRAW":
