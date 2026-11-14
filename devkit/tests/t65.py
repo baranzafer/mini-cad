@@ -62,3 +62,63 @@ if op.sk_drag is not None:
 else:
     print("  (sürükleme başlamadı, atlandı)")
 print("t65 bitti")
+# ---- v0.25.10: düzlem kilidi (Shift+X/Y/Z) — eksen kilidini kapatır, yakalama bozmaz
+print("G) Shift+Z eksen kilidi açıkken: eksen kilidi kapanır, düzlem etkin")
+if op.sk_drag is not None:
+    op.modal(ctx, ev("LEFTMOUSE", (2.0, 2.0), val="RELEASE"))
+op.sk_drag = None
+op.sketch.clear(); op._hist_reset(); op._set_plane("AUTO"); op._set_tool(ctx, "LINE"); op.dirty = True
+op.axis_lock = None
+click((2.0, 2.0)); click((3.0, 3.0)); key("RET")
+op.sketch[-1]["segs"][0]["p"] = tuple(np.asarray(q, float) + (0, 0, 0.8) for q in op.sketch[-1]["segs"][0]["p"])
+op.dirty = True                                    # yakalanacak çizgi z = 0.8'de (düzlem dışı)
+click((0.5, -1.0))
+key("X"); check(op.axis_lock == 0, "X kilidi açık")
+key("Z", shift=True)
+check(op.plane_mode == "XY" and op.axis_lock is None, "Shift+Z: XY düzlemi, eksen kilidi kapandı")
+move((1.7, 0.4))
+check(np.allclose(op.cursor, (1.7, 0.4, 0)), f"imleç serbest, düzlemde: {op.cursor}")
+print("H) Düzlem dışındaki noktaya yakalama: düzleme izdüşer, kilit bozulmaz")
+P_end = np.asarray(op.sketch[-1]["segs"][0]["p"][0], float)
+move(tuple(P_end[:2]))
+check(abs(P_end[2] - 0.8) < 1e-9 and np.allclose(op.cursor, (P_end[0], P_end[1], 0.0)) and op.snap_id is None
+      and "hizası" in (op.info or {}).get("kind", ""), f"uç hizası, z = 0 kaldı: {op.cursor} · {op.info}")
+click(tuple(P_end[:2]))
+check(abs(op.segs[-1]["p"][3][2]) < 1e-9, "nokta düzlemde kondu")
+key("Z", shift=True)
+check(op.plane_mode == "AUTO", "tekrar Shift+Z: düzlem kilidi kapandı")
+move(tuple(P_end[:2]))
+check(abs(op.cursor[2] - 0.8) < 1e-9, f"kilitsiz: yakalama noktanın kendisine gider (eski davranış): {op.cursor}")
+key("RET")
+print("I) Sürüklemede Shift+X: YZ düzlem kilidi (önce X ekseni kilidi oluyordu)")
+st = op.sketch[-1]
+n0 = np.asarray(st["segs"][0]["p"][0], float)
+op._set_tool(ctx, "SELECT"); op.dirty = True
+move(tuple(n0[:2])); op.modal(ctx, ev("LEFTMOUSE", tuple(n0[:2])))
+move((n0[0] + 0.3, n0[1] + 0.1))
+check(op.sk_drag is not None, "sürükleme başladı")
+key("X", shift=True)
+d = op.sk_drag
+check(d["axis"] is None and d.get("plane_lock") == 0 and d["plane"].name == "YZ", "Shift+X: YZ düzlem kilidi, eksen kilidi değil")
+move((n0[0] + 0.7, n0[1] + 0.4))
+q = np.asarray(op.sketch[-1]["segs"][0]["p"][0], float)
+check(abs(q[0] - n0[0]) < 1e-9, f"X sabit kaldı: {q}")
+move(tuple(P_end[:2]))                             # başka çizginin ucu: x farklı
+q = np.asarray(op.sketch[-1]["segs"][0]["p"][0], float)
+check(abs(q[0] - n0[0]) < 1e-9, f"yakalamada da X sabit (düzleme izdüşüm): {q} · {op.info}")
+key("X", shift=True)
+check(op.sk_drag.get("plane_lock") is None and op.sk_drag["plane"].name != "YZ", "tekrar Shift+X: kilit kapandı")
+key("X")
+check(op.sk_drag["axis"] == 0, "X: eksen kilidi hâlâ çalışıyor")
+print("J) Çizimde üstten bakarken Shift+X (düzleme kenarından bakış): imleç donmaz, X sabit")
+op.modal(ctx, ev("LEFTMOUSE", (2.0, 2.0), val="RELEASE")); op.sk_drag = None
+op.sketch.clear(); op._hist_reset(); op._set_plane("AUTO"); op._set_tool(ctx, "LINE"); op.dirty = True
+click((0.5, -1.0))
+key("X", shift=True)
+check(op.plane_mode == "YZ", "Shift+X: YZ")
+move((1.9, 0.7))
+check(abs(op.cursor[0] - 0.5) < 1e-9 and abs(op.cursor[1] - 0.7) < 1e-6, f"X sabit, Y fareyi izliyor: {op.cursor}")
+move((2.4, -0.3))
+check(abs(op.cursor[0] - 0.5) < 1e-9 and abs(op.cursor[1] + 0.3) < 1e-6, f"hareket sürüyor: {op.cursor}")
+op._set_plane("AUTO")
+print("SONUÇ: tamam")

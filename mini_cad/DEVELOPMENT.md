@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.9)
+# Mini CAD — Geliştirme Notları (v0.25.10)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -419,6 +419,20 @@ Diğer kısayollar:
   şaşırtıyordu; yakalanan nokta düzlem dışındaysa kilit bozuluyordu). `_axis_point`.
   Sürüklemede (draw_edit) eksen kilidi de artık yakalamayı eksene izdüşürür.
 - **Düzlem:** Shift+X / Shift+Y / Shift+Z (Blender'daki gibi: o eksen dışındaki düzlem), V.
+  - **Düzlem kilidi (v0.25.10;** kullanıcı: "Shift+X YZ'de kilitlemiyor, işe yaramıyor; başka
+    yakalamayla karşılaşınca kilit bozulmasın"). Üç ayrı sebep vardı:
+    - Düzleme kenarından bakılırken (üstten bakışta Shift+X → YZ) ışın düzlemi kesmiyor, imleç
+      donuyor / fırlıyordu. `_plane_hit`: |ışın · normal| < 0.15 ise fare, düzlem başlangıcından
+      geçen görünüş düzlemine alınıp kilitli düzleme izdüşürülür (ekranda görünen doğrultuda
+      hareket). Yalnızca açıkça seçilen eksen düzlemlerinde.
+    - Eksen kilidi (X) açıkken Shift+X etkisizdi (eksen kilidi öncelikli). Düzlem seçmek artık
+      eksen kilidini kapatır.
+    - Düzlem dışındaki noktaya yakalanınca çizim düzlemden çıkıyordu. `PLANE_LOCK_MODES`
+      (XY / XZ / YZ / VIEW) ve kurulu düzlemde yakalanan nokta düzleme izdüşer ("… hizası",
+      `snap_id` yazılmaz). Otomatik düzlemde ve seçili (LOCK) düzlemde eski davranış.
+    - Taslak sürüklemede (draw_edit) Shift'e bakılmıyor, Shift+X de X ekseni kilidi oluyordu.
+      Artık `d["plane_lock"]`: o eksene dik dünya düzlemi (sürüklenen noktadan), yakalama
+      düzleme izdüşer; tekrar Shift+X ya da X/Y/Z kapatır (`plane0`'a döner).
 - **Geçici zemin (G; v0.25.6'ya kadar U):** çizerken ızgaranın yönü ve yüksekliği değiştirilir
   (aşağıya bakın). Sol el ASD bölgesinde kalsın diye G (Ground).
 - **Çizerken:**
@@ -935,7 +949,7 @@ Betiğin yaptıkları:
 | tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme, Coons'a göre taşma, teğet ağırlığı, üçgenli model) |
 | t62 | Ölçü girişi: 3 noktalı yay (kiriş, yarıçap, 180° / 270°), merkezli yay (merkez → başlangıç → bitiş, zincirden, 200°), teğet yay (R + açı, yalnız R), doğru, daire, dikdörtgen, CV, spline, kalem; yeni eğrinin gizli koleksiyon / yerel görünüm bağlanması |
 | t61 | (F–H: v0.25.2 çok yüzeyli bıçak: üç kareyi tek çizgiyle kesme, boşluktan geçen çizgi, gizli kenarlar) Yüzeyi Böl: iki kare yüzeyde halka döngü kesimi (nokta ekleme, referans / kısıt / fillet eşleme, 4 parça), bıçak (köşe → kenar ortası, aynı kenar reddi), yarım silindirde kesimin yüzeyde kalması, ilişkili spline reddi (değişiklik yok), modal araç (hover, tekerlek, oran, tık, bıçak, Esc) |
-| t65 | Eksen kilidi: X / Y (dünya ekseni), yakalama eksene izdüşer (kilit bozulmaz), sonraki noktada sürer, tekrar basınca kapanır, üstten Z ile dikey, otomatik AXIS, Shift+X düzlem, sürüklemede yakalama izdüşümü |
+| t65 | (G–J: v0.25.10 düzlem kilidi: eksen kilidini kapatma, düzlem dışı yakalamanın izdüşümü, sürüklemede Shift+X, kenardan bakış)  Eksen kilidi: X / Y (dünya ekseni), yakalama eksene izdüşer (kilit bozulmaz), sonraki noktada sürer, tekrar basınca kapanır, üstten Z ile dikey, otomatik AXIS, Shift+X düzlem, sürüklemede yakalama izdüşümü |
 | t64 | Taslakta Teğet / Pürüzsüz: doğru + 3 noktalı yay (doğru aynı, yay uçları yerinde, gerçek yay, kırılma 15.8° → 0), sürükleme sonrası, G2 doğru–yay açıklaması, doğru + spline (yalnız tutamaç), yay + spline G2 (eğrilik eşit), daireye teğet doğru, Bitir |
 | t63 | Hesaplanamayan yüzey / işlem uyarı satırları (gizli gövde, kapalı / başarılı işlem yok, kısaltma, en fazla 5 satır) |
 | tools/occ_fold_check.py | GERÇEK OCC ile katlanma denetimi (zıt yarılar, kelebek; doğru yüzeyde yanlış alarm yok) |
@@ -1136,6 +1150,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - **0.25.7:** katlanan yüzey uyarısı (panel + 3D görünüm); kayıt raporunda yüzey sınırları.
 - **0.25.8:** karşılıklı kenarlar yay uzunluğuna göre eşleşir (iki uçta farklı parçalanmış profilde çapraz kırışık / katlanma düzeltmesi); sınır yüzeyi uydurma denetimi.
 - **0.25.9:** Kenar Seç düzenleme modunda bekler (tutamaç çoklu / kutu seçimi), Tab ile tel kafesi düzenleme, gövde düzenleme modundayken kaybolan güncelleme.
+- **0.25.10:** Shift+X/Y/Z düzlem kilidi: kenardan bakışta çalışır, eksen kilidini kapatır, yakalama düzleme izdüşer; taslak sürüklemede de düzlem kilidi.
 - **0.25.6:** X / Y / Z Blender gibi eksen kilidi (dünya ekseni, yakalama bozmaz, tekrar
   basana kadar); düzlem Shift+X/Y/Z; geçici zemin U → G. Test t65.
 - **0.25.5:** taslakta Teğet / Pürüzsüz anında ve biçimi bozmadan (yay yeniden kurulur, doğru

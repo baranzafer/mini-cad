@@ -728,6 +728,12 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             if event.type in {"X", "Y", "Z", "V"}:
                 mode = {"X": "YZ", "Y": "XZ", "Z": "XY", "V": "VIEW"}[event.type]
                 self._set_plane("AUTO" if self.plane_mode == mode else mode)
+                # v0.25.10: eksen kilidi açıksa düzlem seçimi etkisiz kalıyordu (eksen kilidi
+                # öncelikli) → "Shift+X işe yaramıyor". Düzlem seçmek eksen kilidini kapatır.
+                self.axis_lock = None
+                self._status(context, f"Düzlem kilidi: {dm.PLANE_LABELS[mode]} — yakalamalar "
+                                      f"düzleme izdüşer (tekrar: kapat)"
+                             if self.plane_mode == mode else "Düzlem: otomatik")
                 self._refresh(context)
                 return {"RUNNING_MODAL"}
             if event.type == "T" and not self.tool.startswith("C_") and self.tool != "PEN":

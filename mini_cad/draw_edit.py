@@ -219,11 +219,27 @@ class EditMixin:
             return {"RUNNING_MODAL"}
         if event.type in {"X", "Y", "Z"} and press:
             ax = {"X": 0, "Y": 1, "Z": 2}[event.type]
-            d["axis"] = None if d["axis"] == ax else ax
+            if event.shift:
+                # v0.25.10: Blender gibi Shift+X = YZ düzlemi (o eksen dışındaki düzlem).
+                # Önce Shift'e bakılmıyor, Shift+X de X ekseni kilidi oluyordu.
+                d.setdefault("plane0", d["plane"])
+                d["axis"] = None
+                if d.get("plane_lock") == ax:
+                    d["plane_lock"], d["plane"] = None, d["plane0"]
+                else:
+                    d["plane_lock"] = ax
+                    d["plane"] = dm.Plane.axis(("YZ", "XZ", "XY")[ax], d["pos"])
+                where = (("YZ", "XZ", "XY")[ax] + " düzleminde (kilitli)"
+                         if d["plane_lock"] is not None else "düzlemde")
+            else:
+                d["axis"] = None if d["axis"] == ax else ax
+                if d.get("plane_lock") is not None:
+                    d["plane_lock"], d["plane"] = None, d["plane0"]
+                where = "XYZ"[ax] + " ekseninde" if d["axis"] is not None else "düzlemde"
             if d["moved"]:
                 self._drag_apply(mx, my)
-            self._status(context, f"Sürükleme: {'XYZ'[ax] + ' ekseninde' if d['axis'] is not None else 'düzlemde'}"
-                                  " · X/Y/Z: eksen kilidi · sağ tık / Esc: iptal")
+            self._status(context, f"Sürükleme: {where} · X/Y/Z: eksen kilidi · Shift+X/Y/Z: "
+                                  "düzlem kilidi · sağ tık / Esc: iptal")
             self.area.tag_redraw()
             return {"RUNNING_MODAL"}
         if event.type in MODIFIERS:
@@ -322,7 +338,8 @@ class EditMixin:
                 self.info = {"kind": f"{'XYZ'[d['axis']]} ekseni"}
         else:
             plane = d["plane"]
-            new = plane.ray_hit(ro, rd)
+            new = self._plane_hit(plane, ro, rd) if d.get("plane_lock") is not None \
+                else plane.ray_hit(ro, rd)
             if new is None:
                 return
             anc = self._dim_anchor()
@@ -335,7 +352,17 @@ class EditMixin:
                 self.info = {"kind": "Yazılan", "plane": plane}
             elif not no_snap:
                 snap = self._point_snap_excluding(mx, my, ro, rd, p0)
-                if snap is not None:
+                if snap is not None and d.get("plane_lock") is not None:
+                    # düzlem kilidi: yakalanan nokta düzleme izdüşer, kilit bozulmaz
+                    new = np.asarray(snap[0], dtype=np.float64)
+                    off = abs(float(plane.dist(new))) > 1e-9
+                    new = new - plane.n * plane.dist(new)
+                    if off:
+                        self.info = {"kind": f"{plane.name} düzlemi · {snap[1]} hizası",
+                                     "plane": plane}
+                    else:
+                        self.snap_kind = snap[1]
+                elif snap is not None:
                     new = np.asarray(snap[0], dtype=np.float64)
                     self.snap_kind = snap[1]
                 else:

@@ -19,6 +19,9 @@ from .draw_common import (
 )
 
 
+PLANE_LOCK_MODES = {"XY", "XZ", "YZ", "VIEW"}   # açıkça seçilen düzlem: yakalama izdüşer
+
+
 class SnapMixin:
     """Yakalama ve çıkarım: nokta yakalama, sezgisel kılavuzlar (FORGE snap_math), teğet
     uzantılar, yay devamı, eksen kilitleri, önizleme ve T ile iz (başlangıç noktası tayini)."""
@@ -404,6 +407,7 @@ class SnapMixin:
 
         # Çalışma düzlemi
         plane = self._cur_plane()
+        had_plane = plane is not None
         if plane is None:
             if snap is not None:
                 plane = self._make_plane(self.plane_mode, snap[0])
@@ -429,8 +433,18 @@ class SnapMixin:
         if snap is not None and not locked:
             p = np.asarray(snap[0], dtype=np.float64)
             self.snap_kind, self.snap_id = snap[1], snap[2]
+            if had_plane and self.plane_mode in PLANE_LOCK_MODES and \
+                    abs(float(plane.dist(p))) > 1e-9:
+                # v0.25.10: açıkça seçilmiş düzlemde (Shift+X/Y/Z, V) düzlem dışındaki noktaya
+                # yapışınca çizim düzlemden çıkıyordu. Nokta düzleme izdüşer (eksen kilidindeki
+                # gibi "hiza"); kilit bozulmaz.
+                p = p - plane.n * plane.dist(p)
+                self.snap_kind = self.snap_id = None
+                self.info = {"kind": f"{dm.PLANE_LABELS.get(plane.name, plane.name)} · "
+                                     f"{snap[1]} hizası", "plane": plane}
         else:
-            p = plane.ray_hit(ro, rd)
+            p = self._plane_hit(plane, ro, rd) if self.plane_mode in dm.AXIS_PLANES \
+                else plane.ray_hit(ro, rd)
             if p is None:
                 p = self.cursor if self.cursor is not None else plane.o
             if not no_snap and not locked:
@@ -474,6 +488,25 @@ class SnapMixin:
             return
         self.cursor = self._on_temp(np.asarray(p, dtype=np.float64))
         self._make_preview(plane)
+
+    def _plane_hit(self, plane, ro, rd):
+        """Kilitli düzlemde imleç noktası (v0.25.10). Düzleme kenarından bakılıyorsa (ör.
+        üstten bakarken Shift+X → YZ) ışın düzlemi kesmez ya da çok uzakta keser: imleç
+        donuyor / fırlıyordu ("Shift+X işe yaramıyor"). O zaman fare, düzlemin başlangıcından
+        geçen görünüş düzlemine alınır ve kilitli düzleme izdüşürülür (Blender'daki gibi:
+        düzlemin ekranda görünen doğrultusunda hareket)."""
+        rdn = rd / max(float(np.linalg.norm(rd)), 1e-15)
+        if abs(float(np.dot(rdn, plane.n))) >= 0.15:
+            return plane.ray_hit(ro, rd)
+        try:
+            vp = dm.Plane.from_normal(plane.o, -self._view_dir(), "VIEW",
+                                      u_hint=self._view_right())
+            h = vp.ray_hit(ro, rd)
+        except Exception:
+            h = None
+        if h is None:
+            return plane.ray_hit(ro, rd)
+        return h - plane.n * plane.dist(h)
 
     def _axis_point(self, anchor, i, ro, rd, snap, no_snap):
         """Eksen kilidi (Blender G → X gibi): anchor'dan dünya ekseni i boyunca nokta.
