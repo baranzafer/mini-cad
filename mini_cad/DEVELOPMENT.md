@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.7)
+# Mini CAD — Geliştirme Notları (v0.25.8)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -164,6 +164,31 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
   öbüründe alt yarısı) ya da raylar çapraz. Kullanıcı raporu: damla profilli tüp, ortada
   çapraz kırışık. Araç `devkit/tools/occ_fold_check.py`. Kayıt raporu artık her yüzeyin sınırını
   kenar kenar (segment referansları, uç ve orta noktalar) yazar (`recorder._patch_geometry`).
+- **Karşılıklı kenar eşleşmesi** (v0.25.8, `geometry._side_params`; kullanıcı: damla profilli
+  tüpün yarısı, iki uçtaki profil farklı parçalanmış → çapraz kırışık, Inventor'da sorun yok).
+  - Sebep: Coons / sınır yüzeyinde karşılıklı kenarlar parametreyle eşleşir ve her segment
+    parametrede EŞİT pay alıyordu (`_bspline_from_side` düğümleri 0, 1, 2 ...). 2 segmentli
+    kenarın ilk yarısı, karşıdaki 3 segmentli kenarın ilk 1.5 segmentiyle eşleşiyordu; segment
+    boyları farklıysa noktalar çapraz bağlanıyor, yüzey kırışıyor / katlanıyordu.
+  - Şimdi eşleşme **yay uzunluğuna göre** (Inventor sınır yüzeyi gibi). Geometri aynen kalır
+    (kenarlar ortak topoloji), yalnızca B-spline düğümleri / Hermite parametresi değişir:
+    - Her segmentin payı boyuyla orantılı. Hızı düzgün olmayan segment (tutamakları dengesiz
+      bezier; hız oranı > `PARAM_SPEED_RATIO` 1.25) de Casteljau ile eşit yay boylu 4 / 8
+      parçaya bölünür (`_arc_pieces`); doğru ve daire yayı bölünmez → eski yüzeyler aynı.
+    - İki karşı kenarın segment sayısı eşit ve köşeleri yay oranı olarak yakınsa
+      (`PARAM_JOINT_TOL` 0.15) köşe köşeye eşlenir (ortak konum iki oranın ortalaması).
+    - Noktaya inmiş kenar (3 kenarlı yamanın tepesi) eskisi gibi.
+    - `_loop_sides`: kenarları döngü yönüne çevirir (önce `_hermite` içindeydi). `_coons`,
+      `_coons_surface`, `_hermite` aynı parametreyi kullanır.
+  - **Uydurma denetimi** (`_fit_grid`): OCC'nin `GeomAPI_PointsToBSplineSurface` yaklaşık
+    uydurucusu sıkı toleransta bazen yakınsamadan "tamam" diyor: yüzey ızgara noktalarından
+    geçiyor ama aralarında salınıyor (yama boyunun %4'ü), kenarlara oturmadığı için yüz
+    geçersiz çıkıp Coons / Dolgu'ya düşülüyordu. Sonuç ızgara hücre ortalarında denetlenir
+    (7×7, izdüşüm); tutmazsa eş parametreli (`Approx_IsoParametric`) uydurma, sonra tam ara
+    değerleme (`Interpolate`) denenir.
+  - Ölçüm `devkit/tools/occ_param_check.py` (yarım koni, 2/3, 1/2, 3/3, 4/2 segment): doğru
+    yüzeyden sapma 0.09–0.51 → ≤ 0.004 (profil bezierinin kendi hatası düzeyi). Eski ölçümler
+    değişmedi (Coons regle sapması 0.0004 → 0.0006, halka teğet kırılması aynı).
 - **Hata uyarısı** (v0.25.4, `bool_overlay.error_lines` / `_draw_errors`, POST_PIXEL): görünür
   CAD gövdelerinde başarısız yüzey / işlemler 3D görünümün sol üstünde kırmızı yazılır (en
   fazla 5 satır). Önce yalnız panelde ve durum satırında ("Hatalı: Kesim 1") görünüyordu.
@@ -898,6 +923,7 @@ Betiğin yaptıkları:
 | t64 | Taslakta Teğet / Pürüzsüz: doğru + 3 noktalı yay (doğru aynı, yay uçları yerinde, gerçek yay, kırılma 15.8° → 0), sürükleme sonrası, G2 doğru–yay açıklaması, doğru + spline (yalnız tutamaç), yay + spline G2 (eğrilik eşit), daireye teğet doğru, Bitir |
 | t63 | Hesaplanamayan yüzey / işlem uyarı satırları (gizli gövde, kapalı / başarılı işlem yok, kısaltma, en fazla 5 satır) |
 | tools/occ_fold_check.py | GERÇEK OCC ile katlanma denetimi (zıt yarılar, kelebek; doğru yüzeyde yanlış alarm yok) |
+| tools/occ_param_check.py | GERÇEK OCC ile karşılıklı kenar eşleşmesi: iki uçta farklı parçalanmış profil (2/3, 1/2, 3/3, 4/2 segment, dengesiz tutamak) doğru yüzeyi verir, katlanmaz; sınır yüzeyi (Hermite) yolu dahil |
 | tools/occ_shell_bool_check.py | GERÇEK OCC ile açık kabukta Kesim / Kesişim / Birleşim reddi / değmeyen araç |
 | tools/occ_coons_check.py | GERÇEK OCC ile Coons sınır yüzeyi: iki kemer + iki düz kenar düz çizgili (regle) olmalı (Keskin / Teğet / serbest) |
 | tools/occ_split_check.py | GERÇEK OCC ile bölünen eğri yüzeyin biçimi ve yeni dikişteki teğetlik |
@@ -1091,6 +1117,7 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
   - Test t60; araçlar genişletildi.
 - **0.25.7:** katlanan yüzey uyarısı (panel + 3D görünüm); kayıt raporunda yüzey sınırları.
+- **0.25.8:** karşılıklı kenarlar yay uzunluğuna göre eşleşir (iki uçta farklı parçalanmış profilde çapraz kırışık / katlanma düzeltmesi); sınır yüzeyi uydurma denetimi.
 - **0.25.6:** X / Y / Z Blender gibi eksen kilidi (dünya ekseni, yakalama bozmaz, tekrar
   basana kadar); düzlem Shift+X/Y/Z; geçici zemin U → G. Test t65.
 - **0.25.5:** taslakta Teğet / Pürüzsüz anında ve biçimi bozmadan (yay yeniden kurulur, doğru

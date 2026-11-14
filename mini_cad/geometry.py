@@ -14,6 +14,7 @@ Segment formatı: {"p": [Vector...], "tag": (...), "ref": (...)}; 'p' 2 nokta (d
 veya 4 nokta (kübik bezier).
 """
 
+import bisect
 import importlib
 import math
 
@@ -109,6 +110,8 @@ _PointsToBSpline = _optional("OCP.GeomAPI", "GeomAPI_PointsToBSpline")
 _GeomFill = _optional("OCP.GeomFill", "GeomFill")
 _GeomAbs_C2 = _optional("OCP.GeomAbs", "GeomAbs_C2")
 _PointsToBSplineSurface = _optional("OCP.GeomAPI", "GeomAPI_PointsToBSplineSurface")
+_ProjectPointOnSurf = _optional("OCP.GeomAPI", "GeomAPI_ProjectPointOnSurf")
+_Approx_IsoParametric = _optional("OCP.Approx", "Approx_IsoParametric")
 
 if _PntArray is None:
     raise CadError("OCP: TColgp_Array1OfPnt bulunamadı (OCP 7.9 gerekli)")
@@ -240,19 +243,155 @@ def coons_available():
     return None not in (_GeomFill_BSplineCurves, _GeomFill_CoonsStyle, _RealArray, _IntArray)
 
 
-def _bspline_from_side(side):
-    """Bir kenar grubundaki ardışık segmentleri tek kübik BSpline'a çevirir."""
+def _bspline_from_side(side, pieces=None):
+    """Bir kenar grubundaki ardışık segmentleri tek kübik BSpline'a çevirir. pieces
+    (`_side_params` çıktısı) verilirse düğümler oradaki parametrelerdir: geometri aynı,
+    yalnızca eğri boyunca parametre dağılımı (karşı kenarla eşleşme) değişir."""
+    if pieces is None:
+        pieces = [(_np(_cubic(seg["p"])), float(i), float(i + 1), i)
+                  for i, seg in enumerate(side)]
     poles = []
-    for i, seg in enumerate(side):
-        c = _cubic(seg["p"])
+    for i, pc in enumerate(pieces):
+        c = [tuple(q) for q in pc[0]]
         poles += c if i == 0 else c[1:]
-    nseg = len(side)
+    nseg = len(pieces)
     knots = _RealArray(1, nseg + 1)
     mults = _IntArray(1, nseg + 1)
     for i in range(nseg + 1):
-        knots.SetValue(i + 1, float(i))
+        knots.SetValue(i + 1, float(pieces[i][1] if i < nseg else pieces[-1][2]))
         mults.SetValue(i + 1, 4 if i in (0, nseg) else 3)
     return Geom_BSplineCurve(_pnt_array(poles), knots, mults, 3)
+
+
+# ---------------------------------------------------------------- kenar parametreleri
+# v0.25.8: karşılıklı kenarların eşleşmesi. Önce her segment parametrede eşit pay alıyordu
+# (3 segmentli kenarın 1. segmenti, karşıdaki 2 segmentli kenarın ilk %33'üyle eşleşirdi) ve
+# segment içinde bezier parametresi kullanılıyordu. Kullanıcı: damla profilli tüp, iki uçtaki
+# profilin parçaları farklı → yüzey çapraz kırışıyor / katlanıyor; Inventor'da sorun yok.
+# Artık eşleşme yay uzunluğuna göre (Inventor sınır yüzeyi gibi); iki kenarın segment sayısı
+# aynı ve köşeleri yaklaşık aynı yerdeyse köşe köşeye eşlenir.
+
+PARAM_SPEED_RATIO = 1.25      # segment içi hız (en büyük / en küçük) bundan fazlaysa bölünür
+PARAM_JOINT_TOL = 0.15        # köşeler bu kadar (yay uzunluğu oranı) yakınsa köşe köşeye
+
+
+def _bez_split(P, t):
+    """Kübik bezieri t'de ikiye böler (de Casteljau; geometri aynen)."""
+    a, b, c, d = P
+    ab, bc, cd = a + (b - a) * t, b + (c - b) * t, c + (d - c) * t
+    abc, bcd = ab + (bc - ab) * t, bc + (cd - bc) * t
+    m = abc + (bcd - abc) * t
+    return np.array([a, ab, abc, m]), np.array([m, bcd, cd, d])
+
+
+def _bez_arc(P, m=48):
+    """(parametreler, birikimli uzunluk, hız oranı en büyük / en küçük)."""
+    ts = np.linspace(0.0, 1.0, m + 1)
+    Q = np.array([_bez(P, float(t)) for t in ts])
+    cum = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(Q, axis=0), axis=1))])
+    sp = np.array([np.linalg.norm(_bez_d(P, float(t))) for t in ts])
+    hi = float(sp.max())
+    ratio = hi / float(sp.min()) if float(sp.min()) > 1e-12 * max(hi, 1e-300) else np.inf
+    return ts, cum, ratio
+
+
+def _arc_pieces(P):
+    """Segmenti, parametresi yay uzunluğuna yakın parçalara böler: [(P, uzunluk)]. Hızı
+    zaten düzgün olan segment (doğru, daire yayı) bölünmez."""
+    ts, cum, ratio = _bez_arc(P)
+    L = float(cum[-1])
+    if L < 1e-12 or ratio <= PARAM_SPEED_RATIO:
+        return [(P, L)]
+    K = 4 if ratio <= 3.0 else 8
+    cuts = [float(np.interp(L * k / K, cum, ts)) for k in range(1, K)]
+    out, rest, t_prev = [], P, 0.0
+    for t in cuts:
+        a, rest = _bez_split(rest, (t - t_prev) / max(1.0 - t_prev, 1e-12))
+        out.append((a, L / K))
+        t_prev = t
+    out.append((rest, L / K))
+    return out
+
+
+def _loop_sides(sides):
+    """Kenarları döngü yönünde sıralar (side[i] sonu = side[i+1] başı); kopya döner."""
+    sd = [[{"p": [tuple(map(float, q)) for q in sg["p"]]} for sg in side] for side in sides]
+
+    def ends(side):
+        return np.array(side[0]["p"][0]), np.array(side[-1]["p"][-1])
+
+    def rev(side):
+        return [{"p": list(reversed(sg["p"]))} for sg in reversed(side)]
+    a0, b0 = ends(sd[0])
+    a1, b1 = ends(sd[1])
+    if min(np.linalg.norm(a0 - a1), np.linalg.norm(a0 - b1)) < \
+            min(np.linalg.norm(b0 - a1), np.linalg.norm(b0 - b1)):
+        sd[0] = rev(sd[0])
+    for i in range(1, len(sd)):
+        prev_end = ends(sd[i - 1])[1]
+        a, b = ends(sd[i])
+        if np.linalg.norm(b - prev_end) < np.linalg.norm(a - prev_end):
+            sd[i] = rev(sd[i])
+    return sd
+
+
+def _side_params(sd):
+    """Döngü yönünde sıralı 4 kenar için parça listeleri: her kenar
+    [(P 4×3, t0, t1, asıl segment indeksi)], t kenar boyunca 0..1. Karşılıklı kenarlar
+    (0-2, 1-3) aynı parametrede karşılıklı noktalara denk gelecek biçimde:
+    yay uzunluğuna göre; segment sayıları eşit ve köşeleri yakınsa köşe köşeye."""
+    raw = []                      # kenar başına: (parçalar [(P, L, seg)], köşe konumları 0..1)
+    for side in sd:
+        pcs, joints, tot = [], [0.0], 0.0
+        for k, sg in enumerate(side):
+            for P, L in _arc_pieces(_np(_cubic(_np(sg["p"])))):
+                pcs.append((P, L, k))
+                tot += L
+            joints.append(tot)
+        if tot < 1e-12:           # noktaya inmiş kenar (3 kenarlı yamanın tepesi)
+            raw.append(None)
+            continue
+        raw.append((pcs, np.array(joints) / tot, tot))
+    maps = [None] * len(sd)       # kenarın kendi yay oranı → ortak parametre (xs, ys)
+    for a, b in ((0, 2), (1, 3)):
+        if len(sd) != 4 or raw[a] is None or raw[b] is None:
+            continue
+        ja, jb = raw[a][1], raw[b][1]
+        if len(ja) == len(jb) and len(ja) > 2:
+            jb_r = 1.0 - jb[::-1]                  # karşı kenar ters yönde ilerler
+            if float(np.max(np.abs(ja - jb_r))) <= PARAM_JOINT_TOL:
+                mid = 0.5 * (ja + jb_r)
+                maps[a] = (ja, mid)
+                maps[b] = (jb, (1.0 - mid)[::-1])
+    out = []
+    for i, side in enumerate(sd):
+        if raw[i] is None:
+            n = len(side)
+            out.append([(_np(_cubic(_np(sg["p"]))), k / n, (k + 1) / n, k)
+                        for k, sg in enumerate(side)])
+            continue
+        pcs, _j, tot = raw[i]
+        res, acc = [], 0.0
+        for P, L, k in pcs:
+            s0, s1 = acc / tot, (acc + L) / tot
+            acc += L
+            if maps[i] is not None:
+                s0, s1 = (float(np.interp(x, maps[i][0], maps[i][1])) for x in (s0, s1))
+            if s1 - s0 < 1e-9:    # sıfır boylu parça: düğüm çakışmasın
+                continue
+            res.append((P, s0, s1, k))
+        if not res:
+            res = [(pcs[0][0], 0.0, 1.0, pcs[0][2])]
+        res[0] = (res[0][0], 0.0, res[0][2], res[0][3])
+        res[-1] = (res[-1][0], res[-1][1], 1.0, res[-1][3])
+        out.append(res)
+    return out
+
+
+def _coons_curves(sides):
+    """Coons için 4 sınır eğrisi (karşılıklı kenarlar yay uzunluğuna göre eşleşir)."""
+    sd = _loop_sides(sides)
+    return [_bspline_from_side(side, pcs) for side, pcs in zip(sd, _side_params(sd))]
 
 
 def _fix_face(face):
@@ -592,7 +731,7 @@ class Builder:
             raise CadError("Bu OCP sürümünde Coons desteği yok")
         if len(sides) != 4:
             raise CadError(f"Coons için tam 4 kenar gerekli, bu döngüde {len(sides)} kenar var")
-        curves = [_bspline_from_side(s) for s in sides]
+        curves = _coons_curves(sides)
         try:
             fill = _GeomFill_BSplineCurves(curves[0], curves[1], curves[2], curves[3],
                                            _GeomFill_CoonsStyle)
@@ -622,7 +761,7 @@ class Builder:
         if len(sides) != 4 or not coons_available():
             return None
         try:
-            curves = [_bspline_from_side(s) for s in sides]
+            curves = _coons_curves(sides)
             return _GeomFill_BSplineCurves(curves[0], curves[1], curves[2], curves[3],
                                            _GeomFill_CoonsStyle).Surface()
         except Exception:
@@ -758,35 +897,26 @@ class Builder:
         # kenarları döngü yönünde sırala: side[i] sonu = side[i+1] başı
         def ends(side):
             return np.array(side[0]["p"][0]), np.array(side[-1]["p"][-1])
-
-        def rev(side):
-            return [{"p": list(reversed(sg["p"]))} for sg in reversed(side)]
-        a0, b0 = ends(sd[0])
-        a1, b1 = ends(sd[1])
-        if min(np.linalg.norm(a0 - a1), np.linalg.norm(a0 - b1)) < \
-                min(np.linalg.norm(b0 - a1), np.linalg.norm(b0 - b1)):
-            sd[0] = rev(sd[0])
-        for i in range(1, 4):
-            prev_end = ends(sd[i - 1])[1]
-            a, b = ends(sd[i])
-            if np.linalg.norm(b - prev_end) < np.linalg.norm(a - prev_end):
-                sd[i] = rev(sd[i])
+        sd = _loop_sides(sd)
         B = np.array([q for side in sd for sg in side for q in sg["p"]], dtype=np.float64)
         size = float(np.linalg.norm(np.ptp(B, axis=0)))
         if size < 1e-9 or np.linalg.norm(ends(sd[3])[1] - ends(sd[0])[0]) > 1e-4 * size:
             return None
 
-        def curve(side):
-            Ps = [_np(_cubic(_np(sg["p"]))) for sg in side]
-            n = len(Ps)
+        def curve(side, pcs):
+            # v0.25.8: parametre yay uzunluğuna göre (`_side_params`), karşı kenarla eşleşir
+            t1s = [pc[2] for pc in pcs]
 
             def f(t):
-                x = min(max(t, 0.0), 1.0) * n
-                i = min(int(x), n - 1)
-                tt = x - i
-                return _bez(Ps[i], tt), _bez_d(Ps[i], tt) * n, side[i]
+                t = min(max(t, 0.0), 1.0)
+                i = min(bisect.bisect_right(t1s, t), len(pcs) - 1)
+                P, ta, tb, k = pcs[i]
+                w = tb - ta
+                tt = min(max((t - ta) / w, 0.0), 1.0)
+                return _bez(P, tt), _bez_d(P, tt) / w, side[k]
             return f
-        cs = [curve(side) for side in sd]
+        params = _side_params(sd)
+        cs = [curve(side, pcs) for side, pcs in zip(sd, params)]
         Cg = B.mean(axis=0)                     # yamanın ağırlık merkezi (içeri yönü)
         planes = [[self._side_plane(sg) if tangent else None for sg in side] for side in sd]
 
@@ -979,10 +1109,9 @@ class Builder:
         for i in range(N):
             for j in range(N):
                 arr.SetValue(i + 1, j + 1, _pnt(G[i, j]))
-        fit = _PointsToBSplineSurface(arr, 3, 8, _GeomAbs_C2, 1e-6 * max(size, 1e-3))
-        if not fit.IsDone():
+        surf = _fit_grid(arr, G, size)
+        if surf is None:
             return None
-        surf = fit.Surface()
         face = None
         for w in (wire, _static(TopoDS, "Wire")(wire.Reversed())):
             try:
@@ -1186,6 +1315,58 @@ def _make_ribbon(faces, pts, n_samples=17):
     if not mf.IsDone():
         return None
     return mf.Face()
+
+
+def _fit_grid(arr, G, size):
+    """Izgaradan B-spline yüzeyi. OCC'nin yaklaşık uydurucusu sıkı toleransta bazen
+    yakınsamadan "tamam" der (v0.25.8'de ölçüldü: ızgara doğru, yüzey yama boyunun %4'ü
+    kadar sapıyor, kenarlara oturmadığı için yüz geçersiz). Sonuç ızgarayla denetlenir;
+    tutmuyorsa eş parametreli uydurma, o da tutmuyorsa tam ara değerleme denenir."""
+    tol = 1e-6 * max(size, 1e-3)
+    N = G.shape[0]
+    # denetim noktaları ızgara HÜCRELERİNİN ortası: bozuk uydurma ızgara noktalarından geçer
+    # ama aralarında salınır (ızgara noktasında ölçülünce fark görünmüyor)
+    idx = sorted(set(int(x) for x in np.linspace(0, N - 2, 7)))
+    C = 0.25 * (G[:-1, :-1] + G[1:, :-1] + G[:-1, 1:] + G[1:, 1:])
+    lim = 2e-3 * max(size, 1e-3)
+
+    def good(surf):
+        if _ProjectPointOnSurf is None:
+            return True
+        try:
+            pr = _ProjectPointOnSurf()
+            pr.Init(surf, *surf.Bounds())
+        except Exception:
+            return True                      # denetlenemiyor: eski davranış
+        try:
+            for i in idx:
+                for j in idx:
+                    pr.Perform(_pnt(C[i, j]))
+                    if pr.NbPoints() < 1 or pr.LowerDistance() > lim:
+                        return False
+        except Exception:
+            return False
+        return True
+    tries = [lambda: _PointsToBSplineSurface(arr, 3, 8, _GeomAbs_C2, tol)]
+    if _Approx_IsoParametric is not None:
+        tries.append(lambda: _PointsToBSplineSurface(arr, _Approx_IsoParametric, 3, 8,
+                                                     _GeomAbs_C2, tol))
+
+    def interp():
+        f = _PointsToBSplineSurface()
+        f.Interpolate(arr)
+        return f
+    tries.append(interp)
+    for mk in tries:
+        try:
+            fit = mk()
+            if fit.IsDone():
+                surf = fit.Surface()
+                if good(surf):
+                    return surf
+        except Exception:
+            continue
+    return None
 
 
 def _grid_sane(G, B):
