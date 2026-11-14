@@ -72,6 +72,11 @@ class SketchMixin:
                                 f"kılavuz={(self.info or {}).get('kind')} · yazılan={self.typed}")
         except Exception:
             pass
+        att = getattr(self, "snap_attach", None)
+        if att is not None and t not in SHAPE_TOOLS and \
+                float(np.linalg.norm(att - cur)) <= 1e-9 * (1.0 + float(np.abs(cur).max())):
+            # v0.25.12: eğrinin üstüne konan nokta; Bitir'de o eğriye nokta eklenip bağlanır
+            self.attach_pts = list(getattr(self, "attach_pts", None) or ()) + [cur.copy()]
         if t == "POINT":
             self._sh_point(context, cur)
             return
@@ -345,10 +350,16 @@ class SketchMixin:
         self.typed, self.field = ["", ""], 0
         self.node_ids, self.out_h = {}, None
         start_tan, self.start_tan = self.start_tan, None
+        att, self.attach_pts = list(getattr(self, "attach_pts", None) or ()), []
         if not segs:
             return
+        nodes = [segs[0]["p"][0]] + [sg["p"][3] for sg in segs]
+        att = [q for q in att if any(float(np.linalg.norm(np.asarray(n_, dtype=np.float64) - q))
+                                     <= 1e-9 * (1.0 + float(np.abs(q).max())) for n_ in nodes)]
         self.sketch.append({"segs": segs, "cyclic": cyclic, "node_ids": node_ids,
                             "start_tan": start_tan})
+        if att:
+            self.sketch[-1]["attach"] = att
         if cyclic:
             self.last_closed = ("sketch", len(self.sketch) - 1)
         self.dirty = True
@@ -437,6 +448,7 @@ class SketchMixin:
         edit_ob = bpy.data.objects.get(getattr(self, "edit_obj", None) or "")
         self.edit_obj = None                     # çizim düzenleme Bitir'le biter
         if not strokes_main and not points:
+            self._attach_all(context, strokes, out)
             self._after_finish(context, None, {}, out)
             self._skc_finish(context, self._written_uid(strokes, out))
             constraints.solve_all(context.scene, force=True)
@@ -497,6 +509,8 @@ class SketchMixin:
             n_auto += self._auto_joints(context, ob, written)
         except Exception:
             traceback.print_exc()
+        n_att = self._attach_all(context, strokes, out)
+        n_auto += n_att
         n_auto += self._after_finish(context, ob, sk_map, out, solve=False)
         n_auto += self._skc_finish(context, self._written_uid(strokes, out))
         if n_auto or edited:
@@ -509,6 +523,8 @@ class SketchMixin:
         msg = f"Bitti: '{ob.name}' içine {len(written)} çizgi kaydedildi{msg_pts}"
         if n_auto:
             msg += f" · {n_auto} kısıt"
+        if n_att:
+            msg += f" · {n_att} eğriye bağlandı"
         try:
             from . import recorder
             recorder.log("çiz", msg)
@@ -521,6 +537,94 @@ class SketchMixin:
         self._hist_reset()                       # kaydedildi: geri alma artık Blender'da
         self._thaw()
         return out
+
+    def _attach_all(self, context, strokes, out):
+        """v0.25.12: eğrinin üstüne konmuş uçlar (Yakın / kilitli kesişim). Bütün çizgiler
+        yazıldıktan sonra o noktada eğriye nokta eklenir (biçim değişmez, yüzey referansları
+        iki yarıya eşlenir) ve çizginin ucu ona çakışık kısıtıyla bağlanır. Bağlantı sayısı."""
+        from . import split
+        n = 0
+        for i, st in enumerate(strokes):
+            pts = st.get("attach")
+            if not pts or i not in out:
+                continue
+            ob = bpy.data.objects.get(out[i][0])
+            si = out[i][1]
+            if ob is None:
+                continue
+            for q in pts:
+                q = np.asarray(q, dtype=np.float64)
+                tol = 1e-5 * (1.0 + float(np.abs(q).max()))
+                node = self._node_at(ob, si, q, tol)
+                if node is None:
+                    continue                     # uç taslakta taşınmış
+                hit = self._wire_hit(context, q, tol, (ob.name, si))
+                if hit is None:
+                    continue
+                ob2, si2, k, t, at = hit
+                if at is None:
+                    try:
+                        split.insert_point(ob2, si2, k, t)
+                    except Exception as e:
+                        self._status(context, f"Eğriye nokta eklenemedi: {e}")
+                        continue
+                    at = k + 1
+                    if ob2 == ob and si2 == si and node > k:
+                        node += 1
+                c = constraints.add("COINCIDENT", [("pt", ob2, si2, at), ("pt", ob, si, node)],
+                                    auto=True, solve=False)
+                if c is None:
+                    continue
+                if not constraints.satisfied(c):
+                    constraints.remove_last(c)
+                    continue
+                n += 1
+        return n
+
+    @staticmethod
+    def _node_at(ob, si, q, tol):
+        """Spline'da q'daki nokta (dünya) sırası | None."""
+        try:
+            sp = ob.data.splines[si]
+        except Exception:
+            return None
+        mw = ob.matrix_world
+        for j, b in enumerate(sp.bezier_points):
+            if float(np.linalg.norm(np.array(tuple(mw @ b.co), dtype=np.float64) - q)) <= tol:
+                return j
+        return None
+
+    def _wire_hit(self, context, q, tol, skip):
+        """q'dan geçen tel kafes segmenti: (obje, spline, segment, t, uçtaki nokta | None)."""
+        from . import surfmath as sfm
+        best = None
+        objs = list(getattr(context, "visible_objects", None) or ())
+        for ob in objs:
+            if getattr(ob, "type", None) != "CURVE":
+                continue
+            mw = ob.matrix_world
+            for si, sp in enumerate(ob.data.splines):
+                if (ob.name, si) == skip or sp.type != "BEZIER" or len(sp.bezier_points) < 2:
+                    continue
+                npt = len(sp.bezier_points)
+                for k in range(core._seg_count(sp)):
+                    try:
+                        sg = core._spline_segment(ob, si, sp, k, mw)
+                    except Exception:
+                        sg = None
+                    if sg is None:
+                        continue
+                    P = sfm.cubic(sg["p"])
+                    t, d = sfm.closest_t(P, q)
+                    if d > tol or (best is not None and d >= best[0]):
+                        continue
+                    at = None
+                    if float(np.linalg.norm(P[0] - q)) <= tol or t <= 1e-9:
+                        at = k
+                    elif float(np.linalg.norm(P[3] - q)) <= tol or t >= 1 - 1e-9:
+                        at = (k + 1) % npt
+                    best = (d, (ob, si, k, t, at))
+        return best[1] if best is not None else None
 
     def _thaw(self):
         """Düzenleme bitti: düzenleme sürerken dondurulan gövdeler tel kafesin yeni hâline

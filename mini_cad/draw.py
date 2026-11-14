@@ -173,6 +173,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self.off = None
         self.temp = None                 # geçici zemin (G): {"saved", "plane", "label", "grid_o"}
         self.axis_lock = None            # eksen kilidi (X / Y / Z): 0 / 1 / 2
+        self.snap_attach = None          # imleç bir eğrinin üstünde (Bitir'de eğriye bağlanır)
+        self.attach_pts = []             # süren çizginin eğri üstüne konmuş noktaları
         self.temp_pick = None            # geçici zemin seçiliyor: {"saved"}
         self.snap_src = None             # geçici zeminde izdüşürülen yakalamanın asıl noktası
         self.snap_src_id = None

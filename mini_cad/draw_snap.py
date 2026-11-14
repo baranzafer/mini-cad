@@ -11,8 +11,9 @@ from mathutils import Vector
 from . import constraints
 from . import core
 from . import drawmath as dm
+from . import surfmath as sfm
 from .draw_common import (
-    CLICK_SHAPES, COL_GUIDE, COL_SNAP, FIELDS, GRID_PX, GUIDE_PX, MODIFY_TOOLS, PRIORITY, REF_PX,
+    ATTACH_KINDS, CLICK_SHAPES, COL_GUIDE, COL_SNAP, FIELDS, GRID_PX, GUIDE_PX, MODIFY_TOOLS, PRIORITY, REF_PX,
     SHAPE_TOOLS,
     _Refs,
     _axis_col, _dashed, _marker, _project, _seg_px_dist, _text, parse_angle, parse_length,
@@ -20,6 +21,12 @@ from .draw_common import (
 
 
 PLANE_LOCK_MODES = {"XY", "XZ", "YZ", "VIEW"}   # açıkça seçilen düzlem: yakalama izdüşer
+
+
+def _line_off(q, o, d):
+    """q'nun (o, d) doğrusuna dik uzaklık vektörü (d birim)."""
+    w = np.asarray(q, dtype=np.float64) - o
+    return w - d * float(w @ d)
 
 
 class SnapMixin:
@@ -288,8 +295,65 @@ class SnapMixin:
                 z = za + (zb - za) * t
                 k = int(near[np.argmin(z[near])])
                 q = dm.closest_on_segment_to_ray(refs.A[k], refs.B[k], ro, rd)
+                g = self._ref_geo(k)
+                if g is not None and g[0] == "bez":
+                    # v0.25.12: çoklu çizgi kirişi değil, gerçek eğrinin üstü (Bitir'de eğriye
+                    # nokta eklenip bağlanabilsin)
+                    q = sfm.bez(g[1], sfm.bez_ray_closest(g[1], ro, rd))
                 return q, "Yakın", None
         return None
+
+    def _ref_geo(self, k):
+        """refs.A / B satırının ait olduğu eğrinin tam geometrisi: ("bez", (4,3)) | ("poly", ..)"""
+        refs = self.refs
+        own = getattr(refs, "own", None)
+        geo = getattr(refs, "geo", None)
+        if own is None or geo is None or not (0 <= k < len(own)):
+            return None
+        j = int(own[k])
+        return geo[j] if 0 <= j < len(geo) else None
+
+    def _lock_curve_hit(self, mx, my, lock, radius=None):
+        """v0.25.12: kilitli koordinatta eğri yakalaması. lock = ("plane", o, n) | ("line", o,
+        d). İmlece yakın eğrilerin kilitle (düzlem / eksen doğrusu) kesiştiği noktalardan
+        ekranda imlece en yakını: (nokta, piksel uzaklığı) | None. Nokta hem eğrinin hem
+        kilidin üstündedir: kilit bozulmaz, nokta eğriye bağlanabilir."""
+        refs = self.refs
+        geo = getattr(refs, "geo", None)
+        if not geo or not len(refs.A):
+            return None
+        lim = (radius if radius is not None else self.radius) * 1.25
+        M = np.array(self.rv3d.perspective_matrix, dtype=np.float64)
+        m = np.array([mx, my])
+        pa, oka, _ = _project(refs.A, M, self.region)
+        pb, okb, _ = _project(refs.B, M, self.region)
+        dd, _t = _seg_px_dist(pa, pb, m)
+        dd = np.where(oka & okb, dd, np.inf)
+        rows = np.where(dd <= lim * 2.0)[0]
+        owners = sorted({int(refs.own[k]) for k in rows})
+        kind, o, v = lock
+        o = np.asarray(o, dtype=np.float64)
+        v = np.asarray(v, dtype=np.float64)
+        best = None
+        for j in owners:
+            gk, G = geo[j]
+            scale = 1.0 + float(np.abs(G).max()) + float(np.abs(o).max())
+            if gk == "bez":
+                if kind == "plane":
+                    qs = [sfm.bez(G, t) for t in sfm.bez_plane_hits(G, o, v)]
+                else:
+                    qs = [sfm.bez(G, t) for t in sfm.bez_line_hits(G, o, v, 1e-6 * scale)]
+            else:
+                qs = sfm.poly_plane_hits(G, o, v) if kind == "plane" else \
+                    sfm.poly_line_hits(G, o, v, 1e-6 * scale)
+            for q in qs:
+                qp = self._px(q)
+                if qp is None:
+                    continue
+                dq = math.hypot(qp[0] - mx, qp[1] - my)
+                if dq <= lim and (best is None or dq < best[1]):
+                    best = (np.asarray(q, dtype=np.float64), dq)
+        return best
 
     def _inference_refs(self, plane, mx, my):
         M = np.array(self.rv3d.perspective_matrix, dtype=np.float64)
@@ -430,7 +494,25 @@ class SnapMixin:
 
         self.info = None
         self.snap_kind = self.snap_id = None
-        if snap is not None and not locked:
+        self.snap_attach = None
+        lock_hit = None
+        if had_plane and not no_snap and not locked and \
+                self.plane_mode in PLANE_LOCK_MODES | {"LOCK"} and \
+                self.tool not in SHAPE_TOOLS and getattr(self, "axis_lock", None) is None:
+            # v0.25.12: düzlem kilidinde eğrinin düzlemi kestiği nokta öncelikli (kilit hiç
+            # bozulmaz; düzlem dışındaki yakalamalar izdüşer). Düzlemdeki uç / orta / merkez
+            # yakalamaları yine önce gelir.
+            snap_on_plane = snap is not None and PRIORITY.get(snap[1], 3) <= 1 and \
+                abs(float(plane.dist(np.asarray(snap[0], dtype=np.float64)))) <= \
+                1e-9 * (1.0 + float(np.abs(snap[0]).max()))
+            if not snap_on_plane:
+                lock_hit = self._lock_curve_hit(mx, my, ("plane", plane.o, plane.n))
+        if lock_hit is not None:
+            p = lock_hit[0]
+            self.snap_kind = "Eğri"
+            self.info = {"kind": f"{dm.PLANE_LABELS.get(plane.name, plane.name)} ∩ eğri",
+                         "plane": plane}
+        elif snap is not None and not locked:
             p = np.asarray(snap[0], dtype=np.float64)
             self.snap_kind, self.snap_id = snap[1], snap[2]
             if had_plane and self.plane_mode in PLANE_LOCK_MODES and \
@@ -484,10 +566,20 @@ class SnapMixin:
                 self.tool not in CLICK_SHAPES:
             p = self._axis_point(anchor, ax_i, ro, rd, snap, no_snap)
             self.cursor = np.asarray(p, dtype=np.float64)      # eksen kilidi zemine izdüşmez
+            self._set_attach()
             self._make_preview(plane)
             return
         self.cursor = self._on_temp(np.asarray(p, dtype=np.float64))
+        self._set_attach()
         self._make_preview(plane)
+
+    def _set_attach(self):
+        """Nokta bir eğrinin üstüne yapıştıysa (Yakın / kilitli kesişim) hatırlanır: tıklanınca
+        Bitir'de o eğriye nokta eklenip çizgiye bağlanır (v0.25.12)."""
+        self.snap_attach = None
+        if self.cursor is not None and self.snap_kind in ATTACH_KINDS and \
+                self.tool not in SHAPE_TOOLS and self.tool not in ("POINT", "TEXT"):
+            self.snap_attach = self.cursor.copy()
 
     def _plane_hit(self, plane, ro, rd):
         """Kilitli düzlemde imleç noktası (v0.25.10). Düzleme kenarından bakılıyorsa (ör.
@@ -524,9 +616,28 @@ class SnapMixin:
         txt = self.typed[0].strip() if self.typed[0] else ""
         typed = parse_length(txt.lstrip("+-")) if txt else None
         self.snap_kind = self.snap_id = None
+        hit = None
+        if typed is None and not no_snap:
+            mx, my = getattr(self, "mouse", (0.0, 0.0))
+            hit = self._lock_curve_hit(mx, my, ("line", anchor, ax))
+            if hit is not None and snap is not None and PRIORITY.get(snap[1], 3) <= 1:
+                # eksen üstündeki bir uç / orta noktası daha yakınsa o kalır
+                q = np.asarray(snap[0], dtype=np.float64)
+                on = float(np.linalg.norm(_line_off(q, anchor, ax))) <= \
+                    1e-6 * (1.0 + float(np.abs(q).max()))
+                qp = self._px(q)
+                if on and qp is not None and math.hypot(qp[0] - mx, qp[1] - my) <= hit[1]:
+                    hit = None
         if typed is not None:
             s = -typed if txt.startswith("-") else math.copysign(typed, s if s else 1.0)
             kind += " · yazılan"
+        elif hit is not None:
+            # v0.25.12: eksenin eğriyi kestiği nokta (kilit bozulmaz, eğriye bağlanır)
+            s = float(np.dot(hit[0] - anchor, ax))
+            kind += " · eğri kesişimi"
+            self.info = {"kind": kind, "axis": i}
+            self.snap_kind = "Eğri"
+            return anchor + ax * s
         elif snap is not None and not no_snap:
             s = float(np.dot(np.asarray(snap[0], dtype=np.float64) - anchor, ax))
             kind += f" · {snap[1]} hizası"
