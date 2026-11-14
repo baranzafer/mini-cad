@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.4)
+# Mini CAD — Geliştirme Notları (v0.25.5)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -52,7 +52,7 @@ Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`
 **Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
 beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
 
-Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t64.py` ...),
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t65.py` ...),
 sürüm artırılır ve paketlenir (§8).
 
 ---
@@ -409,8 +409,21 @@ Diğer kısayollar:
   Seçimde taslak ve kayıtlı eğriden imlece yakın olan alınır (`_pick_any`).
 - **Canlı** (nokta tabanlı) kısıtlar `_sk_solve` ile taslakta çözülür; kaydedilmiş noktalar
   sabittir. Çözüm ekleyince, sürükleme bitince ve `_set_sketch` sonrasında yapılır.
-- **Bekleyen** kısıtlar Bitir'de uygulanır: yay / eğri kısıtları (TANGENT, SMOOTH, RADIUS,
-  CONCENTRIC, CENTERDIST, yaylarda EQUAL).
+- **Teğet / Pürüzsüz** (v0.25.5, `GEO`, `_skc_geo`): taslakta ANINDA ve biçimi bozmadan
+  (kullanıcı: "teğet çalışmıyor, eğrilerin yuvarlaklığını bozmasın, Inventor gibi"; önce
+  Bitir'e kadar bekliyordu). `_sk_solve` = nokta çözümü (`_sk_solve_pts`) + `_skc_geo_all`;
+  sürükleme / taslak araçlarından sonra da yeniden uygulanır.
+  - Varlık (`_skc_ent`): taslakta segmentlerin kayıtlı türü (sürüklenip bozulan yay da yay
+    sayılır), kaydedilmiş eğride geometriden. Uyan varlık: kaydedilmiş sabit; ikisi de
+    taslaktaysa eğri > yay > doğru, aynı türdeyse ikinci seçilen.
+  - Ortak uçta (J): yay iki ucunu koruyarak J'de teğet çember yayı olarak yeniden kurulur
+    (`dm.tangent_arc`, aynı parça sayısı); doğru (iki doğru) J etrafında döner, boyu kalır;
+    serbest eğride yalnızca J'deki tutamaç yönü (boyu aynı). Pürüzsüz (G2): eğride 2. kontrol
+    noktası eğrilik eşitlenecek şekilde (`_curvature`); doğru / yay arasında G2 olamaz →
+    teğet uygulanır, açıklama.
+  - Ortak uç yoksa: doğru–yay (doğru kendine paralel kayar), yay–yay (yay kayar, iç / dış
+    teğetten yakın olan).
+- **Bekleyen** kısıtlar Bitir'de uygulanır: RADIUS, CONCENTRIC, CENTERDIST, yaylarda EQUAL.
 - Ölçü aracı taslakta da çalışır (`dim_edit = ("@sk", i)`, `_skc_apply_value`).
 - Taslak kısıtları görünümde silik çizilir; sağ tık doğrudan siler.
 - Bitir: `_written_uid` ile uid → (obje, spline); `_skc_finish` gerçek kısıt ekler.
@@ -864,6 +877,7 @@ Betiğin yaptıkları:
 | tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme, Coons'a göre taşma, teğet ağırlığı, üçgenli model) |
 | t62 | Ölçü girişi: 3 noktalı yay (kiriş, yarıçap, 180° / 270°), merkezli yay (merkez → başlangıç → bitiş, zincirden, 200°), teğet yay (R + açı, yalnız R), doğru, daire, dikdörtgen, CV, spline, kalem; yeni eğrinin gizli koleksiyon / yerel görünüm bağlanması |
 | t61 | (F–H: v0.25.2 çok yüzeyli bıçak: üç kareyi tek çizgiyle kesme, boşluktan geçen çizgi, gizli kenarlar) Yüzeyi Böl: iki kare yüzeyde halka döngü kesimi (nokta ekleme, referans / kısıt / fillet eşleme, 4 parça), bıçak (köşe → kenar ortası, aynı kenar reddi), yarım silindirde kesimin yüzeyde kalması, ilişkili spline reddi (değişiklik yok), modal araç (hover, tekerlek, oran, tık, bıçak, Esc) |
+| t64 | Taslakta Teğet / Pürüzsüz: doğru + 3 noktalı yay (doğru aynı, yay uçları yerinde, gerçek yay, kırılma 15.8° → 0), sürükleme sonrası, G2 doğru–yay açıklaması, doğru + spline (yalnız tutamaç), yay + spline G2 (eğrilik eşit), daireye teğet doğru, Bitir |
 | t63 | Hesaplanamayan yüzey / işlem uyarı satırları (gizli gövde, kapalı / başarılı işlem yok, kısaltma, en fazla 5 satır) |
 | tools/occ_shell_bool_check.py | GERÇEK OCC ile açık kabukta Kesim / Kesişim / Birleşim reddi / değmeyen araç |
 | tools/occ_coons_check.py | GERÇEK OCC ile Coons sınır yüzeyi: iki kemer + iki düz kenar düz çizgili (regle) olmalı (Keskin / Teğet / serbest) |
@@ -1057,6 +1071,8 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - "Teğet – serbest dolgu" seçeneği (eski davranış).
   - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
   - Test t60; araçlar genişletildi.
+- **0.25.5:** taslakta Teğet / Pürüzsüz anında ve biçimi bozmadan (yay yeniden kurulur, doğru
+  korunur, eğride yalnız tutamaç). Test t64.
 - **0.25.4:** açık kabuk (yüzey) gövdede boolean: Kesim / Kesişim yüzeyi budar; başarısız
   yüzey / işlemler 3D görünümde kırmızı uyarı olarak görünür. Test t63.
 - **0.25.3:** yay araçlarında ölçü girişi (3 noktalı, merkezli, teğet; her adım); yeni eğri

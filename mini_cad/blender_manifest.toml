@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "mini_cad"
-version = "0.25.4"
+version = "0.25.5"
 name = "Mini CAD"
 tagline = "Bezier tel kafesten parametrik CAD yuzeyleri"
 maintainer = "Mini CAD"

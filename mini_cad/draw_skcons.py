@@ -8,8 +8,10 @@ de uygulanır (Inventor'da taslak açıkken olduğu gibi).
             sabit): AXIS, PARALLEL, PERP, COLLINEAR, EQUAL (doğru), DISTANCE, ANGLE, FIX,
             COINCIDENT, SYMMETRIC, SYMLINE, PTLINE, LINEDIST. Ekleyince, sürükleme bitince ve
             taslak araçlarından (_set_sketch) sonra yeniden çözülür.
-            Yay / eğri kısıtları (TANGENT, SMOOTH, RADIUS, CONCENTRIC, CENTERDIST, yaylarda
-            EQUAL) taslakta bekler, Bitir'de uygulanır.
+            Teğet / Pürüzsüz (v0.25.5) taslakta anında, biçimi bozmadan uygulanır (_skc_geo):
+            doğru korunur, yay iki ucunu koruyarak teğet çember yayı olarak yeniden kurulur,
+            serbest eğride yalnızca uç tutamacı (G2'de 2. kontrol noktası) ayarlanır.
+            Diğer yay kısıtları (RADIUS, CONCENTRIC, CENTERDIST, yaylarda EQUAL) Bitir'de.
   Bitir     uid → yazılan spline; kısıtlar gerçek kısıt olarak eklenir (_skc_finish).
   Kimlik    Taşı / Döndür / Ölçekle / Esnet çizginin kimliğini korur; Kırp / Böl / Yuvarla gibi
             yapıyı değiştiren işlemler korumaz (o çizgiye bağlı taslak kısıtları düşer).
@@ -32,6 +34,9 @@ _UID = itertools.count(1)
 
 LIVE = {"AXIS", "PARALLEL", "PERP", "COLLINEAR", "EQUAL", "DISTANCE", "ANGLE", "FIX",
         "COINCIDENT", "SYMMETRIC", "SYMLINE", "PTLINE", "LINEDIST"}
+# v0.25.5: taslakta anında, biçimi bozmadan uygulanan geometrik kısıtlar (Inventor gibi)
+GEO = {"TANGENT", "SMOOTH"}
+RANK = {"line": 1, "arc": 2, "curve": 3}       # hangisi uyar: eğri > yay > doğru
 
 
 class SketchConsMixin:
@@ -270,12 +275,22 @@ class SketchConsMixin:
         return {}
 
     def _sk_solve(self, prefer=None):
-        """Canlı taslak kısıtlarını taslak noktalarında çözer (kaydedilmiş noktalar sabit)."""
+        """Canlı taslak kısıtları: önce nokta tabanlılar (solver), sonra teğet / pürüzsüz
+        (geometrik, biçimi koruyarak)."""
+        ok = self._sk_solve_pts(prefer)
+        self._skc_geo_all()
+        return ok
+
+    def _sk_solve_pts(self, prefer=None):
+        """Nokta tabanlı taslak kısıtlarını taslak noktalarında çözer (kaydedilmiş noktalar
+        sabit)."""
         self._skc_init()
         keys, var_of, cons, owners = [], {}, [], []
         pos, fixed = [], []
         for e in self.skc:
             k = e["kind"]
+            if k in GEO:
+                continue
             if k not in LIVE:
                 e["ok"], e["info"] = True, "Bitir'de uygulanır"
                 continue
@@ -326,6 +341,223 @@ class SketchConsMixin:
             sm._move_node(st["segs"], key[2], X[j], st["cyclic"])
         self.dirty = True
         return ok
+
+    # ------------------------------------------------------------ teğet / pürüzsüz (v0.25.5)
+
+    def _skc_ent(self, r):
+        """Segment referansının varlığı (doğru / yay / eğri): sözlük ya da None."""
+        if r[0] != "seg":
+            return None
+        if r[1] == "@sk":
+            k = self._uid_map().get(r[2])
+            if k is None:
+                return None
+            st = self.sketch[k]
+            ent = sm.entity_of(st, r[3])
+            if ent is None:
+                return None
+            i0, i1 = ent
+            segs = [np.array([np.asarray(q, dtype=np.float64) for q in st["segs"][i]["p"]])
+                    for i in range(i0, i1)]
+            closed = sm.closed_entity(st, i0, i1)
+            sk = True
+        else:
+            P = self._skc_seg_bez(r)
+            if P is None:
+                return None
+            segs, k, i0, i1, closed, sk = [np.array(P)], None, None, None, False, False
+        decl = {st["segs"][i].get("kind") for i in range(i0, i1)} if sk else set()
+        if sk and decl <= {"line", "arc", "curve"} and len(decl) == 1:
+            kind = decl.pop()                     # taslakta tür kayıtlı (sürüklenince de yay)
+        elif all(dm.is_straight_poly(P) for P in segs):
+            kind = "line"
+        else:
+            arcs = [dm.arc_of_bezier(P) for P in segs]
+            kind = "arc" if all(a is not None for a in arcs) and all(
+                np.linalg.norm(a[0] - arcs[0][0]) <= 1e-4 * (1 + arcs[0][1]) for a in arcs) \
+                else "curve"
+        return {"sketch": sk, "k": k, "i0": i0, "i1": i1, "segs": segs, "kind": kind,
+                "closed": closed, "S": segs[0][0], "E": segs[-1][3]}
+
+    @staticmethod
+    def _leave_dir(ent, at_start):
+        """Varlığın ucundan içine doğru (o uçtan ayrılış) yönü."""
+        P = ent["segs"][0] if at_start else ent["segs"][-1]
+        if at_start:
+            d = P[1] - P[0] if np.linalg.norm(P[1] - P[0]) > 1e-12 else P[3] - P[0]
+        else:
+            d = P[2] - P[3] if np.linalg.norm(P[2] - P[3]) > 1e-12 else P[0] - P[3]
+        return dm.unit(d)
+
+    @staticmethod
+    def _curvature(ent, at_start):
+        """Uçtaki eğrilik (κ, eğrilik normali birim ya da None)."""
+        if ent["kind"] == "line":
+            return 0.0, None
+        P = ent["segs"][0] if at_start else ent["segs"][-1]
+        if ent["kind"] == "arc" and dm.arc_of_bezier(P) is not None:
+            c, R, _n = dm.arc_of_bezier(P)
+            J = P[0] if at_start else P[3]
+            return 1.0 / R, dm.unit(c - J)
+        if at_start:
+            d1, dd = P[1] - P[0], P[2] - 2 * P[1] + P[0]
+        else:
+            d1, dd = P[3] - P[2], P[3] - 2 * P[2] + P[1]
+        L = float(np.linalg.norm(d1))
+        if L < 1e-12:
+            return 0.0, None
+        t = d1 / L
+        perp = dd - np.dot(dd, t) * t
+        h = float(np.linalg.norm(perp))
+        if h < 1e-15:
+            return 0.0, None
+        # κ = |B' × B''| / |B'|³, B' = 3·d1, B'' = 6·dd
+        return float(np.linalg.norm(np.cross(3 * d1, 6 * dd))) / (3 * L) ** 3, perp / h
+
+    def _write_ent(self, ent, segs):
+        st = self.sketch[ent["k"]]
+        for i, P in zip(range(ent["i0"], ent["i1"]), segs):
+            st["segs"][i]["p"] = tuple(np.asarray(q, dtype=np.float64) for q in P)
+
+    def _move_ent_nodes(self, ent, fn):
+        """Varlığın düğümlerini fn(eski konum) → yeni konuma taşır (komşu bağlantılar korunur)."""
+        st = self.sketch[ent["k"]]
+        nodes = sm.stroke_nodes(st)
+        last = ent["i1"] if not ent["closed"] else ent["i1"] - 1
+        for j in range(ent["i0"], last + 1):
+            jj = j % len(st["segs"]) if st["cyclic"] else j
+            sm._move_node(st["segs"], jj, fn(np.asarray(nodes[jj], dtype=np.float64)),
+                          st["cyclic"])
+
+    def _skc_geo(self, e):
+        """Teğet / pürüzsüz kısıtını taslakta uygular. (sağlandı mı, bilgi)"""
+        if len(e["refs"]) != 2:
+            return False, "iki eğri gerekli"
+        A, B = (self._skc_ent(r) for r in e["refs"])
+        if A is None or B is None:
+            return False, "referans kayboldu (çizgi yapısı değişti)"
+        size = max(1.0, float(np.abs(np.vstack(A["segs"] + B["segs"])).max()))
+        tol = 1e-6 * size
+        joint = None
+        if not A["closed"] and not B["closed"]:
+            best = None
+            for sa, pa in ((True, A["S"]), (False, A["E"])):
+                for sb, pb in ((True, B["S"]), (False, B["E"])):
+                    d = float(np.linalg.norm(pa - pb))
+                    if best is None or d < best[0]:
+                        best = (d, sa, sb, pa)
+            if best[0] <= 1e-4 * size:
+                joint = best[1:]
+        movable = [x for x in (A, B) if x["sketch"]]
+        if not movable:
+            return True, "kaydedilmiş eğriler (Bitir'de)"
+        if joint is None:
+            return self._skc_tan_free(A, B, tol)
+        sa, sb, J = joint
+        if len(movable) == 1:
+            M = movable[0]
+        elif A["kind"] != B["kind"]:
+            M = A if RANK[A["kind"]] > RANK[B["kind"]] else B
+        else:
+            M = B                                    # aynı türde: ikinci seçilen uyar
+        O = B if M is A else A
+        m_start = sa if M is A else sb
+        o_start = sb if M is A else sa
+        t = -self._leave_dir(O, o_start)              # M, J'den bu yönde ayrılmalı
+        if t is None:
+            return False, "teğet yönü bulunamadı"
+        cur = self._leave_dir(M, m_start)
+        smooth = e["kind"] == "SMOOTH"
+        if M["kind"] == "arc":
+            F = M["E"] if m_start else M["S"]
+            arc = dm.tangent_arc(J, t, F)
+            if arc is None:
+                return False, "yay bu konumda teğet olamaz (düzleşirdi)"
+            n = len(M["segs"])
+            th = arc["angle"]
+            ctr, R = arc["center"], arc["radius"]
+            segs = dm._arc_from_basis(ctr, R, (J - ctr) / R, t, th, J, F,
+                                      max_angle=th / n + 1e-9)
+            if len(segs) != n:
+                return False, "yay yeniden kurulamadı"
+            P = [np.array(sg["p"]) for sg in segs]
+            if not m_start:
+                P = [Q[::-1] for Q in reversed(P)]
+            self._write_ent(M, P)
+        elif M["kind"] == "line":
+            if cur is not None and float(np.dot(cur, t)) > 1 - 1e-12:
+                pass
+            else:
+                self._move_ent_nodes(M, lambda q: J + t * float(np.linalg.norm(q - J)))
+        else:                                         # serbest eğri: uçtaki tutamaç
+            P = M["segs"][0].copy() if m_start else M["segs"][-1].copy()
+            hi = 1 if m_start else 2
+            L1 = float(np.linalg.norm(P[hi] - J)) or float(np.linalg.norm(P[3] - P[0])) / 3
+            P[hi] = J + t * L1
+            if smooth:
+                kap, nv = self._curvature(O, o_start)
+                ii = 2 if m_start else 1
+                base = P[hi]
+                along = float(np.dot(P[ii] - base, t))
+                h = 1.5 * kap * L1 * L1
+                P[ii] = base + t * along + (nv * h if nv is not None else 0.0)
+            segs = [Q.copy() for Q in M["segs"]]
+            if m_start:
+                segs[0] = P
+            else:
+                segs[-1] = P
+            self._write_ent(M, segs)
+        if smooth and M["kind"] != "curve":
+            return False, ("Pürüzsüz (G2): eğrilik yalnızca serbest eğride eşitlenebilir "
+                           "(doğru / yay arasında olamaz) · teğet uygulandı")
+        return True, ""
+
+    def _skc_tan_free(self, A, B, tol):
+        """Ortak ucu olmayan teğet: doğru–yay (doğru kayar) ve yay–yay (yay kayar)."""
+        kinds = {A["kind"], B["kind"]}
+        if kinds == {"line", "arc"}:
+            L = A if A["kind"] == "line" else B
+            C = B if L is A else A
+            c, R, _n = dm.arc_of_bezier(C["segs"][0])
+            a, b = L["S"], L["E"]
+            u = dm.unit(b - a)
+            v = c - a
+            foot = a + u * float(np.dot(v, u))
+            d = float(np.linalg.norm(c - foot))
+            if abs(d - R) <= tol:
+                return True, ""
+            if d < 1e-12:
+                return False, "doğru yayın merkezinden geçiyor"
+            nh = (c - foot) / d
+            if L["sketch"]:
+                self._move_ent_nodes(L, lambda q: q + nh * (d - R))
+            elif C["sketch"]:
+                self._move_ent_nodes(C, lambda q: q - nh * (d - R))
+            return True, ""
+        if kinds == {"arc"}:
+            M = B if B["sketch"] else A
+            O = A if M is B else B
+            c1, R1, _ = dm.arc_of_bezier(O["segs"][0])
+            c2, R2, _ = dm.arc_of_bezier(M["segs"][0])
+            d = float(np.linalg.norm(c2 - c1))
+            if d < 1e-12:
+                return False, "eş merkezli yaylar teğet olamaz"
+            want = min((R1 + R2, abs(R1 - R2)), key=lambda x: abs(x - d))
+            if abs(want - d) <= tol:
+                return True, ""
+            shift = (c2 - c1) / d * (want - d)
+            self._move_ent_nodes(M, lambda q: q + shift)
+            return True, ""
+        return False, "ortak uçları yok: bu tür için teğet yalnızca ortak uçta"
+
+    def _skc_geo_all(self):
+        for e in self.skc:
+            if e["kind"] in GEO:
+                try:
+                    e["ok"], e["info"] = self._skc_geo(e)
+                except Exception as ex:
+                    e["ok"], e["info"] = False, f"uygulanamadı: {ex}"
+        self.dirty = True
 
     def _is_arc_ref(self, r):
         if r[0] != "seg":
