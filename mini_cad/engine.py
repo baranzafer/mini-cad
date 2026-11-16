@@ -217,7 +217,11 @@ def _build(job, res, geometry):
     ghosts, bool_new, used = [], {}, {}
     if stages:
         key = (tuple(builder.face_keys), tuple(mirrors), job["make_solid"],
-               tuple(st["key"] for st in stages), job["corner_mode"],
+               tuple(st["key"] for st in stages),
+               # v0.25.13: sonuçlar uid'yle döner; silinip yeniden eklenen (aynı geometri ve
+               # ölçüdeki) özellik eski uid'nin önbellek sonucunu alıp "başarılı" sanılıyordu
+               tuple(st.get("skey") or (st.get("uid"),) for st in stages),
+               job["corner_mode"],
                round(job["factor"], 4), job["smooth"], run_bevels, want_ghost)
         hit = _bevel_cache.get(name)
         if hit is not None and hit[0] == key:

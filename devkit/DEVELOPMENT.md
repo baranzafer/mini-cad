@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.12)
+# Mini CAD — Geliştirme Notları (v0.25.13)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -52,7 +52,7 @@ Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`
 **Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
 beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
 
-Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t69.py` ...),
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t70.py` ...),
 sürüm artırılır ve paketlenir (§8).
 
 ---
@@ -205,6 +205,30 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
     kayboluyordu. `_apply` bunu görür: durum "Gövde düzenleme modunda: sonuç yazılamıyor…",
     `_edit_blocked`'a alınır; moddan çıkınca `on_depsgraph_update` tam hesap ister. Yenile
     (`minicad.rebuild`) gövde düzenleme modundaysa önce obje moduna çıkar.
+- **v0.25.13: fillet önbelleği ve fillet teşhisi** (kullanıcı raporu: kemik profilli gövdede
+  kapak döngüsüne fillet; 1. B "ölçüyü küçült", 2. B panele eklendi ama uygulanmadı, durum
+  satırında "Hatalı: 12562b42c5fc", ölçü büyütülünce "sonuç bozuk").
+  - **Önbellek hatası** (`engine.py`): `_bevel_cache` anahtarında özellik uid'leri yoktu,
+    sonuçlar ise uid'yle dönüyordu. Silinip aynı kenar / ölçüyle yeniden eklenen fillet eski
+    uid'nin sonucunu aldı; yenisine sonuç yazılmadığı için `ok=True` kaldı ("eklendi" sanıldı,
+    durumda eski uid). Anahtara `skey` / `uid` eklendi (t69).
+  - **Yedek yollar** (`_build_once`, `_try_apply`): sonuç geçersizse bir kez ShapeFix
+    (`heal_if_invalid`, alan %1 içinde kalmalı); hâlâ olmuyorsa aynı yüzeydeki parçalı yüzler
+    birleştirilip (`unify_faces`: UnifySameDomain, yalnız yüzler, kenarlar korunur) yeniden
+    denenir. Yalnız başarısızlıkta çalışır; başarılı durumlar değişmez.
+  - **Teşhis:** OCC kontur durumu (`_fillet_status`: WalkingFailure / StartsolFailure /
+    TwistedSurface → Türkçe) ve kenarlardaki en küçük eğrilik yarıçapı (`tight_spot`:
+    |C'×C''|/|C'|³, uçlarda sık örnek). Fillet ondan büyükse mesaj yeri ve yarıçapı söyler;
+    çok küçükse (< %5) "o noktanın tutamaçları çok kısa olabilir".
+  - Ölçüm `devkit/tools/occ_fillet_loop_check.py` (rapordan uydurulan model; profil 2 dikeyde
+    ters, kapak üçe bölünmüş, öbür uç açık): pürüzsüz profilde 0.01–0.2 her ölçü uygulanıyor
+    (kapak bölünmüş ya da tek). Sıkı uydurmada P3 / P0'da neredeyse sıfır tutamaç (yarıçap
+    3e-5) → her ölçüde başarısız; iki noktanın tutamağı uzatılınca uygulanıyor. Kenar
+    döngüsü teğet sürekli olduğu için OCC tek kenarı da bütün döngüye yayar: tek bir sivri
+    nokta bütün fillet'i düşürür.
+  - Kayıt raporu (`recorder._bezier_points`): eğrilerin kontrol noktaları (dünya; nokta, sol /
+    sağ tutamaç, en fazla 400 nokta) ve komşu segmentin %2'sinden kısa tutamaçlara
+    "KISA … tutamaç" işareti. Böylece model birebir kurulabilir.
 - **Hata uyarısı** (v0.25.4, `bool_overlay.error_lines` / `_draw_errors`, POST_PIXEL): görünür
   CAD gövdelerinde başarısız yüzey / işlemler 3D görünümün sol üstünde kırmızı yazılır (en
   fazla 5 satır). Önce yalnız panelde ve durum satırında ("Hatalı: Kesim 1") görünüyordu.
@@ -313,11 +337,11 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 |---|---:|---|
 | `__init__.py` | 37 | Kayıt sırası: recorder → kernel → core → constraints → links → ui → panels → pick → draw → split → wire → bool_overlay |
 | `kernel.py` | 150 | OCP kurulumu / yükleme |
-| `engine.py` | 391 | bpy'siz OCC motoru (komut işleyici, önbellekler) |
+| `engine.py` | 399 | bpy'siz OCC motoru (komut işleyici, önbellekler) |
 | `engine_host.py` | 52 | Alt süreç girişi; paketi sahte `minicad_engine` paketi olarak yükler |
 | `jobs.py` | 337 | Süreç istemcisi (ensure / submit / call / control / poll / stop / describe) |
 | `errors.py` | 2 | `CadError` |
-| `geometry.py` | 2792 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
+| `geometry.py` | 3180 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
 | `core.py` | 2028 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
 | `solver.py` | 185 | numpy kısıt çözücü: ağırlıklı Gauss-Newton, en az hareket; `residual`, `evaluate`, `solve`, `measure` |
 | `constraints.py` | 590 | Kısıt çözümünü çalıştırma (`solve_all`), ekleme / kontrol / silme, canlı tetikleme, operatörler, kayıt |
@@ -352,7 +376,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `panels.py` | 566 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
 | `bool_overlay.py` | 177 | Boolean vurgusu, CAD kenarları, hayalet çizimi |
 | `wire.py` | 308 | Mesh kenarlarından bezier tel kafes |
-| `recorder.py` | 533 | Ctrl+Alt+R kayıt / rapor (§7) |
+| `recorder.py` | 632 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
 
 **Bölme notu (v0.15.2):**
@@ -994,6 +1018,8 @@ Betiğin yaptıkları:
 | tools/occ_coons_check.py | GERÇEK OCC ile Coons sınır yüzeyi: iki kemer + iki düz kenar düz çizgili (regle) olmalı (Keskin / Teğet / serbest) |
 | tools/occ_split_check.py | GERÇEK OCC ile bölünen eğri yüzeyin biçimi ve yeni dikişteki teğetlik |
 | t66 | Kenar Seç düzenleme modunda bekler (tık / Enter / F / B / Esc Blender'a), Tab tel kafesi düzenlemeye alır, gövde mesh'i düzenleme modundayken sonuç yazılmaz ve çıkınca yeniden hesaplanır |
+| t69 | Silinip yeniden eklenen fillet önbellekten eski sonucu almaz (yeni uid, yeniden hesap, durumda ad), değişmeyen özellikte önbellek, kayıt raporunda kontrol noktaları ve kısa tutamaç işareti |
+| tools/occ_fillet_loop_check.py | GERÇEK OCC ile kapak çevresi döngüsüne fillet (pürüzsüz profil: her ölçü; sivri nokta: yerini gösteren hata) |
 | t68 | Eğriye bağlanan çizgi: X kilidiyle iki kare arası (Yakın başlangıç, eksen ∩ eğri, köşe yakınında kilit, nokta ekleme, kısıtlar, biçim), XY kilidinde dik kare (düzlem ∩ eğri), kilitsiz çok parçalı, taslaktaki kareye, taşınmış uç, daire hedef (bezier üstünde, biçim), surfmath kesişimleri |
 | t67 | Çizimi Düzenle → Çizimi Kapat geri yazma, 4 kez düzenle / kapat / Bitir döngüsü (referanslar, konumlar), gövde dondurma (depsgraph / kuyruk / rebuild, yüzey referansı, çözülünce yeniden hesap, değişiklik yoksa hesap yok), save_pre, load_pre |
 | t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |

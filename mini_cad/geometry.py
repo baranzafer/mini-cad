@@ -1573,7 +1573,7 @@ def _face_center(face):
 
 
 _FILLET_MODE = {"fast": False}   # önizlemede hızlı (Polynomial) fillet
-_FAIL = {"why": ""}               # son fillet başarısızlığının nedeni (kullanıcıya gösterilir)
+_FAIL = {"why": "", "detail": ""}   # son fillet başarısızlığının nedeni (kullanıcıya gösterilir)
 
 FAIL_TEXT = {
     "no_match": "kenar gövdede bulunamadı",
@@ -1587,7 +1587,11 @@ def fail_reason(default="hesaplanamadı"):
     why = _FAIL["why"]
     if why.startswith("hata:"):
         return why
-    return FAIL_TEXT.get(why, default)
+    txt = FAIL_TEXT.get(why, default)
+    det = _FAIL.get("detail") or ""
+    if why == "build" and det:
+        txt = f"{det} · ölçüyü küçült"
+    return txt
 
 
 def fillet_accept(base, out):
@@ -1803,14 +1807,27 @@ def _build_once(cur, kind, sel, feats, polys, tol, precise, smooth, stats):
         if not added:
             _FAIL["why"] = "no_match" if n_match == 0 else "not_two_face"
             return None
-        mk.Build()
+        try:
+            mk.Build()
+        except Exception:
+            pass
         if not mk.IsDone():
             _FAIL["why"] = "build"
+            if kind == "FILLET":
+                _FAIL["detail"] = _fillet_status(mk)
             return None
         out = mk.Shape()
         if not fillet_accept(cur, out):
-            _FAIL["why"] = "invalid"
-            return None
+            # v0.25.13: OCC sonucu hesaplayıp küçük topoloji / tolerans kusuruyla bırakmış
+            # olabilir: ShapeFix ile bir kez onarılır, geçerliyse kabul edilir
+            healed, ok = heal_if_invalid(out)
+            if ok:
+                a0, a1 = area(out), area(healed)
+                ok = a0 is not None and a1 is not None and abs(a1 - a0) <= 0.01 * abs(a0)
+            if not ok:
+                _FAIL["why"] = "invalid"
+                return None
+            out = healed
         if kind == "FILLET" and smooth and len(added) > 1:
             out, n = _smooth_corners(cur, mk, out, added)
             if stats is not None:
@@ -1831,14 +1848,109 @@ def _try_apply(shape, idxs, feats, polys, tol, smooth=False, stats=None):
         if not sel:
             continue
         out = None
+        _FAIL["detail"] = ""
         for precise in ((True, False) if kind == "FILLET" else (False,)):
             out = _build_once(cur, kind, sel, feats, polys, tol, precise, smooth, stats)
             if out is not None:
                 break
         if out is None:
+            # v0.25.13: aynı düzlemde / yüzeyde parçalı yüzler (ör. kapağı bölen çizgiler)
+            # fillet'in ilerlediği kenarda ek köşeler yaratır; birleştirilip bir kez daha denenir
+            merged = unify_faces(cur)
+            if merged is not cur:
+                why, detail = _FAIL["why"], _FAIL.get("detail", "")
+                for precise in ((True, False) if kind == "FILLET" else (False,)):
+                    out = _build_once(merged, kind, sel, feats, polys, tol, precise, smooth,
+                                      stats)
+                    if out is not None:
+                        break
+                if out is None:
+                    _FAIL["why"], _FAIL["detail"] = why, detail
+        if out is None:
+            if kind == "FILLET":
+                r = max(float(feats[i]["size"]) for i in sel)
+                ts = tight_spot([e for i in sel for e in match_edges(cur, polys[i], tol)])
+                if ts is not None and ts[0] < r:
+                    x, y, z = ts[1]
+                    _FAIL["why"] = "build"
+                    _FAIL["detail"] = (f"kenar eğrisi ({x:.3g}, {y:.3g}, {z:.3g}) civarında "
+                                       f"{ts[0]:.3g} yarıçapa daralıyor (fillet {r:.3g})")
+                    if ts[0] < 0.05 * r:
+                        _FAIL["detail"] += " · eğri orada neredeyse köşe yapıyor: o noktanın " \
+                                           "tutamaçları çok kısa olabilir"
             return None
         cur = out
     return cur
+
+
+def unify_faces(shape):
+    """Aynı geometrik yüzeydeki (ör. eş düzlemli) komşu yüzleri birleştirir; kenarlara
+    dokunmaz (kenar eşleşmeleri bozulmasın). Yüz sayısı azalmadıysa aynı nesne döner."""
+    if _Unify is None:
+        return shape
+    try:
+        u = _Unify(shape, False, True, False)
+        u.Build()
+        out = u.Shape()
+        if out is None or out.IsNull():
+            return shape
+        if len(_shape_faces(out)) >= len(_shape_faces(shape)):
+            return shape
+        if _BRepCheck_Analyzer is not None and not _BRepCheck_Analyzer(out, True).IsValid():
+            return shape
+        return out
+    except Exception:
+        return shape
+
+
+_STRIPE_TEXT = {
+    "WalkingFailure": "fillet yüzeyi kenar boyunca ilerleyemedi (dar ya da çok eğri bölge)",
+    "StartsolFailure": "fillet için başlangıç çözümü bulunamadı",
+    "TwistedSurface": "fillet yüzeyi bükülüyor (yarıçap yüzey eğriliğinden büyük)",
+    "Error": "",
+}
+
+
+def tight_spot(edges, n=400):
+    """Kenarlarda en küçük eğrilik yarıçapı ve yeri (|C'×C''| / |C'|³, yoğun örnek; uçlara
+    yakın kısa tutamaçların yarattığı sivri bölgeler de yakalanır). (yarıçap, nokta) | None.
+    Fillet yarıçapı bundan büyükse (içbükey yanda) sığmaz."""
+    if _BRepAdaptor_Curve is None:
+        return None
+    from OCP.gp import gp_Pnt, gp_Vec
+    best = None
+    for e in edges:
+        try:
+            c = _BRepAdaptor_Curve(e)
+            u0, u1 = c.FirstParameter(), c.LastParameter()
+            p, d1, d2 = gp_Pnt(), gp_Vec(), gp_Vec()
+            for k in range(n + 1):
+                u = u0 + (u1 - u0) * (0.5 * (1 - math.cos(math.pi * k / n)))  # uçlarda sık
+                c.D2(u, p, d1, d2)
+                v1 = np.array([d1.X(), d1.Y(), d1.Z()])
+                v2 = np.array([d2.X(), d2.Y(), d2.Z()])
+                sp = float(np.linalg.norm(v1))
+                if sp < 1e-12:
+                    continue
+                kap = float(np.linalg.norm(np.cross(v1, v2))) / sp ** 3
+                if kap > 1e-12 and (best is None or 1.0 / kap < best[0]):
+                    best = (1.0 / kap, np.array([p.X(), p.Y(), p.Z()]))
+        except Exception:
+            continue
+    return best
+
+
+def _fillet_status(mk):
+    """OCC fillet başarısızlığının ayrıntısı (kullanıcıya gösterilir)."""
+    try:
+        for ic in range(1, mk.NbContours() + 1):
+            st = str(mk.StripeStatus(ic)).split(".")[-1].replace("ChFiDS_", "")
+            if st != "Ok":
+                txt = _STRIPE_TEXT.get(st, st)
+                return txt
+    except Exception:
+        pass
+    return ""
 
 
 def _apply_edgewise(shape, i, feats, polys, tol):

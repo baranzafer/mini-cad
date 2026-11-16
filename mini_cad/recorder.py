@@ -89,6 +89,43 @@ def _version():
         return "?"
 
 
+def _bezier_points(ob, sp, budget):
+    """v0.25.13: kontrol noktaları (dünya; nokta, sol / sağ tutamaç) — model birebir
+    kurulabilsin. Komşu segmente göre çok kısa tutamaç (sivri nokta: fillet / teğet yüzey
+    sorunlarının sık sebebi) işaretlenir."""
+    out = []
+    bp = list(sp.bezier_points)
+    if budget[0] <= 0:
+        return ["      (nokta listesi kısaltıldı)"]
+    try:
+        mw = ob.matrix_world
+        W = [tuple(mw @ b.co) for b in bp]
+        HL = [tuple(mw @ b.handle_left) for b in bp]
+        HR = [tuple(mw @ b.handle_right) for b in bp]
+    except Exception:
+        return out
+    n = len(bp)
+
+    def dist(a, b):
+        return sum((float(x) - float(y)) ** 2 for x, y in zip(a, b)) ** 0.5
+    for j in range(n):
+        if budget[0] <= 0:
+            out.append("      (nokta listesi kısaltıldı)")
+            break
+        budget[0] -= 1
+        warn = ""
+        for side, H, k in (("sol", HL, j - 1), ("sağ", HR, j + 1)):
+            if not sp.use_cyclic_u and not (0 <= k < n):
+                continue
+            chord = dist(W[j], W[k % n])
+            if chord > 1e-9 and dist(W[j], H[j]) < 0.02 * chord and \
+                    getattr(bp[j], f"handle_{'left' if side == 'sol' else 'right'}_type",
+                            "") != "VECTOR":
+                warn += f" · KISA {side} tutamaç"
+        out.append(f"      n{j}: {fmt_pt(W[j])} sol {fmt_pt(HL[j])} sağ {fmt_pt(HR[j])}{warn}")
+    return out
+
+
 def fmt_pt(p):
     if p is None:
         return "None"
@@ -182,12 +219,14 @@ def _curve_lines(context):
         out.append(f"- {ob.name} · ebeveyn={ob.parent.name if ob.parent else None} · "
                    f"mod={ob.mode} · görünür={vis} · koleksiyon={colls}{lv} · "
                    f"{ob.data.dimensions} · {len(sps)} spline")
+        budget = [400]                           # rapor çok büyümesin: en fazla 400 nokta
         for si, sp in enumerate(list(sps)[:16]):
             if sp.type == "BEZIER":
                 bp = sp.bezier_points
                 kinds = sorted({b.handle_left_type for b in bp} | {b.handle_right_type for b in bp})
                 out.append(f"    spline {si}: BEZIER {len(bp)} nokta kapalı={sp.use_cyclic_u} "
                            f"tutamaç={kinds}")
+                out += _bezier_points(ob, sp, budget)
             else:
                 out.append(f"    spline {si}: {sp.type} {len(sp.points)} nokta "
                            f"kapalı={sp.use_cyclic_u}")
