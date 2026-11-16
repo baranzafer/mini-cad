@@ -1,4 +1,4 @@
-# Mini CAD — Geliştirme Notları (v0.25.7)
+# Mini CAD — Geliştirme Notları (v0.25.13)
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -52,7 +52,7 @@ Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`
 **Beklenen başlangıç:** `t6.py` ve `t14.py` dışındaki her test **geçti** (bu ikisi v0.12'den
 beri bayat, "(bilinen)" olarak işaretlenir). `SONUÇ: tamam` görünmeli.
 
-Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t66.py` ...),
+Değişiklikten sonra testler yeniden çalıştırılır. Gerekirse yeni test eklenir (`t70.py` ...),
 sürüm artırılır ve paketlenir (§8).
 
 ---
@@ -164,6 +164,71 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
   öbüründe alt yarısı) ya da raylar çapraz. Kullanıcı raporu: damla profilli tüp, ortada
   çapraz kırışık. Araç `devkit/tools/occ_fold_check.py`. Kayıt raporu artık her yüzeyin sınırını
   kenar kenar (segment referansları, uç ve orta noktalar) yazar (`recorder._patch_geometry`).
+- **Karşılıklı kenar eşleşmesi** (v0.25.8, `geometry._side_params`; kullanıcı: damla profilli
+  tüpün yarısı, iki uçtaki profil farklı parçalanmış → çapraz kırışık, Inventor'da sorun yok).
+  - Sebep: Coons / sınır yüzeyinde karşılıklı kenarlar parametreyle eşleşir ve her segment
+    parametrede EŞİT pay alıyordu (`_bspline_from_side` düğümleri 0, 1, 2 ...). 2 segmentli
+    kenarın ilk yarısı, karşıdaki 3 segmentli kenarın ilk 1.5 segmentiyle eşleşiyordu; segment
+    boyları farklıysa noktalar çapraz bağlanıyor, yüzey kırışıyor / katlanıyordu.
+  - Şimdi eşleşme **yay uzunluğuna göre** (Inventor sınır yüzeyi gibi). Geometri aynen kalır
+    (kenarlar ortak topoloji), yalnızca B-spline düğümleri / Hermite parametresi değişir:
+    - Her segmentin payı boyuyla orantılı. Hızı düzgün olmayan segment (tutamakları dengesiz
+      bezier; hız oranı > `PARAM_SPEED_RATIO` 1.25) de Casteljau ile eşit yay boylu 4 / 8
+      parçaya bölünür (`_arc_pieces`); doğru ve daire yayı bölünmez → eski yüzeyler aynı.
+    - İki karşı kenarın segment sayısı eşit ve köşeleri yay oranı olarak yakınsa
+      (`PARAM_JOINT_TOL` 0.15) köşe köşeye eşlenir (ortak konum iki oranın ortalaması).
+    - Noktaya inmiş kenar (3 kenarlı yamanın tepesi) eskisi gibi.
+    - `_loop_sides`: kenarları döngü yönüne çevirir (önce `_hermite` içindeydi). `_coons`,
+      `_coons_surface`, `_hermite` aynı parametreyi kullanır.
+  - **Uydurma denetimi** (`_fit_grid`): OCC'nin `GeomAPI_PointsToBSplineSurface` yaklaşık
+    uydurucusu sıkı toleransta bazen yakınsamadan "tamam" diyor: yüzey ızgara noktalarından
+    geçiyor ama aralarında salınıyor (yama boyunun %4'ü), kenarlara oturmadığı için yüz
+    geçersiz çıkıp Coons / Dolgu'ya düşülüyordu. Sonuç ızgara hücre ortalarında denetlenir
+    (7×7, izdüşüm); tutmazsa eş parametreli (`Approx_IsoParametric`) uydurma, sonra tam ara
+    değerleme (`Interpolate`) denenir.
+  - Ölçüm `devkit/tools/occ_param_check.py` (yarım koni, 2/3, 1/2, 3/3, 4/2 segment): doğru
+    yüzeyden sapma 0.09–0.51 → ≤ 0.004 (profil bezierinin kendi hatası düzeyi). Eski ölçümler
+    değişmedi (Coons regle sapması 0.0004 → 0.0006, halka teğet kırılması aynı).
+- **Kenar Seç ve düzenleme modu** (v0.25.9; kullanıcı raporu: düzenleme moduna geçilemiyor,
+  tutamaçlar çoklu / kutuyla seçilemiyor, değişiklikten sonra gövde güncellenmiyor, Yenile de
+  üretmiyor). Raporda Kenar Seç açık, aktif obje yoktu.
+  - Kenar Seç modali (`pick.py`) düzenleme modunda da çalışıyordu: tutamaç her zaman bir kenarın
+    üstünde olduğundan tık kenar seçimi sayılıp yutuluyor, Enter / F / B / Backspace de
+    yutuluyordu. Artık `context.mode != "OBJECT"` iken **bekler** (`self.waiting`): her olay
+    (Esc dahil) Blender'a geçer, vurgu çizilmez, durum satırı "BEKLİYOR" der; obje moduna
+    dönünce seçimiyle birlikte sürer.
+  - Kenar Seç açıkken tıklar kenar seçtiği için eğri aktif yapılamıyor, Tab çalışmıyordu (ya da
+    tıklanan gövde mesh'i düzenleme moduna giriyordu). **Tab** (`_enter_edit`): üzerinde
+    durulan kenarın eğrisini, yoksa hedef gövdenin tel kafesini seçip düzenleme moduna alır.
+    Eğri zaten aktif ve seçiliyse Blender'ın kendi Tab'ı çalışır.
+  - Gövdenin kendisi (mesh) düzenleme modundayken `write_mesh` etkisiz kalıyor, sonuç sessizce
+    kayboluyordu. `_apply` bunu görür: durum "Gövde düzenleme modunda: sonuç yazılamıyor…",
+    `_edit_blocked`'a alınır; moddan çıkınca `on_depsgraph_update` tam hesap ister. Yenile
+    (`minicad.rebuild`) gövde düzenleme modundaysa önce obje moduna çıkar.
+- **v0.25.13: fillet önbelleği ve fillet teşhisi** (kullanıcı raporu: kemik profilli gövdede
+  kapak döngüsüne fillet; 1. B "ölçüyü küçült", 2. B panele eklendi ama uygulanmadı, durum
+  satırında "Hatalı: 12562b42c5fc", ölçü büyütülünce "sonuç bozuk").
+  - **Önbellek hatası** (`engine.py`): `_bevel_cache` anahtarında özellik uid'leri yoktu,
+    sonuçlar ise uid'yle dönüyordu. Silinip aynı kenar / ölçüyle yeniden eklenen fillet eski
+    uid'nin sonucunu aldı; yenisine sonuç yazılmadığı için `ok=True` kaldı ("eklendi" sanıldı,
+    durumda eski uid). Anahtara `skey` / `uid` eklendi (t69).
+  - **Yedek yollar** (`_build_once`, `_try_apply`): sonuç geçersizse bir kez ShapeFix
+    (`heal_if_invalid`, alan %1 içinde kalmalı); hâlâ olmuyorsa aynı yüzeydeki parçalı yüzler
+    birleştirilip (`unify_faces`: UnifySameDomain, yalnız yüzler, kenarlar korunur) yeniden
+    denenir. Yalnız başarısızlıkta çalışır; başarılı durumlar değişmez.
+  - **Teşhis:** OCC kontur durumu (`_fillet_status`: WalkingFailure / StartsolFailure /
+    TwistedSurface → Türkçe) ve kenarlardaki en küçük eğrilik yarıçapı (`tight_spot`:
+    |C'×C''|/|C'|³, uçlarda sık örnek). Fillet ondan büyükse mesaj yeri ve yarıçapı söyler;
+    çok küçükse (< %5) "o noktanın tutamaçları çok kısa olabilir".
+  - Ölçüm `devkit/tools/occ_fillet_loop_check.py` (rapordan uydurulan model; profil 2 dikeyde
+    ters, kapak üçe bölünmüş, öbür uç açık): pürüzsüz profilde 0.01–0.2 her ölçü uygulanıyor
+    (kapak bölünmüş ya da tek). Sıkı uydurmada P3 / P0'da neredeyse sıfır tutamaç (yarıçap
+    3e-5) → her ölçüde başarısız; iki noktanın tutamağı uzatılınca uygulanıyor. Kenar
+    döngüsü teğet sürekli olduğu için OCC tek kenarı da bütün döngüye yayar: tek bir sivri
+    nokta bütün fillet'i düşürür.
+  - Kayıt raporu (`recorder._bezier_points`): eğrilerin kontrol noktaları (dünya; nokta, sol /
+    sağ tutamaç, en fazla 400 nokta) ve komşu segmentin %2'sinden kısa tutamaçlara
+    "KISA … tutamaç" işareti. Böylece model birebir kurulabilir.
 - **Hata uyarısı** (v0.25.4, `bool_overlay.error_lines` / `_draw_errors`, POST_PIXEL): görünür
   CAD gövdelerinde başarısız yüzey / işlemler 3D görünümün sol üstünde kırmızı yazılır (en
   fazla 5 satır). Önce yalnız panelde ve durum satırında ("Hatalı: Kesim 1") görünüyordu.
@@ -272,12 +337,12 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 |---|---:|---|
 | `__init__.py` | 37 | Kayıt sırası: recorder → kernel → core → constraints → links → ui → panels → pick → draw → split → wire → bool_overlay |
 | `kernel.py` | 150 | OCP kurulumu / yükleme |
-| `engine.py` | 391 | bpy'siz OCC motoru (komut işleyici, önbellekler) |
+| `engine.py` | 399 | bpy'siz OCC motoru (komut işleyici, önbellekler) |
 | `engine_host.py` | 52 | Alt süreç girişi; paketi sahte `minicad_engine` paketi olarak yükler |
 | `jobs.py` | 337 | Süreç istemcisi (ensure / submit / call / control / poll / stop / describe) |
 | `errors.py` | 2 | `CadError` |
-| `geometry.py` | 2792 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
-| `core.py` | 1950 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
+| `geometry.py` | 3180 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
+| `core.py` | 2028 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
 | `solver.py` | 185 | numpy kısıt çözücü: ağırlıklı Gauss-Newton, en az hareket; `residual`, `evaluate`, `solve`, `measure` |
 | `constraints.py` | 590 | Kısıt çözümünü çalıştırma (`solve_all`), ekleme / kontrol / silme, canlı tetikleme, operatörler, kayıt |
 | `constraints_refs.py` | 100 | Kısıt veri erişimi: referans noktaları, dünya konumu, `all_constraints` |
@@ -286,10 +351,10 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `draw_dims.py` | 414 | DimMixin: genel Ölçü aracı, ölçü değeri düzenleme, Yatay / Dikey, karışık referanslı seçim |
 | `constraints_glyphs.py` | 268 | Kısıt simgesi çizimi, `glyph_at` |
 | `draw.py` | 946 | **MINICAD_OT_draw** ana operatör: invoke, durum çubuğu, araç değiştirme, palet olayları, `modal` / `_modal_inner`, kayıt; **MINICAD_OT_edit_sketch** (Çizimi Düzenle) ve menü girişleri |
-| `draw_common.py` | 481 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
+| `draw_common.py` | 531 | Sabitler / renkler, ölçü ayrıştırma, `_Refs` (yakalama referansları), GPU yardımcıları, `_move_node` / `_move_handle`, araç tabloları |
 | `draw_plane.py` | 537 | PlaneMixin: düzlem seçimi (yön, sonra yükseklik), ızgara ve ızgara yakalama, düzleme bakış, geçici zemin (G) |
-| `draw_snap.py` | 663 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
-| `draw_sketch.py` | 848 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
+| `draw_snap.py` | 965 | SnapMixin: nokta yakalama, çıkarım kılavuzları, kilitler, önizleme, T ile iz |
+| `draw_sketch.py` | 1012 | SketchMixin: nokta koyma, `_commit`, Bitir (`_finish_sketch`), oto kısıt, yüzey, taslak geri al / yinele |
 | `draw_edit.py` | 433 | EditMixin: taslak noktası / tutamaç sürükleme, pivot, sürüklerken yakalama, sürüklerken ölçü yardımcısı |
 | `draw_glyphs.py` | 271 | ConstraintUIMixin: kısıt için kenar / nokta seçimi, simge sağ tık menüsü |
 | `draw_render.py` | 280 | RenderMixin: 3D / 2D çizim işleyicileri, ölçü giriş kutusu |
@@ -305,13 +370,13 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `snapmath.py` | 410 | FORGE snap_math (GPL başlıklı kopya) |
 | `palette.py` | 615 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
 | `split.py` | 1001 | **Yüzeyi Böl** (v0.25): kenara nokta ekleme (`insert_point`), yüzey sınırı (`PatchGeom`), döngü kesimi halkası (`ring_cuts`), bıçak (`knife_cut`), uygulama (`apply_cuts`, `split_patch`), modal araç `minicad.split_surface` |
-| `surfmath.py` | 313 | bpy'siz bölme matematiği: bezier bölme / en yakın parametre, kenar parametresi, Coons (3 / 4 kenar), üçgen ağda en yakın nokta ve ışın (`Mesh`), izdüşüm, bezier zinciri uydurma (`fit_chain`) |
+| `surfmath.py` | 442 | bpy'siz bölme matematiği: bezier bölme / en yakın parametre, kenar parametresi, Coons (3 / 4 kenar), üçgen ağda en yakın nokta ve ışın (`Mesh`), izdüşüm, bezier zinciri uydurma (`fit_chain`) |
 | `pick.py` | 579 | Kenar seçim modu (hover + tık), sarı gövde kenarları, B ile fillet |
 | `ui.py` | 590 | Operatörler, tercihler (`background`), `add_feature` (BODY ref) |
 | `panels.py` | 566 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
 | `bool_overlay.py` | 177 | Boolean vurgusu, CAD kenarları, hayalet çizimi |
 | `wire.py` | 308 | Mesh kenarlarından bezier tel kafes |
-| `recorder.py` | 533 | Ctrl+Alt+R kayıt / rapor (§7) |
+| `recorder.py` | 632 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
 
 **Bölme notu (v0.15.2):**
@@ -377,7 +442,42 @@ Diğer kısayollar:
   tıklamalılar) uygulanmaz. Önce X/Y/Z düzlem seçiyordu (X → YZ: X'e DİK düzlem, kullanıcıyı
   şaşırtıyordu; yakalanan nokta düzlem dışındaysa kilit bozuluyordu). `_axis_point`.
   Sürüklemede (draw_edit) eksen kilidi de artık yakalamayı eksene izdüşürür.
+- **v0.25.12: eğriye bağlanan çizgi, kilit öncelikli yakalama** (kullanıcı: iki kapalı eğri
+  arasına bağlantı eğrisi; başlangıç ve bitiş eğriye yapışıp eğriye kesişim noktası eklensin,
+  Shift+Y / X·Y·Z kilitleri hiçbir yakalamayla bozulmasın, kapatana kadar sürsün).
+  - "Yakın" yakalaması artık çoklu çizgi kirişinde değil gerçek bezier'in üstünde
+    (`_ref_geo`, `surfmath.bez_ray_closest`; `_Refs.geo` / `_Refs.own`: A/B satırı → tam
+    geometri).
+  - **Kilitli kesişim** (`_lock_curve_hit`, tür "Eğri", X işareti): eksen kilidinde eksen
+    doğrusunun, düzlem kilidinde (Shift+X/Y/Z, V, seçilen düzlem; ilk noktadan sonra)
+    düzlemin imlece yakın eğrileri kestiği nokta (`surfmath.bez_line_hits`,
+    `bez_plane_hits`, çoklu çizgi için `poly_*`). Nokta hem eğride hem kilitte: kilit
+    bozulmaz. Kilit üstündeki uç / orta / merkez yakalaması yine önce gelir; kesişim
+    yoksa eski davranış (izdüşüm "hizası"). Düzlemin içindeki eğri kesişim sayılmaz.
+  - **Bağlama:** imleç "Yakın" ya da "Eğri" iken konan nokta `attach_pts`'e, çizgi
+    taslağa eklenince düğümlerine denk gelenler `st["attach"]`'a yazılır. Bitir'de bütün
+    çizgiler yazıldıktan sonra (`_attach_all`) o noktadan geçen tel kafes segmenti bulunur
+    (`_wire_hit`, kendi spline'ı hariç; taslaktan yeni yazılan eğriler dahil), oraya
+    `split.insert_point` ile nokta eklenir (biçim değişmez, yüzey referansları iki yarıya
+    eşlenir) ve uç ona COINCIDENT ile bağlanır. Nokta zaten düğümse yalnız kısıt. Uç
+    taslakta taşınmışsa bağlanmaz. "Orta" ve "Kesişim" (iki doğrunun) yakalamaları eskisi
+    gibi eğriyi bölmez (ölçü kısıtları bozulmasın).
+  - Eksen / düzlem kilidi kapatılana kadar sürer (çizgi bitince de).
 - **Düzlem:** Shift+X / Shift+Y / Shift+Z (Blender'daki gibi: o eksen dışındaki düzlem), V.
+  - **Düzlem kilidi (v0.25.10;** kullanıcı: "Shift+X YZ'de kilitlemiyor, işe yaramıyor; başka
+    yakalamayla karşılaşınca kilit bozulmasın"). Üç ayrı sebep vardı:
+    - Düzleme kenarından bakılırken (üstten bakışta Shift+X → YZ) ışın düzlemi kesmiyor, imleç
+      donuyor / fırlıyordu. `_plane_hit`: |ışın · normal| < 0.15 ise fare, düzlem başlangıcından
+      geçen görünüş düzlemine alınıp kilitli düzleme izdüşürülür (ekranda görünen doğrultuda
+      hareket). Yalnızca açıkça seçilen eksen düzlemlerinde.
+    - Eksen kilidi (X) açıkken Shift+X etkisizdi (eksen kilidi öncelikli). Düzlem seçmek artık
+      eksen kilidini kapatır.
+    - Düzlem dışındaki noktaya yakalanınca çizim düzlemden çıkıyordu. `PLANE_LOCK_MODES`
+      (XY / XZ / YZ / VIEW) ve kurulu düzlemde yakalanan nokta düzleme izdüşer ("… hizası",
+      `snap_id` yazılmaz). Otomatik düzlemde ve seçili (LOCK) düzlemde eski davranış.
+    - Taslak sürüklemede (draw_edit) Shift'e bakılmıyor, Shift+X de X ekseni kilidi oluyordu.
+      Artık `d["plane_lock"]`: o eksene dik dünya düzlemi (sürüklenen noktadan), yakalama
+      düzleme izdüşer; tekrar Shift+X ya da X/Y/Z kapatır (`plane0`'a döner).
 - **Geçici zemin (G; v0.25.6'ya kadar U):** çizerken ızgaranın yönü ve yüksekliği değiştirilir
   (aşağıya bakın). Sol el ASD bölgesinde kalsın diye G (Ground).
 - **Çizerken:**
@@ -575,6 +675,21 @@ Diğer kısayollar:
   Blender'a gitmez. Gitseydi spline'lar objeye geri gelir, Bitir'de çiftlenirdi.
 - Yalnızca düzenlenen çizgilerin olduğu Bitir artık geri alma adımı yazar (`created` artar)
   ve taslak geçmişini temizler.
+- **v0.25.11: sınırsız düzenleme** (kullanıcı: "Çizimi Düzenle'den sonra Çizimi Kapat'a basınca
+  çizim görünümden kayboluyor"). Sebep: `cleanup_all` aracı yalnızca durduruyordu; taslağa
+  alınmış spline'lar objeden silinmiş olduğu için taslakla birlikte gidiyordu.
+  - `draw_common.cleanup_all(save=True)`: kapatmadan önce `save_sketch` → `_finish_sketch`
+    (Bitir). Paneldeki Çizimi Kapat, Kenar Seç ve Yüzeyi Böl'ün açılması, eklenti kapatma
+    bu yoldan geçer. Dosya yüklenirken (`load_pre`) `save=False`.
+  - `save_pre`: taslakta `edit_src`'li çizgi varken dosya kaydedilirse önce Bitir'lenir
+    (dosyada çizim eksik kalmasın); araç açık kalır. Yalnız yeni çizgiler taslağa dokunulmaz.
+  - **Gövde dondurma** (`core.frozen`, `core.edited_curves`, `core._frozen_skip`,
+    `core.thaw_edited`): düzenlenen çizime bağlı gövde düzenleme sürerken yeniden
+    hesaplanmaz (depsgraph, kuyruk, senkron `rebuild`); son hâli görünür kalır, panelde
+    "Çizim düzenleniyor" yazar. Bitir / kapatma sonrası girdi değiştiyse ya da ertelenen iş
+    varsa yeniden hesaplanır: yüzeyler tel kafesin yeni hâlini izler. Önce düzenleme
+    sürerken yüzeyler "referans kayboldu" hatasıyla kayboluyordu.
+  - Düzenle → yüzey (F) → tekrar düzenle → kapat döngüsü sınırsız tekrarlanabilir (t67).
 
 **Oluştur araçları** (v0.18.0; `draw_shapes` + `shapemath`):
 - **Çok tıklamalı şekiller** `CLICK_SHAPES` ⊂ `SHAPE_TOOLS` (RECT3, RECTC, RECT3C, POLYGON,
@@ -894,13 +1009,19 @@ Betiğin yaptıkları:
 | tools/occ_blend_ring_check.py | GERÇEK OCC ile halka biçimli teğet birleşim (8 eğri yama, 4 biçim, kurma sırasından bağımsızlık, önizleme, Coons'a göre taşma, teğet ağırlığı, üçgenli model) |
 | t62 | Ölçü girişi: 3 noktalı yay (kiriş, yarıçap, 180° / 270°), merkezli yay (merkez → başlangıç → bitiş, zincirden, 200°), teğet yay (R + açı, yalnız R), doğru, daire, dikdörtgen, CV, spline, kalem; yeni eğrinin gizli koleksiyon / yerel görünüm bağlanması |
 | t61 | (F–H: v0.25.2 çok yüzeyli bıçak: üç kareyi tek çizgiyle kesme, boşluktan geçen çizgi, gizli kenarlar) Yüzeyi Böl: iki kare yüzeyde halka döngü kesimi (nokta ekleme, referans / kısıt / fillet eşleme, 4 parça), bıçak (köşe → kenar ortası, aynı kenar reddi), yarım silindirde kesimin yüzeyde kalması, ilişkili spline reddi (değişiklik yok), modal araç (hover, tekerlek, oran, tık, bıçak, Esc) |
-| t65 | Eksen kilidi: X / Y (dünya ekseni), yakalama eksene izdüşer (kilit bozulmaz), sonraki noktada sürer, tekrar basınca kapanır, üstten Z ile dikey, otomatik AXIS, Shift+X düzlem, sürüklemede yakalama izdüşümü |
+| t65 | (G–J: v0.25.10 düzlem kilidi: eksen kilidini kapatma, düzlem dışı yakalamanın izdüşümü, sürüklemede Shift+X, kenardan bakış)  Eksen kilidi: X / Y (dünya ekseni), yakalama eksene izdüşer (kilit bozulmaz), sonraki noktada sürer, tekrar basınca kapanır, üstten Z ile dikey, otomatik AXIS, Shift+X düzlem, sürüklemede yakalama izdüşümü |
 | t64 | Taslakta Teğet / Pürüzsüz: doğru + 3 noktalı yay (doğru aynı, yay uçları yerinde, gerçek yay, kırılma 15.8° → 0), sürükleme sonrası, G2 doğru–yay açıklaması, doğru + spline (yalnız tutamaç), yay + spline G2 (eğrilik eşit), daireye teğet doğru, Bitir |
 | t63 | Hesaplanamayan yüzey / işlem uyarı satırları (gizli gövde, kapalı / başarılı işlem yok, kısaltma, en fazla 5 satır) |
 | tools/occ_fold_check.py | GERÇEK OCC ile katlanma denetimi (zıt yarılar, kelebek; doğru yüzeyde yanlış alarm yok) |
+| tools/occ_param_check.py | GERÇEK OCC ile karşılıklı kenar eşleşmesi: iki uçta farklı parçalanmış profil (2/3, 1/2, 3/3, 4/2 segment, dengesiz tutamak) doğru yüzeyi verir, katlanmaz; sınır yüzeyi (Hermite) yolu dahil |
 | tools/occ_shell_bool_check.py | GERÇEK OCC ile açık kabukta Kesim / Kesişim / Birleşim reddi / değmeyen araç |
 | tools/occ_coons_check.py | GERÇEK OCC ile Coons sınır yüzeyi: iki kemer + iki düz kenar düz çizgili (regle) olmalı (Keskin / Teğet / serbest) |
 | tools/occ_split_check.py | GERÇEK OCC ile bölünen eğri yüzeyin biçimi ve yeni dikişteki teğetlik |
+| t66 | Kenar Seç düzenleme modunda bekler (tık / Enter / F / B / Esc Blender'a), Tab tel kafesi düzenlemeye alır, gövde mesh'i düzenleme modundayken sonuç yazılmaz ve çıkınca yeniden hesaplanır |
+| t69 | Silinip yeniden eklenen fillet önbellekten eski sonucu almaz (yeni uid, yeniden hesap, durumda ad), değişmeyen özellikte önbellek, kayıt raporunda kontrol noktaları ve kısa tutamaç işareti |
+| tools/occ_fillet_loop_check.py | GERÇEK OCC ile kapak çevresi döngüsüne fillet (pürüzsüz profil: her ölçü; sivri nokta: yerini gösteren hata) |
+| t68 | Eğriye bağlanan çizgi: X kilidiyle iki kare arası (Yakın başlangıç, eksen ∩ eğri, köşe yakınında kilit, nokta ekleme, kısıtlar, biçim), XY kilidinde dik kare (düzlem ∩ eğri), kilitsiz çok parçalı, taslaktaki kareye, taşınmış uç, daire hedef (bezier üstünde, biçim), surfmath kesişimleri |
+| t67 | Çizimi Düzenle → Çizimi Kapat geri yazma, 4 kez düzenle / kapat / Bitir döngüsü (referanslar, konumlar), gövde dondurma (depsgraph / kuyruk / rebuild, yüzey referansı, çözülünce yeniden hesap, değişiklik yoksa hesap yok), save_pre, load_pre |
 | t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |
 
 **Test yazma kalıbı:**
@@ -957,6 +1078,11 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - Taslakta Ctrl+Z / Ctrl+Shift+Z aracın kendi geçmişini kullanır.
 - Izgara yakalaması sürüklemede de geçerlidir, Ctrl ile kapanır.
 - `pick` modu açılınca çizim aracı kapatılır (`draw.cleanup_all`); ikisi aynı anda çalışmaz.
+- Eksen / düzlem kilidi hiçbir yakalamayla bozulmaz; kilitliyken eğri yakalaması kilitle
+  kesişimdir (v0.25.12). "Orta" yakalaması hedef eğriyi bölmez.
+- Çizim aracı hangi yoldan kapanırsa kapansın (Çizimi Kapat, Esc, palet, başka mod) taslak
+  önce kaydedilir; taslağa alınmış çizim asla kaybolmaz (v0.25.11). Yalnız dosya yüklenirken
+  yazılmaz.
 - Motor süreci açılamazsa Blender içinde hesaplamaya düşülür, hata verip durmaz.
 
 ---
@@ -1091,6 +1217,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - Coons düzeltmesi: ters yönlü yüzeyde kırpma hatası (Keskin'de de etkili).
   - Test t60; araçlar genişletildi.
 - **0.25.7:** katlanan yüzey uyarısı (panel + 3D görünüm); kayıt raporunda yüzey sınırları.
+- **0.25.8:** karşılıklı kenarlar yay uzunluğuna göre eşleşir (iki uçta farklı parçalanmış profilde çapraz kırışık / katlanma düzeltmesi); sınır yüzeyi uydurma denetimi.
+- **0.25.9:** Kenar Seç düzenleme modunda bekler (tutamaç çoklu / kutu seçimi), Tab ile tel kafesi düzenleme, gövde düzenleme modundayken kaybolan güncelleme.
+- **0.25.10:** Shift+X/Y/Z düzlem kilidi: kenardan bakışta çalışır, eksen kilidini kapatır, yakalama düzleme izdüşer; taslak sürüklemede de düzlem kilidi.
 - **0.25.6:** X / Y / Z Blender gibi eksen kilidi (dünya ekseni, yakalama bozmaz, tekrar
   basana kadar); düzlem Shift+X/Y/Z; geçici zemin U → G. Test t65.
 - **0.25.5:** taslakta Teğet / Pürüzsüz anında ve biçimi bozmadan (yay yeniden kurulur, doğru

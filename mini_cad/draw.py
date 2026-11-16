@@ -67,6 +67,7 @@ from .draw_common import (
     TOOL_KEYS, _HANDLES, _LAST, _Refs, _STATE, _UNIT_SUFFIX, _axis_col, _bezier, _dashed,
     _line_thirds, _marker, _move_handle, _move_node, _poly, _project, _rect, _remove_handle,
     _seg_px_dist, _shader, _text, cleanup_all, is_running, parse_angle, parse_length,
+    save_sketch,
 )
 from .draw_plane import PlaneMixin
 from .draw_snap import SnapMixin
@@ -107,8 +108,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
 
     def invoke(self, context, event):
         if _STATE["active"] is not None:
-            cleanup_all()
-            self.report({"INFO"}, "Çizim kapatıldı")
+            cleanup_all()                      # taslak (düzenlenen çizim dahil) önce kaydedilir
+            self.report({"INFO"}, "Çizim kaydedildi ve kapatıldı")
             return {"CANCELLED"}
         try:
             from . import pick
@@ -172,6 +173,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self.off = None
         self.temp = None                 # geçici zemin (G): {"saved", "plane", "label", "grid_o"}
         self.axis_lock = None            # eksen kilidi (X / Y / Z): 0 / 1 / 2
+        self.snap_attach = None          # imleç bir eğrinin üstünde (Bitir'de eğriye bağlanır)
+        self.attach_pts = []             # süren çizginin eğri üstüne konmuş noktaları
         self.temp_pick = None            # geçici zemin seçiliyor: {"saved"}
         self.snap_src = None             # geçici zeminde izdüşürülen yakalamanın asıl noktası
         self.snap_src_id = None
@@ -728,6 +731,12 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             if event.type in {"X", "Y", "Z", "V"}:
                 mode = {"X": "YZ", "Y": "XZ", "Z": "XY", "V": "VIEW"}[event.type]
                 self._set_plane("AUTO" if self.plane_mode == mode else mode)
+                # v0.25.10: eksen kilidi açıksa düzlem seçimi etkisiz kalıyordu (eksen kilidi
+                # öncelikli) → "Shift+X işe yaramıyor". Düzlem seçmek eksen kilidini kapatır.
+                self.axis_lock = None
+                self._status(context, f"Düzlem kilidi: {dm.PLANE_LABELS[mode]} — yakalamalar "
+                                      f"düzleme izdüşer (tekrar: kapat)"
+                             if self.plane_mode == mode else "Düzlem: otomatik")
                 self._refresh(context)
                 return {"RUNNING_MODAL"}
             if event.type == "T" and not self.tool.startswith("C_") and self.tool != "PEN":
@@ -897,7 +906,23 @@ classes = (MINICAD_OT_draw, MINICAD_OT_edit_sketch)
 
 @bpy.app.handlers.persistent
 def _on_load_pre(_dummy):
-    cleanup_all()
+    cleanup_all(save=False)                    # eski sahne gidiyor: yazılacak yer yok
+
+
+@bpy.app.handlers.persistent
+def _on_save_pre(_dummy):
+    """Dosya kaydedilirken taslağa alınmış (Çizimi Düzenle) çizgiler objede yok: kaydetmeden
+    önce Bitir'lenir, yoksa dosyada çizim eksik kalırdı. Araç açık kalır."""
+    op = _STATE["active"]
+    if op is None or getattr(op, "stop_request", False):
+        return
+    if not any(st.get("edit_src") for st in (getattr(op, "sketch", None) or ())):
+        return
+    save_sketch(op)
+    try:
+        op._status(bpy.context, "Kaydetmeden önce düzenlenen çizim Bitir'lendi")
+    except Exception:
+        pass
 
 
 def register():
@@ -929,6 +954,8 @@ def register():
         name="Önce Düzlem Seç", description="Çizim açılınca önce çizim düzlemini seçtir "
         "(Inventor gibi)", default=True)
     bpy.app.handlers.load_pre.append(_on_load_pre)
+    if hasattr(bpy.app.handlers, "save_pre"):
+        bpy.app.handlers.save_pre.append(_on_save_pre)
     for m in _MENUS:
         mt = getattr(bpy.types, m, None)
         if mt is not None and hasattr(mt, "append"):
@@ -946,6 +973,9 @@ def unregister():
                 pass
     if _on_load_pre in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.remove(_on_load_pre)
+    sv = getattr(bpy.app.handlers, "save_pre", None)
+    if sv is not None and _on_save_pre in sv:
+        sv.remove(_on_save_pre)
     for name in ("minicad_grid_snap", "minicad_grid_alpha", "minicad_grid_fade",
                  "minicad_grid_size", "minicad_draw_target",
                  "minicad_look_at",

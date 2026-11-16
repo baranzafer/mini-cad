@@ -311,3 +311,132 @@ def _hermite_fit(P):
 def _chain_error(segs, P):
     """Örneklerin zincire gerçek (en yakın nokta) uzaklıklarının en büyüğü."""
     return float(max(min(closest_t(sg, p, 16)[1] for sg in segs) for p in P))
+
+
+# ---------------------------------------------------------------- v0.25.12: kilitli yakalama
+
+def _golden(f, a, b, it=60):
+    """[a, b] aralığında f'nin en küçüğü (altın oran araması)."""
+    g = 0.6180339887498949
+    c, d = b - g * (b - a), a + g * (b - a)
+    fc, fd = f(c), f(d)
+    for _ in range(it):
+        if fc < fd:
+            b, d, fd = d, c, fc
+            c = b - g * (b - a)
+            fc = f(c)
+        else:
+            a, c, fc = c, d, fd
+            d = a + g * (b - a)
+            fd = f(d)
+    return 0.5 * (a + b)
+
+
+def _line_dist(X, o, d):
+    w = np.asarray(X, dtype=np.float64) - o
+    return w - np.multiply.outer(w @ d, d) if w.ndim == 2 else w - d * float(w @ d)
+
+
+def bez_plane_hits(P, o, n, eps=1e-9, samples=48):
+    """Bezier'in (o, n) düzlemini kestiği parametreler. Eğri düzlemin içindeyse boş."""
+    P = np.asarray(P, dtype=np.float64)
+    n = np.asarray(n, dtype=np.float64)
+    o = np.asarray(o, dtype=np.float64)
+    ts = np.linspace(0.0, 1.0, samples + 1)
+    f = np.array([float((bez(P, t) - o) @ n) for t in ts])
+    scale = 1.0 + float(np.abs(P).max())
+    if float(np.abs(f).max()) <= eps * scale:
+        return []
+    out = []
+    for i in range(samples):
+        a, b, fa, fb = ts[i], ts[i + 1], f[i], f[i + 1]
+        if fa == 0.0:
+            out.append(a)
+            continue
+        if fa * fb > 0.0 or fb == 0.0:
+            continue                          # fb == 0: sonraki aralıkta fa == 0 olarak
+        for _ in range(60):
+            m = 0.5 * (a + b)
+            fm = float((bez(P, m) - o) @ n)
+            if fa * fm <= 0.0:
+                b = m
+            else:
+                a, fa = m, fm
+        out.append(0.5 * (a + b))
+    if f[-1] == 0.0:
+        out.append(1.0)
+    return out
+
+
+def bez_line_hits(P, o, d, tol, samples=48):
+    """Bezier'in (o, d) doğrusuyla kesiştiği parametreler (uzaklık ≤ tol)."""
+    P = np.asarray(P, dtype=np.float64)
+    o = np.asarray(o, dtype=np.float64)
+    d = np.asarray(d, dtype=np.float64)
+    d = d / max(float(np.linalg.norm(d)), 1e-300)
+    ts = np.linspace(0.0, 1.0, samples + 1)
+
+    def h(t):
+        return float(np.linalg.norm(_line_dist(bez(P, t), o, d)))
+    H = np.array([h(t) for t in ts])
+    out = []
+    for i in range(samples + 1):
+        if (i > 0 and H[i] > H[i - 1]) or (i < samples and H[i] > H[i + 1]):
+            continue
+        t = _golden(h, ts[max(i - 1, 0)], ts[min(i + 1, samples)])
+        if h(t) <= tol and not any(abs(t - u) < 1e-6 for u in out):
+            out.append(t)
+    return out
+
+
+def bez_ray_closest(P, ro, rd, samples=48):
+    """Bezier üzerinde fare ışınına en yakın parametre."""
+    P = np.asarray(P, dtype=np.float64)
+    rd = np.asarray(rd, dtype=np.float64)
+    rd = rd / max(float(np.linalg.norm(rd)), 1e-300)
+    ro = np.asarray(ro, dtype=np.float64)
+
+    def h(t):
+        return float(np.linalg.norm(_line_dist(bez(P, t), ro, rd)))
+    ts = np.linspace(0.0, 1.0, samples + 1)
+    H = np.array([h(t) for t in ts])
+    i = int(np.argmin(H))
+    return _golden(h, ts[max(i - 1, 0)], ts[min(i + 1, samples)])
+
+
+def poly_plane_hits(S, o, n, eps=1e-9):
+    """Çoklu çizginin düzlemi kestiği noktalar."""
+    S = np.asarray(S, dtype=np.float64)
+    f = (S - o) @ np.asarray(n, dtype=np.float64)
+    if float(np.abs(f).max()) <= eps * (1.0 + float(np.abs(S).max())):
+        return []
+    out = []
+    for i in range(len(S) - 1):
+        if f[i] == 0.0:
+            out.append(S[i].copy())
+        elif f[i] * f[i + 1] < 0.0:
+            out.append(S[i] + (S[i + 1] - S[i]) * (f[i] / (f[i] - f[i + 1])))
+    if f[-1] == 0.0:
+        out.append(S[-1].copy())
+    return out
+
+
+def poly_line_hits(S, o, d, tol):
+    """Çoklu çizginin doğruyla kesiştiği noktalar (uzaklık ≤ tol)."""
+    S = np.asarray(S, dtype=np.float64)
+    d = np.asarray(d, dtype=np.float64)
+    d = d / max(float(np.linalg.norm(d)), 1e-300)
+    out = []
+    for i in range(len(S) - 1):
+        a, b = S[i], S[i + 1]
+        u = b - a
+        w0 = a - o
+        A, B, C = float(u @ u), float(u @ d), 1.0
+        D, E = float(u @ w0), float(d @ w0)
+        den = A * C - B * B
+        s = (B * E - C * D) / den if den > 1e-18 else 0.0
+        s = min(max(s, 0.0), 1.0)
+        q = a + u * s
+        if float(np.linalg.norm(_line_dist(q, o, d))) <= tol:
+            out.append(q)
+    return out
