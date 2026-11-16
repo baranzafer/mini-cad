@@ -172,6 +172,131 @@ def add_feature(context, refs):
     return True, f"{f.name}: {f.info}{extra} · ölçüyü panelden ayarla"
 
 
+def _fill_path(f, refs):
+    """Seçili kenarları işlemin yoluna yazar (tel kafes segmenti ya da gövde kenarı)."""
+    f.segs.clear()
+    f.geo_edges.clear()
+    n_body = 0
+    for ref in refs:
+        if isinstance(ref, tuple) and len(ref) == 3 and ref[0] == "BODY":
+            _, src, poly = ref
+            g = f.geo_edges.add()
+            g.id, g.src, g.data = core.new_uid(), src, core.geo_desc_json(poly)
+            n_body += 1
+            continue
+        ob, si, i = ref
+        r = f.segs.add()
+        r.obj, r.spline, r.seg = ob, si, i
+    return n_body
+
+
+def pick_refs(context):
+    """Kenar Seç modu açıksa seçili kenarlar, değilse None."""
+    try:
+        from . import pick
+        op = pick._STATE.get("active")
+        if op is None or not op.selected:
+            return None
+        op._ensure_scene(context)
+        return op._refs()
+    except Exception:
+        return None
+
+
+def add_sweep(context, refs):
+    """Seçili kenarları yol, paneldeki eğriyi profil yapan Profil Süpürme ekler (v0.26.0).
+    Başarısız olsa da silinmez: yerleşim panelden ayarlanır. (başarılı mı, mesaj)"""
+    target = get_target(context)
+    if target is None:
+        return False, "Önce yüzey oluştur (hedef CAD objesi yok)"
+    sc = context.scene
+    prof = getattr(sc, "minicad_sweep_profile", None)
+    if prof is None:
+        return False, ("Önce N panelde 'Mini CAD: Profil Süpürme' bölümünden profil eğrisini "
+                       "seç")
+    if not refs:
+        return False, "Yol yok: Kenar Seç'te yol kenarlarını seç"
+    props = target.cad
+    f = props.features.add()
+    f.op = "SWEEP"
+    f.uid = core.new_uid()
+    f.bool_type = sc.minicad_sweep_type
+    f.profile = prof
+    f.name = f"Süpürme {len(props.features)}"
+    n_body = _fill_path(f, refs)
+    props.active_sweep = len(props.features) - 1
+    core.rebuild(target, preview=False)
+    extra = f" · yolda {n_body} gövde kenarı" if n_body else ""
+    if not f.ok:
+        return False, (f"{f.name} eklendi ama uygulanamadı: {f.info}{extra} · yerleşimi "
+                       "panelden ayarla")
+    return True, f"{f.name}: {f.info}{extra}"
+
+
+class MINICAD_OT_add_sweep(bpy.types.Operator):
+    bl_idname = "minicad.add_sweep"
+    bl_label = "Seçili Kenarlara Süpürme Ekle"
+    bl_description = ("Kenar Seç'te seçili kenarları YOL, paneldeki eğriyi PROFİL yapar: profil "
+                      "yol boyunca süpürülür ve gövdeye seçili işlemle uygulanır (Inventor "
+                      "Süpür). Kenar Seç'te P tuşu da aynı işi yapar")
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        refs = pick_refs(context)
+        if refs is None:
+            self.report({"WARNING"}, "Önce Kenar Seç'i açıp yol kenarlarını seç")
+            return {"CANCELLED"}
+        ok, msg = add_sweep(context, refs)
+        self.report({"INFO"} if ok else {"WARNING"}, msg)
+        return {"FINISHED"}
+
+
+class MINICAD_OT_sweep_set_path(bpy.types.Operator):
+    bl_idname = "minicad.sweep_set_path"
+    bl_label = "Seçimi Yol Yap"
+    bl_description = "Kenar Seç'te seçili kenarlar bu süpürmenin yeni yolu olur"
+    bl_options = {"REGISTER", "UNDO"}
+
+    index: bpy.props.IntProperty()
+
+    def execute(self, context):
+        target = get_target(context)
+        refs = pick_refs(context)
+        if target is None or refs is None or not (0 <= self.index < len(target.cad.features)):
+            self.report({"WARNING"}, "Önce Kenar Seç'i açıp yol kenarlarını seç")
+            return {"CANCELLED"}
+        f = target.cad.features[self.index]
+        _fill_path(f, refs)
+        core.rebuild(target, preview=False)
+        self.report({"INFO"} if f.ok else {"WARNING"}, f"{f.name}: {f.info}")
+        return {"FINISHED"}
+
+
+class MINICAD_OT_diagnose_feature(bpy.types.Operator):
+    bl_idname = "minicad.diagnose_feature"
+    bl_label = "Ayrıntılı Teşhis"
+    bl_description = ("Başarısız işlemi derinlemesine inceler: yapılabilen en büyük ölçüyü arar, "
+                      "kenarları tek tek dener; sebebin modelden mi, geometriden mi, çekirdekten "
+                      "mi geldiğini söyler (birkaç saniye ile bir dakika sürebilir)")
+    bl_options = {"REGISTER"}
+
+    index: bpy.props.IntProperty()
+
+    def execute(self, context):
+        target = get_target(context)
+        if target is None or not (0 <= self.index < len(target.cad.features)):
+            return {"CANCELLED"}
+        props = target.cad
+        f = props.features[self.index]
+        props.diag_uid = f.uid
+        try:
+            core.rebuild(target, preview=False)
+        finally:
+            props.diag_uid = ""
+        self.report({"INFO"} if f.ok else {"WARNING"}, f"{f.name}: {f.info}")
+        return {"FINISHED"}
+
+
 class MINICAD_OT_remove_patch(bpy.types.Operator):
     bl_idname = "minicad.remove_patch"
     bl_label = "Yüzeyi Sil"
@@ -580,6 +705,9 @@ classes = (
     MINICAD_OT_swap_bool,
     MINICAD_OT_swap_existing_bool,
     MINICAD_OT_move_feature,
+    MINICAD_OT_add_sweep,
+    MINICAD_OT_sweep_set_path,
+    MINICAD_OT_diagnose_feature,
     MINICAD_OT_export_step,
     MINICAD_OT_rebuild,
     MINICAD_Preferences,

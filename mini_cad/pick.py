@@ -6,6 +6,7 @@ Kısayollar (mod açıkken):
   Enter / F        seçili kenarlardan yüzey oluştur (hedef gövdeye ekler)
   Ctrl+Enter       seçili kenarlarla YENİ bir gövde başlat
   B                seçili kenarlara bevel ekle (ölçü panelden)
+  P                seçili kenarları YOL yapıp paneldeki profili süpür (Profil Süpürme, v0.26)
   Sarı kenarlar    gövdenin boolean'la oluşan kenarları: tek tek seçilip B ile fillet'lenir
   Backspace        seçimi temizle
   Esc              moddan çık
@@ -270,7 +271,7 @@ class MINICAD_OT_pick_edges(bpy.types.Operator):
                 for ob, si, i in core.patch_refs(p):
                     self.used.add((ob.name, si, i))
             for f in target.cad.features:
-                if f.enabled:
+                if f.enabled and core.is_bevel(f):
                     for r in f.segs:
                         if r.obj is not None:
                             self.beveled.add((r.obj.name, r.spline, r.seg))
@@ -279,7 +280,7 @@ class MINICAD_OT_pick_edges(bpy.types.Operator):
         n = len(self.selected)
         txt = (f"Kenar seçimi: {n} seçili  |  Tık: zinciri seç/bırak  |  Alt+tık: tek parça  |  "
                f"Enter: yüzey  |  "
-               f"Ctrl+Enter: YENİ gövde  |  B: fillet (sarı = gövde kenarları)  |  "
+               f"Ctrl+Enter: YENİ gövde  |  B: fillet (sarı = gövde kenarları)  |  P: profil süpür  |  "
                f"Backspace: temizle  |  Esc: çık")
         if msg:
             txt = f"{msg}   —   {txt}"
@@ -573,6 +574,13 @@ class MINICAD_OT_pick_edges(bpy.types.Operator):
             from .ui import add_feature
             ok, msg = add_feature(context, self._refs())
             self._after_action(context, ok, msg, "Mini CAD: Bevel")
+            return {"RUNNING_MODAL"}
+
+        if event.type == "P" and press and self.selected and not (event.ctrl or event.alt):
+            self._ensure_scene(context)
+            from .ui import add_sweep
+            ok, msg = add_sweep(context, self._refs())
+            self._after_action(context, ok, msg, "Mini CAD: Profil Süpürme")
             return {"RUNNING_MODAL"}
 
         if (event.type in {"RET", "NUMPAD_ENTER"} or

@@ -180,11 +180,26 @@ def _cad_lines(context):
             if f.op == "BOOLEAN":
                 desc = (f"BOOLEAN {f.bool_type} araç={f.tool.name if f.tool else None} "
                         f"yeni_kenar={f.edge_size:g} ({f.edge_mode}) aynala={f.mirror_tool}")
+            elif f.op == "SWEEP":
+                pr = f.profile
+                psegs = 0
+                if pr is not None:
+                    try:
+                        psegs = len(core.profile_spec(pr)["segs"])
+                    except Exception:
+                        pass
+                desc = (f"SWEEP {f.bool_type} profil={pr.name if pr else None} ({psegs} segment) "
+                        f"yol={len(f.segs)} tel kafes + {len(f.geo_edges)} gövde kenarı · "
+                        f"yerleşim={f.sw_place} yön={f.sw_ref} kapat={f.sw_close} "
+                        f"açı={math.degrees(f.sw_angle):.1f} kaydır=({f.sw_off_x:g}, "
+                        f"{f.sw_off_y:g}) ölçek={f.sw_scale:g} aynala={f.sw_flip} "
+                        f"ters={f.sw_reverse} uzat={f.sw_extend_auto}+{f.sw_extend:g} "
+                        f"yeni_kenar={f.edge_size:g}")
             else:
                 desc = (f"{f.kind} {f.size:g} · {len(f.segs)} tel kafes kenarı + "
                         f"{len(f.geo_edges)} gövde kenarı")
             out.append(f"    işlem {i}: {f.name} etkin={f.enabled} {desc} "
-                       f"{'OK' if f.ok else 'HATA'} · {_short(f.info)}")
+                       f"{'OK' if f.ok else 'HATA'} · {_short(f.info, 700)}")
         d = core._display.get(ob.name, {})
         g = d.get("ghost")
         out.append(f"    çizim verisi: {len(d.get('edges') or [])} kenar, "

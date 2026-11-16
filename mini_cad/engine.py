@@ -22,6 +22,7 @@ _stage_base = {}    # gövde adı -> {aşama anahtarı: fillet öncesi şekil} (
 _bool_new = {}      # gövde adı -> {boolean uid: [kenar kaydı]} son tam kalite
 _tool_cache = {}    # araç adı -> (anahtar, katı)
 _tool_good = {}     # araç adı -> son başarıyla okunan katı
+_sweep_lines = {}   # gövde adı -> {süpürme uid: [araç kenar çizgileri]} (önizleme çizimi)
 
 
 def _geo():
@@ -146,6 +147,56 @@ def _merge_ghosts(parts):
 
 # ---------------------------------------------------------------- gövde hesabı
 
+def _sweep_stage(name, st, shape, bool_new, tol, mirrors, run_bevels, job, preview, deep,
+                 bevel_done, results, upd, used, sweep_lines):
+    """Profil Süpürme (v0.26.0): profil yol boyunca süpürülür, araç gövdeye boolean olarak
+    uygulanır. Yol tel kafes segmentleri ve / veya boolean'ın oluşturduğu gövde kenarlarıdır.
+    Sonuç gövde st["_out"]'a yazılır."""
+    geometry = _geo()
+    from . import sweep
+    uid = st["uid"]
+    try:
+        gp, gu, ge, gused = _resolve_geo(name, st, bool_new, tol)
+        for src, ks in gused.items():
+            used.setdefault(src, set()).update(ks)
+        if gu:
+            upd[uid] = gu
+        if ge and not gp and not st["path"]:
+            raise CadError("Model kaynaklı: yolun gövde kenarı bulunamadı: " + ge[0])
+        pieces = [("bez", p) for p in st["path"]] + [("pts", P) for P in gp]
+        tools, tinfo = sweep.make_tool(shape, pieces, st["profile"], st["params"], tol)
+        try:
+            sweep_lines[uid] = [np.asarray(p, dtype=np.float32) for t in tools
+                                for p in geometry.shape_edge_polylines(t)]
+        except Exception:
+            traceback.print_exc()
+        if st["mirror_tool"] and mirrors:
+            tools = [m for t in tools for m in geometry.mirror_copies(t, mirrors)]
+        if st["bool_type"] == "INTERSECT" and len(tools) > 1:
+            tl = tools[0]
+            for t in tools[1:]:
+                tl = geometry.safe_boolean("UNION", tl, t)
+            tools = [tl]
+        before = shape
+        out, ok, info = geometry.apply_boolean(
+            shape, tools, st["bool_type"], st["edge_size"] if run_bevels else 0.0,
+            st["edge_mode"], tol, job["smooth"], preview=preview, deep=uid in deep,
+            after_bevel=bevel_done)
+        results[uid] = (ok, f"{info} · {tinfo}")
+        st["_out"] = out
+        if st.get("want_edges"):
+            try:
+                bool_new[uid] = geometry.edge_records(
+                    geometry.boolean_new_edges(out, before, tools, "ALL", tol))
+            except Exception:
+                traceback.print_exc()
+    except CadError as e:
+        results[uid] = (False, str(e))
+    except Exception as e:
+        traceback.print_exc()
+        results[uid] = (False, f"Hata: {e}")
+
+
 def build(job):
     geometry = _geo()
     t0 = time.perf_counter()
@@ -222,13 +273,17 @@ def _build(job, res, geometry):
                # ölçüdeki) özellik eski uid'nin önbellek sonucunu alıp "başarılı" sanılıyordu
                tuple(st.get("skey") or (st.get("uid"),) for st in stages),
                job["corner_mode"],
-               round(job["factor"], 4), job["smooth"], run_bevels, want_ghost)
+               round(job["factor"], 4), job["smooth"], run_bevels, want_ghost,
+               tuple(sorted(job.get("deep", ()))))
         hit = _bevel_cache.get(name)
         if hit is not None and hit[0] == key:
             shape, results, bool_new, ghosts, used, upd = hit[1:]
             res["geo_updates"] = upd
         else:
             results, upd, bases = {}, {}, {}
+            sweep_lines = {}
+            deep = set(job.get("deep", ()))
+            bevel_done = False             # bu aşamadan önce fillet uygulandı mı (teşhis ipucu)
             for st in stages:
                 if st["op"] == "BEVEL":
                     items = st["items"]
@@ -256,14 +311,20 @@ def _build(job, res, geometry):
                         continue
                     shape, rr = geometry.apply_features(
                         shape, [{"kind": it["kind"], "size": it["size"], "polys": it["polys"],
-                                 "geo_polys": gp} for it, gp, _ in live],
+                                 "geo_polys": gp, "deep": it["uid"] in deep}
+                                for it, gp, _ in live],
                         mirrors, tol, job["corner_mode"], job["factor"],
                         job["smooth"] and not preview, fast=preview)
+                    bevel_done = bevel_done or any(r[0] for r in rr)
                     for (it, gp, ge), r in zip(live, rr):
                         ok, info = r
                         if ok and ge:
                             info += f" · {len(ge)} gövde kenarı çözülemedi: {ge[0]}"
                         results[it["uid"]] = (ok, info)
+                elif st["op"] == "SWEEP":
+                    _sweep_stage(name, st, shape, bool_new, tol, mirrors, run_bevels, job,
+                                 preview, deep, bevel_done, results, upd, used, sweep_lines)
+                    shape = st.pop("_out", shape)
                 else:
                     try:
                         tools = [_tool_shape(st["tool"])]
@@ -273,7 +334,8 @@ def _build(job, res, geometry):
                         shape, ok, info = geometry.apply_boolean(
                             shape, tools, st["bool_type"],
                             st["edge_size"] if run_bevels else 0.0, st["edge_mode"], tol,
-                            job["smooth"], preview=preview)
+                            job["smooth"], preview=preview, deep=st["uid"] in deep,
+                            after_bevel=bevel_done)
                         results[st["uid"]] = (ok, info)
                         if st.get("want_edges"):
                             try:
@@ -288,6 +350,7 @@ def _build(job, res, geometry):
                         traceback.print_exc()
                         results[st["uid"]] = (False, f"Hata: {e}")
             res["geo_updates"] = upd
+            _sweep_lines[name] = sweep_lines
             _bevel_cache[name] = (key, shape, results, bool_new, ghosts, used, upd)
             if not preview:
                 _stage_base[name] = bases
@@ -312,6 +375,7 @@ def _build(job, res, geometry):
     res["normals"] = None if normals is None else \
         np.asarray(normals, dtype=np.float64).reshape(-1, 3)
     res["ghost"] = _merge_ghosts(ghosts) if want_ghost else None
+    res["sweep_lines"] = _sweep_lines.get(name, {}) if stages else {}
     if not preview:
         disp = {"edges": [], "bool_edges": []}
         try:
@@ -361,7 +425,7 @@ def write_step(data):
 
 def forget(data):
     name = data.get("name")
-    tables = (_builders, _bevel_cache, _final, _stage_base, _bool_new)
+    tables = (_builders, _bevel_cache, _final, _stage_base, _bool_new, _sweep_lines)
     if name is None:
         for t in tables + (_tool_cache,):
             t.clear()

@@ -21,7 +21,7 @@ def mirror_copies(t, m): return [t]
 def mesh_to_solid(v, p): return ("tool", len(v))
 class E:
     def __init__(s, P): s.P = np.asarray(P, float)
-def apply_boolean(shape, tools, op, es, em, tol, smooth=True, preview=False):
+def apply_boolean(shape, tools, op, es, em, tol, smooth=True, preview=False, **kw):
     if os.environ.get("FAKE_SLOW"): time.sleep(float(os.environ["FAKE_SLOW"]))
     return shape + ["bool"], True, "uygulandı"
 def boolean_new_edges(shape, before, tools, mode, tol):

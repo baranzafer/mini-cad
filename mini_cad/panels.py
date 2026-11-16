@@ -2,8 +2,10 @@
 
 Bağımsız, "Mini CAD: ..." ön ekli paneller (her biri ayrı açılır/kapanır):
   Gövde · Seçim ve Tel Kafes · Yüzeyler · Simetri [☑] · Boolean [☑] · Fillet [☑] ·
-  İşlem Sırası · Ayarlar · Export
+  Profil Süpürme · İşlem Sırası · Ayarlar · Export
 """
+
+import textwrap
 
 import bpy
 
@@ -21,6 +23,59 @@ def _status_icon(text):
 
 def _ready():
     return kernel.kernel_available()
+
+
+# v0.26.0: başarısızlığın kaynağı (geometry.SOURCE_TEXT ile aynı metinler)
+SOURCES = (("Model kaynaklı", "USER",
+            "Model / tel kafes / seçim kaynaklı: düzeltilebilir"),
+           ("Geometrik olarak mümkün değil", "MESH_ICOSPHERE",
+            "Ölçü bu geometriye sığmıyor: hiçbir CAD çekirdeği yapamaz"),
+           ("Ölçü sınırı", "DRIVER_DISTANCE",
+            "Küçük ölçüyle oluyor, istenen ölçüyle olmuyor"),
+           ("Çekirdek sınırı (OCC)", "SYSTEM",
+            "Geometri uygun, OCC çekirdeği çözemedi (Inventor / SolidWorks çoğu zaman yapar)"))
+
+
+def _chars(context):
+    try:
+        w = context.region.width / max(context.preferences.system.ui_scale, 0.5)
+    except Exception:
+        w = 300
+    return max(28, int((w - 40) / 6.2))
+
+
+def draw_info(layout, context, f, index):
+    """İşlem bilgisini satırlara bölerek gösterir; başarısızsa kaynağı başlık yapar ve
+    'Ayrıntılı Teşhis' düğmesi koyar (tek satırlık etikette uzun metin kesiliyordu)."""
+    txt = (f.info or "").strip()
+    if not txt:
+        return
+    box = layout.box()
+    col = box.column(align=True)
+    col.scale_y = 0.85
+    width = _chars(context)
+    src = next((sv for sv in SOURCES if sv[0] + ":" in txt), None)
+    if src is not None:
+        head = txt.split(src[0] + ":", 1)
+        pre = head[0].strip().rstrip(":").strip(" ·")
+        txt = head[1].strip()
+        row = box.row()
+        row.alert = not f.ok and src[0] != "Ölçü sınırı"
+        row.label(text=f"Kaynak: {src[0]}", icon=src[1])
+        box.label(text=src[2])
+        if pre and pre != "Hesaplanamadı":
+            col.label(text=pre, icon="ERROR" if not f.ok else "NONE")
+    first = src is None
+    for part in txt.split(" · "):
+        for k, line in enumerate(textwrap.wrap(part, width) or [""]):
+            icon = "NONE"
+            if first:
+                icon = "CHECKMARK" if f.ok else "ERROR"
+                first = False
+            col.label(text=("" if k == 0 else "   ") + line, icon=icon)
+    if not f.ok:
+        op = box.operator("minicad.diagnose_feature", icon="VIEWZOOM")
+        op.index = index
 
 
 # ================================================================ listeler
@@ -48,8 +103,12 @@ class MINICAD_UL_features(bpy.types.UIList):
         if self.list_id == "order":
             row.label(text=f"{index + 1}.")
         row.prop(item, "name", text="", emboss=False,
-                 icon="MOD_BOOLEAN" if is_bool else "MOD_BEVEL")
-        if is_bool:
+                 icon="MOD_BOOLEAN" if is_bool else
+                 "CURVE_PATH" if item.op == "SWEEP" else "MOD_BEVEL")
+        if item.op == "SWEEP":
+            prof = item.profile.name if item.profile else "—"
+            row.label(text=f"{BOOL_NAMES.get(item.bool_type, '')} · {prof}")
+        elif is_bool:
             tool = item.tool.name if item.tool else "—"
             row.label(text=f"{BOOL_NAMES.get(item.bool_type, '')} · {tool}")
         else:
@@ -66,7 +125,9 @@ class MINICAD_UL_features(bpy.types.UIList):
             if self.list_id == "bools":
                 show = f.op == "BOOLEAN"
             elif self.list_id == "bevels":
-                show = f.op != "BOOLEAN"
+                show = core.is_bevel(f)
+            elif self.list_id == "sweeps":
+                show = f.op == "SWEEP"
             else:
                 show = True
             flags.append(self.bitflag_filter_item if show else 0)
@@ -426,8 +487,7 @@ class MINICAD_PT_boolean(_Sub, bpy.types.Panel):
                 row.prop(f, "edge_mode", text="")
             if p.use_mirror and (p.mirror_x or p.mirror_y or p.mirror_z):
                 box.prop(f, "mirror_tool")
-            if f.info:
-                box.label(text=f.info, icon="CHECKMARK" if f.ok else "ERROR")
+            draw_info(box, context, f, i)
             row = box.row(align=True)
             op = row.operator("minicad.swap_existing_bool", text="Gövde ⇄ İkincil",
                               icon="UV_SYNC_SELECT")
@@ -465,13 +525,13 @@ class MINICAD_PT_fillet(_Sub, bpy.types.Panel):
         row.prop(p, "ghost_bevel", icon="GHOST_ENABLED")
         row.prop(p, "preview_bevel", text="Önizlemede gerçek")
 
-        if not any(f.op != "BOOLEAN" for f in p.features):
+        if not any(core.is_bevel(f) for f in p.features):
             layout.label(text="Kenar seçiminde kenarları seç, B'ye bas", icon="INFO")
             return
         layout.template_list("MINICAD_UL_features", "bevels", p, "features", p, "active_bevel",
                              rows=4)
         i = p.active_bevel
-        if 0 <= i < len(p.features) and p.features[i].op != "BOOLEAN":
+        if 0 <= i < len(p.features) and core.is_bevel(p.features[i]):
             f = p.features[i]
             box = layout.box()
             row = box.row(align=True)
@@ -480,12 +540,93 @@ class MINICAD_PT_fillet(_Sub, bpy.types.Panel):
             if len(f.geo_edges):
                 box.label(text=f"{len(f.segs)} tel kafes + {len(f.geo_edges)} gövde kenarı "
                                "(boolean'dan)", icon="EDGESEL")
-            if f.info:
-                box.label(text=f.info, icon="NONE" if f.ok else "ERROR")
+            draw_info(box, context, f, i)
             op = box.operator("minicad.remove_feature", text="Fillet'i Sil", icon="TRASH")
             op.index = i
         else:
             layout.label(text="Ayrıntı için listeden bir fillet seç")
+
+
+# ================================================================ profil süpürme (v0.26.0)
+
+class MINICAD_PT_sweep(_Sub, bpy.types.Panel):
+    bl_label = "Mini CAD: Profil Süpürme"
+    bl_idname = "MINICAD_PT_sweep"
+    bl_order = 6
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        sc = context.scene
+        p = get_target(context).cad
+        from . import pick
+        box = layout.box()
+        col = box.column(align=True)
+        col.scale_y = 0.85
+        col.label(text="Bir profili bir yol boyunca süpürüp gövdeden", icon="INFO")
+        col.label(text="çıkarır / ekler (Inventor Süpür): fillet'in")
+        col.label(text="kuramadığı kenara pah, yay, kıvrım, oluk.")
+        box.separator()
+        col = box.column(align=True)
+        col.label(text="1) Profil: XY'de çiz — orijin = kenar,", icon="CURVE_BEZCURVE")
+        col.label(text="    +Y = dışarı (gövde -Y tarafında)")
+        box.prop(sc, "minicad_sweep_profile", text="Profil")
+        box.row(align=True).prop(sc, "minicad_sweep_type", expand=True)
+        col = box.column(align=True)
+        col.label(text="2) Kenar Seç'te yol kenarlarını seç → P", icon="EDGESEL")
+        rr = box.row()
+        rr.scale_y = 1.2
+        running = pick.is_running()
+        rr.enabled = running and sc.minicad_sweep_profile is not None
+        rr.operator("minicad.add_sweep", icon="ADD")
+        if not running:
+            box.label(text="Kenar Seç kapalı (Seçim ve Tel Kafes paneli)", icon="DOT")
+
+        if not any(f.op == "SWEEP" for f in p.features):
+            return
+        layout.template_list("MINICAD_UL_features", "sweeps", p, "features", p,
+                             "active_sweep", rows=3)
+        i = p.active_sweep
+        if not (0 <= i < len(p.features) and p.features[i].op == "SWEEP"):
+            layout.label(text="Ayrıntı için listeden bir süpürme seç")
+            return
+        f = p.features[i]
+        box = layout.box()
+        box.row(align=True).prop(f, "bool_type", expand=True)
+        box.prop(f, "profile")
+        row = box.row(align=True)
+        row.label(text=f"Yol: {len(f.segs)} tel kafes + {len(f.geo_edges)} gövde kenarı",
+                  icon="CURVE_PATH")
+        op = row.operator("minicad.sweep_set_path", text="Seçimi Yol Yap", icon="EDGESEL")
+        op.index = i
+        box.label(text="Yerleşim:")
+        box.row(align=True).prop(f, "sw_place", expand=True)
+        if f.sw_place == "AUTO":
+            box.row(align=True).prop(f, "sw_ref", expand=True)
+            col = box.column(align=True)
+            col.prop(f, "sw_angle")
+            row = col.row(align=True)
+            row.prop(f, "sw_off_x")
+            row.prop(f, "sw_off_y")
+            row = col.row(align=True)
+            row.prop(f, "sw_scale")
+            row.prop(f, "sw_flip", toggle=True)
+        box.label(text="Açık profil:")
+        box.row(align=True).prop(f, "sw_close", expand=True)
+        row = box.row(align=True)
+        row.prop(f, "sw_reverse", toggle=True)
+        row.prop(f, "sw_extend_auto", toggle=True)
+        if f.sw_extend_auto:
+            box.prop(f, "sw_extend")
+        row = box.row(align=True)
+        row.prop(f, "edge_size")
+        if f.edge_size > 0:
+            row.prop(f, "edge_mode", text="")
+        if p.use_mirror and (p.mirror_x or p.mirror_y or p.mirror_z):
+            box.prop(f, "mirror_tool")
+        draw_info(box, context, f, i)
+        op = box.operator("minicad.remove_feature", text="Süpürmeyi Sil", icon="TRASH")
+        op.index = i
 
 
 # ================================================================ işlem sırası
@@ -493,7 +634,7 @@ class MINICAD_PT_fillet(_Sub, bpy.types.Panel):
 class MINICAD_PT_order(_Sub, bpy.types.Panel):
     bl_label = "Mini CAD: İşlem Sırası"
     bl_idname = "MINICAD_PT_order"
-    bl_order = 6
+    bl_order = 7
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -522,7 +663,7 @@ class MINICAD_PT_order(_Sub, bpy.types.Panel):
 class MINICAD_PT_settings(_Sub, bpy.types.Panel):
     bl_label = "Mini CAD: Ayarlar"
     bl_idname = "MINICAD_PT_settings"
-    bl_order = 7
+    bl_order = 8
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -558,7 +699,7 @@ class MINICAD_PT_settings(_Sub, bpy.types.Panel):
 class MINICAD_PT_export(_Sub, bpy.types.Panel):
     bl_label = "Mini CAD: Export"
     bl_idname = "MINICAD_PT_export"
-    bl_order = 8
+    bl_order = 9
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -579,6 +720,7 @@ classes = (
     MINICAD_PT_mirror,
     MINICAD_PT_boolean,
     MINICAD_PT_fillet,
+    MINICAD_PT_sweep,
     MINICAD_PT_order,
     MINICAD_PT_settings,
     MINICAD_PT_export,

@@ -1815,6 +1815,7 @@ def _build_once(cur, kind, sel, feats, polys, tol, precise, smooth, stats):
             _FAIL["why"] = "build"
             if kind == "FILLET":
                 _FAIL["detail"] = _fillet_status(mk)
+                _FAIL["stripe"] = _FAIL["detail"]
             return None
         out = mk.Shape()
         if not fillet_accept(cur, out):
@@ -1849,6 +1850,7 @@ def _try_apply(shape, idxs, feats, polys, tol, smooth=False, stats=None):
             continue
         out = None
         _FAIL["detail"] = ""
+        _FAIL["stripe"] = ""
         for precise in ((True, False) if kind == "FILLET" else (False,)):
             out = _build_once(cur, kind, sel, feats, polys, tol, precise, smooth, stats)
             if out is not None:
@@ -1951,6 +1953,425 @@ def _fillet_status(mk):
     except Exception:
         pass
     return ""
+
+
+# ---------------------------------------------------------------- başarısızlık teşhisi (v0.26.0)
+# Fillet / pah / boolean yapılamayınca sebebin KAYNAĞI söylenir (kullanıcı isteği: "model mi,
+# çekirdek mi, geometrik olarak mı imkânsız?"):
+#   MODEL  : model / tel kafes / seçim kaynaklı — kullanıcı düzeltebilir
+#   GEO    : geometrik olarak mümkün değil — ölçü bu geometriye sığmıyor, hiçbir çekirdek yapamaz
+#   SIZE   : küçük ölçüyle oluyor, istenen ölçüyle olmuyor (sınır ölçü verilir)
+#   KERNEL : geometri izin veriyor görünüyor, OCC çekirdeği çözemedi (Parasolid / ACIS gibi
+#            ticari çekirdekler çoğu zaman yapar)
+
+SOURCE_TEXT = {"MODEL": "Model kaynaklı", "GEO": "Geometrik olarak mümkün değil",
+               "SIZE": "Ölçü sınırı", "KERNEL": "Çekirdek sınırı (OCC)"}
+_FaceClassifier = _optional("OCP.BRepClass", "BRepClass_FaceClassifier")
+_gp_Pnt2d = _optional("OCP.gp", "gp_Pnt2d")
+_DIAG_CACHE = {}          # anahtar -> (kaynak, metin): aynı durum her hesapta yeniden ölçülmez
+DIAG_SAMPLES = 9          # kenar başına örnek
+DIAG_TANGENT_DEG = 3.0    # iki yüz normali arasındaki açı bundan küçükse kenar "teğet"
+DIAG_KNIFE_DEG = 177.0    # bundan büyükse yüzler üst üste katlanıyor (bıçak sırtı)
+
+
+def diag_text(src, text):
+    return f"{SOURCE_TEXT.get(src, src)}: {text}"
+
+
+def _p3(p):
+    return f"({p[0]:.3g}, {p[1]:.3g}, {p[2]:.3g})"
+
+
+def _is_valid(shape):
+    if _BRepCheck_Analyzer is None:
+        return True
+    try:
+        return bool(_BRepCheck_Analyzer(shape, True).IsValid())
+    except Exception:
+        return True
+
+
+def _edge_faces(anc, e):
+    try:
+        if not anc.Contains(e):
+            return []
+        out = []
+        for f in _list_shapes(anc.FindFromKey(e)):
+            if not any(f.IsSame(x) for x in out):
+                out.append(f)
+        return [_FACE_CAST(f) for f in out]
+    except Exception:
+        return []
+
+
+def _in_face(face, sa, q, tol=1e-6):
+    """q noktasının yüze izdüşümü yüzün içinde mi (sınır dahil)?"""
+    try:
+        uv = sa.ValueOfUV(gp_Pnt(*map(float, q)), 1e-4)
+        st = _FaceClassifier(face, _gp_Pnt2d(uv.X(), uv.Y()), tol).State()
+        return st != _TopAbs_OUT
+    except Exception:
+        return True                          # emin değilsek engel sayma
+
+
+def _room(face, sa, p, u, need):
+    """Kenar noktası p'den yüz içine u yönünde ne kadar yer var (need'e kadar)."""
+    if _in_face(face, sa, p + u * need):
+        return need
+    lo, hi = 0.0, need
+    for _ in range(10):
+        mid = 0.5 * (lo + hi)
+        if _in_face(face, sa, p + u * mid):
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+def _curvature(e, n=200):
+    """Kenar eğrisinin en küçük eğrilik yarıçapı, yeri ve eğrilik merkezi yönü."""
+    best = None
+    try:
+        c = _BRepAdaptor_Curve(e)
+        u0, u1 = c.FirstParameter(), c.LastParameter()
+        p, d1, d2 = gp_Pnt(), _gp_Vec(), _gp_Vec()
+        for k in range(n + 1):
+            u = u0 + (u1 - u0) * (0.5 * (1 - math.cos(math.pi * k / n)))
+            c.D2(u, p, d1, d2)
+            v1 = np.array([d1.X(), d1.Y(), d1.Z()])
+            v2 = np.array([d2.X(), d2.Y(), d2.Z()])
+            sp = float(np.linalg.norm(v1))
+            if sp < 1e-12:
+                continue
+            kv = np.cross(np.cross(v1, v2), v1) / sp ** 4     # merkeze doğru eğrilik vektörü
+            kap = float(np.linalg.norm(kv))
+            if kap > 1e-12 and (best is None or 1.0 / kap < best[0]):
+                best = (1.0 / kap, np.array([p.X(), p.Y(), p.Z()]), kv / kap)
+    except Exception:
+        return None
+    return best
+
+
+def probe_edges(shape, edges, kind, r):
+    """Ucuz geometri ölçümü (OCC fillet kurmadan). Bulgular:
+    [(kaynak, kod, metin, ağırlık)] ve özet {"ang": (min, max), "room": en dar oran, ...}."""
+    found, info = [], {"ang": [], "ratio": 1.0, "ratio_at": None, "rmax": None, "n": len(edges)}
+    if None in (_DataMapAnc, _ShapeAnalysis_Surface, _BRepGProp_Face, _gp_Vec,
+                _BRepAdaptor_Curve, _FaceClassifier, _gp_Pnt2d):
+        return found, info
+    anc = _DataMapAnc()
+    try:
+        _static(TopExp, "MapShapesAndAncestors")(shape, TopAbs_EDGE, TopAbs_FACE, anc)
+    except Exception:
+        return found, info
+    solid = _first_solid(shape)
+    clf = None
+    if solid is not None and _SolidClassifier is not None:
+        try:
+            clf = _SolidClassifier(solid)
+        except Exception:
+            clf = None
+    surf_tool = _static(BRep_Tool, "Surface")
+    open_edges, tangent, knife, folded, part_tan = [], [], [], [], []
+    seen_faces = []
+    for e in edges[:60]:
+        faces = _edge_faces(anc, e)
+        if len(faces) < 2:
+            open_edges.append(_edge_samples(e)[EDGE_SAMPLES // 2])
+            continue
+        f1, f2 = faces[0], faces[1]
+        for f in (f1, f2):
+            if not any(f.IsSame(x) for x in seen_faces):
+                seen_faces.append(f)
+                if face_folded(f):
+                    folded.append(_face_center(f))
+        try:
+            gp1, gp2 = _BRepGProp_Face(f1), _BRepGProp_Face(f2)
+            sa1, sa2 = _ShapeAnalysis_Surface(surf_tool(f1)), _ShapeAnalysis_Surface(surf_tool(f2))
+            c = _BRepAdaptor_Curve(e)
+            u0, u1 = c.FirstParameter(), c.LastParameter()
+        except Exception:
+            continue
+        angs, sign, n_tan, centers = [], None, 0, []
+        try:
+            L = _edge_length(e)
+        except Exception:
+            L = 0.0
+        short = []                         # yeri yetmeyen örnekler (kenar uçlarından uzakta)
+        for k in range(DIAG_SAMPLES):
+            frac = 0.06 + 0.88 * k / (DIAG_SAMPLES - 1)
+            try:
+                P, D = gp_Pnt(), _gp_Vec()
+                c.D1(u0 + (u1 - u0) * frac, P, D)
+                t = np.array([D.X(), D.Y(), D.Z()])
+                if np.linalg.norm(t) < 1e-12:
+                    continue
+                t /= np.linalg.norm(t)
+                p = np.array([P.X(), P.Y(), P.Z()])
+                ns = []
+                for gpf, sa in ((gp1, sa1), (gp2, sa2)):
+                    uv = sa.ValueOfUV(P, 1e-3)
+                    Q, N = gp_Pnt(), _gp_Vec()
+                    gpf.Normal(uv.X(), uv.Y(), Q, N)
+                    nv = np.array([N.X(), N.Y(), N.Z()])
+                    ns.append(nv / np.linalg.norm(nv))
+            except Exception:
+                continue
+            n1, n2 = ns
+            ang = math.degrees(math.acos(float(np.clip(n1 @ n2, -1.0, 1.0))))
+            angs.append(ang)
+            if ang < DIAG_TANGENT_DEG:
+                n_tan += 1
+                continue
+            if ang > DIAG_KNIFE_DEG:
+                knife.append(p)
+                continue
+            b = n1 + n2
+            b /= np.linalg.norm(b)
+            if sign is None:
+                sign = 1.0
+                if clf is not None and _TopAbs_IN is not None:
+                    try:
+                        clf.Perform(gp_Pnt(*map(float, p + b * max(1e-4, 0.05 * r))), 1e-7)
+                        if clf.State() == _TopAbs_IN:
+                            sign = -1.0            # içbükey kenar
+                    except Exception:
+                        pass
+            half = math.radians(ang) / 2.0
+            need = r * math.tan(half) if kind == "FILLET" else r
+            centers.append((p, -sign * b))
+            # Kenar ucuna yakın örnekte yüz sınırı doğal olarak yakındır (köşe; zincir sonraki
+            # kenarla sürer): yer ölçümü uçlardan 1.5 pay uzakta yapılır — ama kenarın orta
+            # yarısı her zaman ölçülür (pay kenardan uzunsa hiçbir örnek kalmıyordu)
+            if min(frac, 1.0 - frac) * L < min(1.5 * need, 0.25 * L):
+                continue
+            for n, face, sa in ((n1, f1, sa1), (n2, f2, sa2)):
+                u = np.cross(t, n)
+                if np.linalg.norm(u) < 1e-12:
+                    continue
+                u /= np.linalg.norm(u)
+                if np.dot(u, b) * sign > 0:
+                    u = -u
+                have = _room(face, sa, p, u, need)
+                ratio = have / need if need > 1e-12 else 1.0
+                if ratio < 0.98:
+                    k_r = (have / math.tan(half)) if kind == "FILLET" else have
+                    short.append((ratio, p, k_r))
+        if len(short) >= 2:                # tek noktalık açık yanlış alarm olabilir
+            ratio, p_at, k_r = min(short, key=lambda x: x[0])
+            if ratio < info["ratio"]:
+                info["ratio"], info["ratio_at"], info["rmax"] = ratio, p_at, k_r
+        if angs:
+            info["ang"] += angs
+            if n_tan >= max(1, int(0.7 * len(angs))):
+                tangent.append((_edge_samples(e)[EDGE_SAMPLES // 2], min(angs)))
+            elif n_tan:
+                part_tan.append((_edge_samples(e)[EDGE_SAMPLES // 2], min(angs)))
+        if kind == "FILLET" and centers:
+            cv = _curvature(e)
+            if cv is not None and cv[0] < r:
+                rho, at, kdir = cv
+                cdir = min(centers, key=lambda pc: np.linalg.norm(pc[0] - at))[1]
+                if rho < 0.05 * r:
+                    found.append(("MODEL", "cusp",
+                                  f"kenar eğrisi {_p3(at)} civarında {rho:.3g} yarıçapa "
+                                  f"daralıyor (fillet {r:.3g}) · eğri orada neredeyse köşe "
+                                  "yapıyor: o noktanın tutamaçları çok kısa olabilir", 3))
+                elif float(np.dot(kdir, cdir)) > 0.2:
+                    found.append(("GEO", "curv",
+                                  f"kenar eğrisi {_p3(at)} civarında {rho:.3g} yarıçapla "
+                                  f"kıvrılıyor; {r:.3g} fillet o iç kavise sığmaz · en fazla "
+                                  f"≈{0.9 * rho:.3g}", 2))
+    if open_edges:
+        found.append(("MODEL", "open",
+                      f"{len(open_edges)} kenar iki yüzün buluştuğu yerde değil (açık kenar, "
+                      f"ör. {_p3(open_edges[0])}): gövdede boşluk var, yüzeyleri tamamla", 3))
+    if folded:
+        found.append(("MODEL", "fold",
+                      f"kenara komşu yüzey kendi üzerine katlanıyor ({_p3(folded[0])} "
+                      "civarı): tel kafeste karşılıklı kenar parçaları birbirini tutmuyor", 3))
+    if knife:
+        found.append(("MODEL", "knife",
+                      f"iki yüz {_p3(knife[0])} civarında neredeyse üst üste katlanıyor "
+                      "(bıçak sırtı, açı ≈180°): orada yuvarlanacak hacim yok", 3))
+    if tangent:
+        found.append(("MODEL", "tangent",
+                      f"{len(tangent)} kenarda iki yan yüz teğet (açı ≈{tangent[0][1]:.1f}°, "
+                      f"ör. {_p3(tangent[0][0])}): yuvarlanacak köşe yok, bu kenarları "
+                      "seçimden çıkar", 2))
+    if part_tan:
+        found.append(("GEO", "fade",
+                      f"kenar boyunca yüzler {_p3(part_tan[0][0])} civarında teğetleşiyor "
+                      f"(açı {part_tan[0][1]:.1f}°'ye iniyor): sabit ölçülü fillet orada sıfır "
+                      "genişliğe iner, çoğu çekirdek bunu kuramaz · kenarı o noktaya kadar böl",
+                      1))
+    if info["ratio"] < 0.98 and info["ratio_at"] is not None:
+        rm = info["rmax"] or 0.0
+        found.append(("GEO", "room",
+                      f"{r:.3g} için kenarın yanındaki yüzde yer yok: {_p3(info['ratio_at'])} "
+                      f"civarında gereken payın yalnızca %{info['ratio'] * 100:.0f}'i var · "
+                      f"en fazla ≈{0.95 * rm:.3g}", 2))
+    return found, info
+
+
+def _try_edges(shape, edges, kind, r):
+    """Kenar kümesini tek işlemde dene; başarılıysa True."""
+    try:
+        mk = _new_fillet(shape, False) if kind == "FILLET" else _MakeChamfer(shape)
+        okf = two_face_filter(shape)
+        n = 0
+        for e in edges:
+            if not okf(e):
+                continue
+            if kind == "FILLET":
+                try:
+                    if mk.Contour(e) != 0:
+                        continue           # aynı teğet zincirde zaten var
+                except Exception:
+                    pass
+            mk.Add(float(r), e)
+            n += 1
+        if not n:
+            return False
+        mk.Build()
+        return bool(mk.IsDone()) and fillet_accept(shape, mk.Shape())
+    except Exception:
+        return False
+
+
+def _diag_key(shape, edges, kind, r, deep, hint=""):
+    try:
+        mids = tuple(tuple(np.round(_edge_samples(e)[EDGE_SAMPLES // 2], 5)) for e in edges)
+        return (kind, round(float(r), 9), mids, len(_shape_faces(shape)),
+                round(area(shape) or 0.0, 6), deep, hint)
+    except Exception:
+        return None
+
+
+def diagnose(shape, edges, kind, r, stripe="", deep=False, budget=40.0, hint=""):
+    """Fillet / pah başarısızlığının kaynağını ve açıklamasını verir: (kaynak, metin).
+    Önce ucuz ölçümler (açık kenar, katlanma, teğet yüzler, yer, eğrilik); hiçbiri engel
+    değilse küçük ölçüyle bir deneme yapılır. deep=True: sınır ölçü aranır, kenarlar tek tek
+    denenir (panelde "Ayrıntılı teşhis")."""
+    import time
+    if not edges:
+        return "MODEL", ("seçili kenarlar gövdede bulunamadı (tel kafes değişmiş ya da kenar "
+                         "önceki bir işlemle yok olmuş olabilir) · kenarları yeniden seç")
+    key = _diag_key(shape, edges, kind, r, deep, hint)
+    if key is not None:
+        # aynı durumun AYRINTILI teşhisi varsa normal hesap da onu gösterir (panelde
+        # 'Ayrıntılı teşhis'ten sonraki ilk canlı güncelleme sonucu silmesin)
+        deep_key = key[:-2] + (True, hint)
+        if deep_key in _DIAG_CACHE:
+            return _DIAG_CACHE[deep_key]
+        if key in _DIAG_CACHE:
+            return _DIAG_CACHE[key]
+    t0 = time.perf_counter()
+    res = _diagnose(shape, edges, kind, r, stripe, deep, budget, t0, hint)
+    if key is not None:
+        if len(_DIAG_CACHE) > 64:
+            _DIAG_CACHE.clear()
+        _DIAG_CACHE[key] = res
+    return res
+
+
+def _diagnose(shape, edges, kind, r, stripe, deep, budget, t0, hint=""):
+    import time
+    name = "fillet" if kind == "FILLET" else "pah"
+    if not _is_valid(shape):
+        return "MODEL", ("gövdenin kendisi geçersiz geometri içeriyor (kendini kesen ya da "
+                         "katlanan yüz, açık dikiş): önce gövdeyi düzelt · görünümdeki UYARI "
+                         "satırlarına ve yüzey durumlarına bak")
+    found, info = probe_edges(shape, edges, kind, r)
+
+    def top(src):
+        hits = sorted((f for f in found if f[0] == src), key=lambda f: -f[3])
+        if not hits:
+            return None
+        txt = hits[0][2]
+        if len(hits) > 1:
+            txt += f" (+{len(hits) - 1} bulgu daha)"
+        return txt
+
+    model = top("MODEL")
+    if model:
+        return "MODEL", model           # model kusurları kesin engeldir; önce onlar düzelir
+    geo = top("GEO")
+    ang = info["ang"]
+    facts = []
+    if ang:
+        facts.append(f"kenar açıları {min(ang):.0f}–{max(ang):.0f}°")
+    if not geo:
+        facts.append(f"yanlarda yer var (en dar %{min(100, info['ratio'] * 100):.0f})")
+    fact = ", ".join(facts)
+    chain = ""
+    if len(edges) > 1:
+        chain = f" · {len(edges)} kenar tek teğet zincir olarak birlikte hesaplanıyor"
+    stripe_txt = f" ({stripe})" if stripe else ""
+    tip = ("Parasolid / ACIS çekirdekli programlar (Inventor, SolidWorks) bunu çoğu zaman "
+           "yapar · dene: Köşe modunu değiştir, işlem sırasını değiştir ya da Profil "
+           "Süpürme ile oy")
+    if hint:
+        tip = hint + " · " + tip
+    small = r * 0.1
+    small_ok = time.perf_counter() - t0 < budget and _try_edges(shape, edges, kind, small)
+    if geo:
+        if small_ok:
+            return "GEO", geo
+        return "KERNEL", (f"{name} {small:.3g} gibi küçük bir ölçüyle bile kurulamıyor"
+                          f"{stripe_txt}: asıl engel ölçü değil, OCC bu yüzey birleşiminde "
+                          f"{name} yüzeyini kuramıyor{chain} · ayrıca: {geo} · "
+                          + tip)
+    if small_ok:
+        if not deep:
+            return "SIZE", (f"{small:.3g} ile yapılabiliyor, {r:.3g} ile olmuyor; ölçülen "
+                            f"geometride engel görünmüyor ({fact}) · ölçüyü küçült ya da sınır "
+                            "ölçü için 'Ayrıntılı teşhis'")
+        lo, hi = small, r
+        for _ in range(4):
+            if time.perf_counter() - t0 > budget:
+                break
+            mid = math.sqrt(lo * hi)
+            if _try_edges(shape, edges, kind, mid):
+                lo = mid
+            else:
+                hi = mid
+        return "SIZE", (f"en fazla ≈{lo:.3g} ile yapılabiliyor ({hi:.3g} ile olmuyor); "
+                        f"ölçülen geometride engel görünmüyor ({fact}): sınırı çekirdek "
+                        f"belirliyor olabilir{chain}")
+    txt = (f"geometride engel bulunamadı ({fact}) ama {name} {small:.3g} gibi küçük bir "
+           f"ölçüyle bile kurulamıyor{stripe_txt} — sorun ölçüde değil, OCC bu yüzey "
+           f"birleşiminde {name} yüzeyini kuramıyor{chain}")
+    if deep and len(edges) > 1 and time.perf_counter() - t0 < budget:
+        bad, good = [], 0
+        for e in edges[:24]:
+            if time.perf_counter() - t0 > budget:
+                break
+            if _try_edges(shape, [e], kind, small):
+                good += 1
+            else:
+                bad.append(_edge_samples(e)[EDGE_SAMPLES // 2])
+        if bad and good:
+            txt += (f" · tek tek: {good} kenar oluyor, {len(bad)} kenar olmuyor (ör. "
+                    f"{_p3(bad[0])}) — sorunlu kenarları ayrı bir işleme al")
+        elif good and not bad:
+            txt += " · kenarlar tek tek oluyor, birlikte olmuyor: ortak köşelerde birleşim " \
+                   "kurulamıyor — Köşe modunu 'Kenar kenar' yap"
+    return "KERNEL", txt + " · " + tip
+
+
+def boolean_failure(a, b, last_err):
+    """safe_boolean başarısız: kaynağı söyleyen hata metni."""
+    if not _is_valid(a):
+        return diag_text("MODEL", "ana gövde geçersiz geometri içeriyor (kendini kesen / "
+                                  "katlanan yüz); boolean bozuk girdiyle hesaplanamaz · önce "
+                                  "gövdeyi düzelt")
+    if not _is_valid(b):
+        return diag_text("MODEL", "araç gövdesi geçersiz geometri içeriyor; aracı düzelt")
+    return diag_text("KERNEL", f"iki girdi de geçerli ama boolean hesaplanamadı ({last_err}). "
+                               "En sık sebep çakışık ya da teğet değen yüzeyler: aracı çok az "
+                               "kaydır / büyüt (o zaman kaynak modeldir); sürerse çekirdek "
+                               "sınırıdır")
 
 
 def _apply_edgewise(shape, i, feats, polys, tol):
@@ -2139,7 +2560,9 @@ def _apply_features(shape, feats, mirrors, tol, corner_mode, factor, smooth_corn
     edge_lists = [match_edges(shape, polys[i], tol) for i in range(n)]
     for i in range(n):
         if not edge_lists[i]:
-            results[i] = (False, "Gövdede eşleşen kenar yok (iki yüzeyin birleştiği kenar olmalı)")
+            results[i] = (False, "Hesaplanamadı: Model kaynaklı: gövdede eşleşen kenar yok "
+                                 "(iki yüzeyin birleştiği kenar olmalı; tel kafes değişmiş ya da "
+                                 "kenar önceki bir işlemle yok olmuş olabilir)")
 
     def sequential(shape, order, edgewise=False):
         cur, res = shape, {}
@@ -2158,6 +2581,18 @@ def _apply_features(shape, feats, mirrors, tol, corner_mode, factor, smooth_corn
     def corner_note(stats):
         n = stats.get("corners", 0)
         return f" · {n} köşe yaması pürüzsüzleştirildi" if n else ""
+
+    def explain(base, i):
+        """v0.26.0: başarısızlığın kaynağı (model / geometri / ölçü / çekirdek)."""
+        try:
+            if _FILLET_MODE["fast"]:
+                raise RuntimeError("önizleme")
+            src, txt = diagnose(base, match_edges(base, polys[i], tol), feats[i]["kind"],
+                                float(feats[i]["size"]), stripe=_FAIL.get("stripe", ""),
+                                deep=bool(feats[i].get("deep")))
+            return f"Hesaplanamadı: {diag_text(src, txt)}"
+        except Exception:
+            return f"Hesaplanamadı: {fail_reason()}"
 
     def joint(shape, g):
         stats = {}
@@ -2183,6 +2618,7 @@ def _apply_features(shape, feats, mirrors, tol, corner_mode, factor, smooth_corn
         "SMALL_FIRST": lambda g: sorted(g, key=lambda i: feats[i]["size"]),
     }
     for g in feature_groups(edge_lists):
+        base = shape
         if len(g) == 1:
             stats = {}
             if corner_mode == "EDGEWISE":
@@ -2195,7 +2631,7 @@ def _apply_features(shape, feats, mirrors, tol, corner_mode, factor, smooth_corn
                 shape = out
                 results[g[0]] = (True, "uygulandı" + corner_note(stats))
             else:
-                results[g[0]] = (False, f"Hesaplanamadı: {fail_reason()}")
+                results[g[0]] = (False, explain(base, g[0]))
             continue
         # Tercih edilen yöntem önce, diğerleri yedek olarak denenir
         attempts = []
@@ -2232,7 +2668,7 @@ def _apply_features(shape, feats, mirrors, tol, corner_mode, factor, smooth_corn
                 break
         _, shape, res = best
         for i, r in res.items():
-            results[i] = r
+            results[i] = r if r[0] else (False, explain(base, i))
     return shape, results
 
 
@@ -2593,11 +3029,22 @@ def _has_solid(shape):
 
 
 def volume(shape):
+    """v0.26.0: uyarlamalı integral (bağıl hassasiyet 1e-3). OCC'nin varsayılan (sabit Gauss)
+    integrali B-spline yüzlü gövdelerde %0.6 sapıyordu: kullanıcı modelinde 17.333 (gerçek
+    17.2305). 0.004'lük bir pah kesimi "hacim +%0.4" görünüyor, boolean denetimleri (araç
+    kesişmiyor / içinde) yanlış karar verebiliyordu. Bu yol hem doğru hem daha hızlı."""
     if _GProps is None or _BRepGProp is None:
         return None
+    fn = _static(_BRepGProp, "VolumeProperties")
     try:
         g = _GProps()
-        _static(_BRepGProp, "VolumeProperties")(shape, g)
+        fn(shape, g, 1e-3)
+        return float(g.Mass())
+    except Exception:
+        pass
+    try:
+        g = _GProps()
+        fn(shape, g)
         return float(g.Mass())
     except Exception:
         return None
@@ -2841,8 +3288,7 @@ def safe_boolean(op, a, b, fuzzy=0.0):
             return res
         except Exception as e:
             last_err = str(e)
-    raise CadError(f"Boolean hesaplanamadı ({last_err}); araç gövdeyle düzgün kesişmiyor "
-                   "olabilir ya da yüzeyler çakışıyor")
+    raise CadError("Boolean hesaplanamadı · " + boolean_failure(a, b, last_err))
 
 
 def area(shape):
@@ -2867,7 +3313,8 @@ def _boolean_open_shell(shape, tools, op, preview=False):
     tools = [prepare_solid(t) for t in tools]
     for t in tools:
         if not _has_solid(t):
-            raise CadError("Araç kapalı bir hacim değil")
+            raise CadError("Model kaynaklı: Araç kapalı bir hacim değil (aracın bütün "
+                           "yüzeylerini tamamla)")
     a0 = area(shape)
     cur = shape
     fuzzy = 1e-5 * max(_bbox_diag(shape), 1e-9) if preview else 0.0
@@ -2883,14 +3330,19 @@ def _boolean_open_shell(shape, tools, op, preview=False):
         raise CadError("Boolean sonucu boş")
     a1 = area(cur)
     if a0 is not None and a1 is not None and abs(a1 - a0) <= 1e-9 * max(1.0, abs(a0)):
-        raise CadError("Araç yüzeye değmiyor (alan değişmedi); aracı yüzeyin üzerine taşı")
+        raise CadError("Model kaynaklı: " + "Araç yüzeye değmiyor (alan değişmedi); aracı yüzeyin üzerine taşı")
     txt = ""
     if a0 and a1 is not None:
         txt = f" · alan {(a1 - a0) / abs(a0) * 100:+.1f}%"
     return cur, True, "uygulandı (açık kabuk: yüzey budandı)" + txt
 
 
-def apply_boolean(shape, tools, op, edge_size, edge_mode, tol, smooth=True, preview=False):
+def _fmt_size(v):
+    return f"{v:.4g}"
+
+
+def apply_boolean(shape, tools, op, edge_size, edge_mode, tol, smooth=True, preview=False,
+                  deep=False, after_bevel=False):
     """Gövdeye boolean uygular; istenirse oluşan yeni kenarları yuvarlar.
     (gövde, başarılı mı, bilgi) döndürür. Boolean başarısızsa CadError."""
     if op not in _BOOL_ALGOS or _BOOL_ALGOS[op] is None:
@@ -2901,7 +3353,8 @@ def apply_boolean(shape, tools, op, edge_size, edge_mode, tol, smooth=True, prev
     tools = [prepare_solid(t) for t in tools]
     for t in tools:
         if not _has_solid(t):
-            raise CadError("Araç kapalı bir hacim değil")
+            raise CadError("Model kaynaklı: Araç kapalı bir hacim değil (aracın bütün "
+                           "yüzeylerini tamamla)")
     vol0 = volume(shape)
     before = shape
     cur = shape
@@ -2916,7 +3369,7 @@ def apply_boolean(shape, tools, op, edge_size, edge_mode, tol, smooth=True, prev
         raise CadError("Boolean sonucu boş (araç gövdeyi tamamen kaplıyor olabilir)")
     vol1 = volume(cur)
     if vol0 is not None and vol1 is not None and abs(vol1 - vol0) <= 1e-9 * max(1.0, abs(vol0)):
-        raise CadError("Araç gövdeyle kesişmiyor (hacim değişmedi); aracı gövdenin üzerine taşı")
+        raise CadError("Model kaynaklı: " + "Araç gövdeyle kesişmiyor (hacim değişmedi); aracı gövdenin üzerine taşı")
     vol_txt = ""
     if vol0 and vol1 is not None:
         vol_txt = f" · hacim {(vol1 - vol0) / abs(vol0) * 100:+.1f}%"
@@ -2925,11 +3378,11 @@ def apply_boolean(shape, tools, op, edge_size, edge_mode, tol, smooth=True, prev
     n_solids = _count(cur, TopAbs_SOLID)
     n_shells = _count(cur, TopAbs_SHELL)
     if op == "CUT" and n_solids == 1 and n_shells > 1:
-        return cur, False, ("Araç gövdenin tamamen İÇİNDE: kesim içeride kapalı bir boşluk "
+        return cur, False, ("Model kaynaklı: Araç gövdenin tamamen İÇİNDE: kesim içeride kapalı bir boşluk "
                             "açtı, dışarıdan görünmez. Aracı gövdenin yüzeyini kesecek şekilde "
                             "taşı" + vol_txt)
     if op == "UNION" and n_solids > 1:
-        return cur, False, ("Araç gövdeye değmiyor: ayrı bir parça olarak eklendi. Aracı "
+        return cur, False, ("Model kaynaklı: Araç gövdeye değmiyor: ayrı bir parça olarak eklendi. Aracı "
                             "gövdeyle kesişecek şekilde taşı" + vol_txt)
     if op == "CUT" and n_solids > 1:
         vol_txt += f" · gövde {n_solids} parçaya bölündü"
@@ -2945,8 +3398,18 @@ def apply_boolean(shape, tools, op, edge_size, edge_mode, tol, smooth=True, prev
     finally:
         _FILLET_MODE["fast"] = False
     if out is None:
-        return cur, False, (f"kesim uygulandı ama {len(edges)} yeni kenar yuvarlanamadı "
-                            "· ölçüyü küçült" + vol_txt)
+        what = {"CUT": "kesim", "UNION": "birleşim", "INTERSECT": "kesişim"}.get(op, "boolean")
+        txt = "ölçüyü küçült"
+        if not preview:
+            try:
+                hint = ("bu boolean önceki fillet yüzeylerini kesiyor: İşlem Sırası'nda "
+                        "boolean'ı fillet'lerin önüne almak çoğu zaman çözer") if after_bevel else ""
+                src, txt = diagnose(cur, edges, "FILLET", edge_size, deep=deep, hint=hint)
+                txt = diag_text(src, txt)
+            except Exception:
+                pass
+        return cur, False, (f"{what} uygulandı ama {len(edges)} yeni kenar yuvarlanamadı "
+                            f"({_fmt_size(edge_size)}) · " + txt + vol_txt)
     return out, True, f"uygulandı · {len(edges)} yeni kenar yuvarlandı" + vol_txt
 
 

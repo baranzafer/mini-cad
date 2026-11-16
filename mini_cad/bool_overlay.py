@@ -66,6 +66,41 @@ def _mesh_lines(ob):
     return lines
 
 
+def _draw_sweep(ctx, body):
+    """v0.26.0: listede seçili Profil Süpürme'nin araç katısı (turuncu tel): profilin nereye
+    oturduğu görülür, açı / kaydırma buna göre ayarlanır."""
+    try:
+        if body is None or not body.cad.is_cad:
+            return
+        p = body.cad
+        i = p.active_sweep
+        if not (0 <= i < len(p.features)) or p.features[i].op != "SWEEP" or \
+                not p.features[i].enabled:
+            return
+        polys = core._display.get(body.name, {}).get("sweeps", {}).get(p.features[i].uid)
+        if not polys:
+            return
+        lines = []
+        for P in polys:
+            for k in range(len(P) - 1):
+                lines.append(tuple(P[k]))
+                lines.append(tuple(P[k + 1]))
+        if not lines:
+            return
+        shader = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")
+        gpu.state.blend_set("ALPHA")
+        gpu.state.depth_test_set("NONE")
+        batch = batch_for_shader(shader, "LINES", {"pos": lines})
+        shader.bind()
+        shader.uniform_float("viewportSize", (ctx.region.width, ctx.region.height))
+        shader.uniform_float("lineWidth", WIDTH)
+        shader.uniform_float("color", COL_TOOL)
+        batch.draw(shader)
+        gpu.state.blend_set("NONE")
+    except Exception as e:
+        print("[Mini CAD] süpürme çizilemedi:", e)
+
+
 def _draw():
     try:
         ctx = bpy.context
@@ -80,6 +115,7 @@ def _draw():
             if 0 <= i < len(p.features) and p.features[i].op == "BOOLEAN" and \
                     p.features[i].enabled and p.use_booleans:
                 tool = p.features[i].tool
+        _draw_sweep(ctx, body)
         if tool is None or not kernel.kernel_available():
             return
         region = ctx.region
@@ -182,10 +218,27 @@ def error_lines(scene, limit=5):
                 out.append(f"{ob.name} · {p.name}: {info}")
         for f in props.features:
             if f.enabled and not f.ok:
-                out.append(f"{ob.name} · {f.name}: {f.info}")
+                out.append(f"{ob.name} · {f.name}: {short_error(f.info)}")
     if len(out) > limit:
         out = out[:limit - 1] + [f"… ve {len(out) - limit + 1} hata daha (N paneli)"]
     return [t if len(t) <= 140 else t[:137] + "…" for t in out]
+
+
+SOURCE_LABELS = ("Model kaynaklı", "Geometrik olarak mümkün değil", "Ölçü sınırı",
+                 "Çekirdek sınırı (OCC)")
+
+
+def short_error(info):
+    """Görünüm uyarısı için kısa biçim: önce kaynak (v0.26.0), sonra ilk cümle — uzun teşhis
+    metni 140 karakterde kesilince kaynak görünmüyordu."""
+    info = info or ""
+    for src in SOURCE_LABELS:
+        if src + ":" in info:
+            pre, post = info.split(src + ":", 1)
+            pre = pre.replace("Hesaplanamadı", "").strip(" ·:")
+            first = post.strip().split(" · ")[0]
+            return f"[{src}] " + (pre + " — " if pre else "") + first
+    return info
 
 
 def _draw_errors():

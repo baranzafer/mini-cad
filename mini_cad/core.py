@@ -108,7 +108,39 @@ def _poll_tool(self, obj):
     return obj.type == "MESH" and obj != self.id_data
 
 
-FEATURE_OPS = [("BEVEL", "Bevel", ""), ("BOOLEAN", "Boolean", "")]
+FEATURE_OPS = [("BEVEL", "Bevel", ""), ("BOOLEAN", "Boolean", ""),
+               ("SWEEP", "Profil Süpürme", "")]
+
+
+def is_bevel(f):
+    """Fillet / pah işlemi mi? (v0.26.0'dan önce 'BOOLEAN olmayan' her şey bevel'di)"""
+    return f.op not in ("BOOLEAN", "SWEEP")
+
+
+def _poll_profile(self, obj):
+    return obj.type == "CURVE"
+
+
+SWEEP_PLACES = [
+    ("AUTO", "Yolun Başına Yerleştir",
+     "Profil kendi düzleminde çizilir; orijini yolun başına, düzlemi yola dik oturur. "
+     "Profilin +Y'si dışarıyı (gövde kenarında iki yan yüzün açıortayını) gösterir"),
+    ("KEEP", "Olduğu Yerde", "Profil çizildiği yerde süpürülür (yolun başında, yola dik "
+                             "çizilmiş olmalı — Inventor'daki gibi)"),
+]
+SWEEP_REFS = [
+    ("FACES", "Kenarı İzle", "Gövde kenarında profil her noktada iki yan yüzün açıortayına "
+                             "göre döner (kılavuz yüzey); kenar boyunca açı değişse de pah / "
+                             "yuvarlatma aynı kalır"),
+    ("Z", "Dünya Z", "Profilin +Y'si dünya Z'ye en yakın dik yön; profil yol boyunca boru gibi "
+                     "taşınır"),
+]
+SWEEP_CLOSES = [
+    ("ORIGIN", "Dışarıdan (köşe)", "Açık profilin uçları +Y yönünde köşenin üstünden "
+                                   "kapatılır: köşe pahı / yuvarlatma / yontma"),
+    ("CHORD", "Düz Çizgi", "Açık profilin uçları düz çizgiyle birleşir: oluk / kanal"),
+    ("NONE", "Kapalı Olmalı", "Profil kapalı bir eğri olmalı"),
+]
 BOOL_TYPES = [
     ("CUT", "Çıkar", "Aracın hacmini gövdeden çıkarır (trim / cep / kesim)"),
     ("UNION", "Birleştir", "Aracı gövdeye ekler"),
@@ -158,6 +190,37 @@ class MINICAD_Feature(bpy.types.PropertyGroup):
     size: bpy.props.FloatProperty(name="Ölçü", default=0.002, min=0.0, soft_max=0.05,
                                   precision=4, unit="LENGTH", update=_on_bevel_param)
     enabled: bpy.props.BoolProperty(name="Etkin", default=True, update=_on_setting_change)
+    # ---- Profil Süpürme (v0.26.0); yol = segs + geo_edges, işlem = bool_type
+    profile: bpy.props.PointerProperty(name="Profil", type=bpy.types.Object, poll=_poll_profile,
+                                       update=_on_setting_change,
+                                       description="Yol boyunca süpürülecek düzlemsel eğri")
+    sw_place: bpy.props.EnumProperty(name="Yerleşim", items=SWEEP_PLACES, default="AUTO",
+                                     update=_on_setting_change)
+    sw_ref: bpy.props.EnumProperty(name="Yön", items=SWEEP_REFS, default="FACES",
+                                   update=_on_setting_change)
+    sw_close: bpy.props.EnumProperty(name="Açık Profil", items=SWEEP_CLOSES, default="ORIGIN",
+                                     update=_on_setting_change)
+    sw_angle: bpy.props.FloatProperty(name="Açı", subtype="ANGLE", default=0.0,
+                                      update=_on_setting_change,
+                                      description="Profili yol ekseni etrafında döndürür")
+    sw_off_x: bpy.props.FloatProperty(name="Kaydır X", default=0.0, unit="LENGTH",
+                                      precision=4, update=_on_setting_change)
+    sw_off_y: bpy.props.FloatProperty(name="Kaydır Y", default=0.0, unit="LENGTH",
+                                      precision=4, update=_on_setting_change)
+    sw_scale: bpy.props.FloatProperty(name="Ölçek", default=1.0, min=0.001, soft_max=10.0,
+                                      update=_on_setting_change)
+    sw_flip: bpy.props.BoolProperty(name="Aynala (X)", default=False,
+                                    update=_on_setting_change,
+                                    description="Profili Y ekseninde aynalar (sağ / sol yan)")
+    sw_reverse: bpy.props.BoolProperty(name="Yolu Ters Çevir", default=False,
+                                       update=_on_setting_change,
+                                       description="Yolun başı öbür uca geçer")
+    sw_extend_auto: bpy.props.BoolProperty(
+        name="Uçları Uzat", default=True, update=_on_setting_change,
+        description="Açık yol iki ucundan profil boyu kadar uzatılır: kesim kenarın bittiği "
+                    "yüzleri temiz geçer")
+    sw_extend: bpy.props.FloatProperty(name="Ek Uzatma", default=0.0, min=0.0, unit="LENGTH",
+                                       precision=4, update=_on_setting_change)
     segs: bpy.props.CollectionProperty(type=MINICAD_SegRef)
     info: bpy.props.StringProperty(default="")
     ok: bpy.props.BoolProperty(default=True)
@@ -286,6 +349,8 @@ class MINICAD_ObjectProps(bpy.types.PropertyGroup):
     active_bevel: bpy.props.IntProperty(default=0)
     active_bool: bpy.props.IntProperty(default=0)
     active_order: bpy.props.IntProperty(default=0)
+    active_sweep: bpy.props.IntProperty(default=0)
+    diag_uid: bpy.props.StringProperty(default="")   # ayrıntılı teşhis istenen işlem (v0.26.0)
     use_mirror: bpy.props.BoolProperty(name="Simetri", default=True,
                                        update=_on_setting_change)
     use_booleans: bpy.props.BoolProperty(name="Boolean", default=True,
@@ -1048,6 +1113,59 @@ def _tool_spec(obj, f):
     return spec, key
 
 
+def _sweep_params_key(f):
+    return (f.sw_place, f.sw_ref, f.sw_close, round(f.sw_angle, 6), round(f.sw_off_x, 9),
+            round(f.sw_off_y, 9), round(f.sw_scale, 6), f.sw_flip, f.sw_reverse,
+            f.sw_extend_auto, round(f.sw_extend, 9))
+
+
+def profile_spec(ob):
+    """Profil eğrisi → süreç verisi: dünya segmentleri, orijin, eksenler."""
+    segs = []
+    mw = ob.matrix_world
+    for si, sp in enumerate(ob.data.splines):
+        for k in range(_seg_count(sp)):
+            sg = _spline_segment(ob, si, sp, k, mw)
+            if sg is not None:
+                segs.append([tuple(float(c) for c in v) for v in sg["p"]])
+    m3 = mw.to_3x3()
+    axes = [tuple(float(c) for c in m3.col[i].normalized()) for i in range(3)]
+    return {"segs": segs, "origin": tuple(float(c) for c in mw.translation), "axes": axes}
+
+
+def _sweep_stage(f, preview, run_bevels, ghost, geo_srcs):
+    """Profil Süpürme aşaması (v0.26.0)."""
+    if f.profile is None:
+        raise CadError("Model kaynaklı: profil eğrisi seçilmemiş (panelde 'Profil')")
+    segs = collect_segrefs(f.segs) if len(f.segs) else []
+    geo = []
+    for g in f.geo_edges:
+        d = _geo_desc(g)
+        if d is not None:
+            geo.append({"id": g.id, "src": g.src, "desc": d})
+    if not segs and not geo:
+        raise CadError("Model kaynaklı: yol yok — Kenar Seç'te yol kenarlarını seçip "
+                       "'Seçimi Yol Yap'")
+    prof = profile_spec(f.profile)
+    if not prof["segs"]:
+        raise CadError(f"Model kaynaklı: '{f.profile.name}' eğrisinde segment yok")
+    params = {"place": f.sw_place, "ref": f.sw_ref, "close": f.sw_close,
+              "angle": math.degrees(f.sw_angle), "off_x": f.sw_off_x, "off_y": f.sw_off_y,
+              "scale": f.sw_scale, "flip": f.sw_flip, "reverse": f.sw_reverse,
+              "extend_auto": f.sw_extend_auto, "extend": f.sw_extend}
+    pkey = tuple(round(c, 7) for sg in prof["segs"] for v in sg for c in v) + \
+        tuple(round(c, 7) for c in prof["origin"]) + \
+        tuple(round(c, 7) for a in prof["axes"] for c in a)
+    return {"op": "SWEEP", "uid": f.uid, "bool_type": f.bool_type,
+            "path": [[tuple(float(c) for c in v) for v in sg["p"]] for sg in segs],
+            "geo": geo, "profile": prof, "params": params,
+            "edge_size": f.edge_size, "edge_mode": f.edge_mode, "mirror_tool": f.mirror_tool,
+            "want_edges": (not preview) or (f.uid in geo_srcs and (run_bevels or ghost)),
+            "key": ("S", f.bool_type, _geom_key(segs), tuple(g["id"] for g in geo), pkey,
+                    _sweep_params_key(f), round(f.edge_size, 9) if run_bevels else 0.0,
+                    f.edge_mode, f.mirror_tool)}
+
+
 def gather(obj, preview, allow_ghost=True):
     """bpy verisini hesap sürecine gidecek düz veriye çevirir. (komut, iş)"""
     import time as _t
@@ -1132,6 +1250,15 @@ def gather(obj, preview, allow_ghost=True):
                     "key": ("B", f.bool_type, tkey, round(f.edge_size, 9) if run_bevels else 0.0,
                             f.edge_mode, f.mirror_tool)})
                 continue
+            if f.op == "SWEEP":
+                if not props.use_booleans:
+                    continue
+                try:
+                    stages.append(_sweep_stage(f, preview, run_bevels, ghost, geo_srcs))
+                except CadError as e:
+                    f.ok, f.info = False, str(e)
+                    errors.append(f.name)
+                continue
             if not props.use_bevels or not (run_bevels or ghost):
                 continue
             try:
@@ -1170,6 +1297,7 @@ def gather(obj, preview, allow_ghost=True):
            "corner_mode": props.corner_mode, "factor": props.transition_factor,
            "smooth": props.smooth_corners, "lin": props.lin_defl, "ang": props.ang_defl,
            "feature_names": names, "sig": sig, "parts": (hash(parts[0]), hash(parts[1])),
+           "deep": [props.diag_uid] if getattr(props, "diag_uid", "") else [],
            "t0": _t.perf_counter()}
     cmd = "build"
     if ghost and allow_ghost and _final_parts.get(obj.name) == job["parts"] and \
@@ -1258,10 +1386,11 @@ def _apply(obj, job, res, cmd="build"):
         return False
     d = _display.setdefault(name, {})
     d["ghost"] = res.get("ghost")
+    d["sweeps"] = res.get("sweep_lines") or {}     # süpürme araçlarının telleri (v0.26.0)
     errors = res.get("errors", [])
     if job["preview"]:
         _final_sig.pop(name, None)
-        has_bevel = props.use_bevels and any(f.enabled and f.op != "BOOLEAN"
+        has_bevel = props.use_bevels and any(f.enabled and is_bevel(f)
                                              for f in props.features)
         if has_bevel and not props.preview_bevel:
             mode = "Önizleme (fillet'ler bırakınca gelecek)"
@@ -1610,6 +1739,12 @@ def _signature_parts(props):
             struct.append(("B", f.uid, f.enabled, f.bool_type,
                            f.tool.name if f.tool is not None else None,
                            round(f.edge_size, 9), f.edge_mode, f.mirror_tool))
+        elif f.op == "SWEEP":
+            struct.append(("S", f.uid, f.enabled, f.bool_type, len(f.segs),
+                           tuple(g.id for g in f.geo_edges),
+                           f.profile.name if f.profile is not None else None)
+                          + _sweep_params_key(f) + (round(f.edge_size, 9), f.edge_mode,
+                                                     f.mirror_tool))
         else:
             struct.append(("F", f.uid, f.enabled, len(f.segs),
                            tuple(g.id for g in f.geo_edges)))
@@ -1658,6 +1793,8 @@ def _watched_objects(props):
                 yield r.obj
         if f.op == "BOOLEAN" and f.tool is not None:
             yield f.tool
+        if f.op == "SWEEP" and f.profile is not None:
+            yield f.profile
     if props.mirror_center is not None:
         yield props.mirror_center
 
@@ -1943,6 +2080,11 @@ def register():
     bpy.types.Scene.minicad_bool_highlight = bpy.props.BoolProperty(
         name="Boolean Vurgusu", description="Gövdenin mavi, ikincil parçanın turuncu dış hat "
         "çizgilerini viewport'ta göster / gizle", default=True)
+    bpy.types.Scene.minicad_sweep_profile = bpy.props.PointerProperty(
+        name="Profil", type=bpy.types.Object, poll=_poll_profile,
+        description="Yol boyunca süpürülecek düzlemsel eğri (yay, kıvrım, pah çizgisi...)")
+    bpy.types.Scene.minicad_sweep_type = bpy.props.EnumProperty(
+        name="İşlem", items=BOOL_TYPES, default="CUT")
     bpy.types.Scene.minicad_bool_type = bpy.props.EnumProperty(
         name="İşlem", items=BOOL_TYPES, default="CUT")
     bpy.types.Scene.minicad_target = bpy.props.PointerProperty(
@@ -2020,6 +2162,8 @@ def unregister():
     del bpy.types.Scene.minicad_bool_tool
     del bpy.types.Scene.minicad_bool_highlight
     del bpy.types.Scene.minicad_bool_type
+    del bpy.types.Scene.minicad_sweep_profile
+    del bpy.types.Scene.minicad_sweep_type
     del bpy.types.Scene.minicad_poly_smooth
     del bpy.types.Scene.minicad_poly_corner
     del bpy.types.Object.cad
