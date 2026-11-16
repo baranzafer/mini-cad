@@ -498,6 +498,12 @@ class MINICAD_OT_rebuild(bpy.types.Operator):
 
     def execute(self, context):
         target = get_target(context)
+        if getattr(target.data, "is_editmode", False) is True:
+            # gövde mesh'i düzenleme modundayken sonuç yazılamaz (v0.25.9)
+            try:
+                bpy.ops.object.mode_set(mode="OBJECT")
+            except Exception:
+                pass
         core.forget_cache(target.name)
         for f in target.cad.features:            # ikincil parçaları da yeniden oku
             if f.op == "BOOLEAN" and f.tool is not None:
