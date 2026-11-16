@@ -1,0 +1,16 @@
+schema_version = "1.0.0"
+
+id = "olcu_ustasi"
+version = "1.0.0"
+name = "Olcu Ustasi"
+tagline = "Cok parcali modelleri tek butun olarak olc ve olcekle"
+maintainer = "Mini CAD"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+copyright = ["2026 Mini CAD"]
+
+tags = ["Object", "Modeling"]
