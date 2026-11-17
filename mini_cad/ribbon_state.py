@@ -4,7 +4,8 @@
 üzerindeyken olayı kendileri işlemeyip şeride bırakmak için over_ribbon() kullanır.
 """
 
-STATE = {"running": False, "close": False, "ribbon": None, "area": None, "text": None}
+STATE = {"running": False, "close": False, "ribbon": None, "area": None, "text": None,
+         "capture": False}
 
 MOUSE_EVENTS = {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE", "LEFTMOUSE", "RIGHTMOUSE", "MIDDLEMOUSE",
                 "WHEELUPMOUSE", "WHEELDOWNMOUSE"}
@@ -12,6 +13,19 @@ MOUSE_EVENTS = {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE", "LEFTMOUSE", "RIGHTMOUSE", "
 
 def is_running():
     return bool(STATE["running"])
+
+
+def palette_allowed():
+    """Çizimin eski kayan paleti yalnızca 'Eski N panellerini göster' açıkken (geçiş dönemi)
+    görünür. Tercih okunamıyorsa (testler) eski davranış."""
+    try:
+        import bpy
+        for k, a in bpy.context.preferences.addons.items():
+            if k.split(".")[-1] == "mini_cad":
+                return bool(getattr(a.preferences, "legacy_panels", False))
+    except Exception:
+        return True
+    return True
 
 
 def find_area(context, ptr):
@@ -34,7 +48,11 @@ def window_region(area):
 def over_ribbon(event):
     """Fare olayı açık şeridin (ya da açılır listesinin) üzerinde mi?"""
     rb = STATE["ribbon"]
-    if not STATE["running"] or rb is None or event.type not in MOUSE_EVENTS:
+    if not STATE["running"] or rb is None:
+        return False
+    if STATE.get("capture"):              # araç penceresinde yazılıyor / sürükleniyor
+        return event.type not in ("TIMER", "TIMER_REPORT", "NONE")
+    if event.type not in MOUSE_EVENTS:
         return False
     try:
         import bpy

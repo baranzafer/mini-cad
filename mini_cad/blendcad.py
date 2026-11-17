@@ -22,6 +22,7 @@ from gpu_extras.batch import batch_for_shader
 from . import ribbon, ribbon_actions, ribbon_state
 
 _STATE = ribbon_state.STATE
+_STATE.setdefault("capture", False)
 
 
 def _now():
@@ -205,6 +206,7 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
         rb.on_action = self._on_action
         rb.state_fn = ribbon_actions.state
         rb.active_fn = ribbon_actions.active
+        _setup_forms(rb)
         rb.hover = None
         rb.fly = None
         _STATE.update(running=True, close=False, area=context.area.as_pointer())
@@ -231,7 +233,11 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
             context.window_manager.event_timer_remove(BLENDCAD_OT_workspace._timer)
             BLENDCAD_OT_workspace._timer = None
         _restore_text(context)
-        _STATE.update(running=False, close=False, area=None)
+        rb = _STATE["ribbon"]
+        if rb is not None:
+            rb.forms.close()
+        _STATE.update(running=False, close=False, area=None, capture=False)
+        _close_tools()
         _redraw_all(context)
 
     def cancel(self, context):
@@ -263,36 +269,136 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
             return {"PASS_THROUGH"}
         mx, my = event.mouse_x - region.x, event.mouse_y - region.y
         inside = 0 <= mx <= region.width and 0 <= my <= region.height
+        try:
+            return self._modal_events(context, event, rb, area, mx, my, inside, now)
+        finally:
+            _STATE["capture"] = rb.capturing()
+
+    def _modal_events(self, context, event, rb, area, mx, my, inside, now):
+        et, press = event.type, event.value == "PRESS"
+        # pencerede sayı yazılıyor / sürükleniyor: klavye ve fare pencerenin
+        if rb.capturing():
+            if et in ("MOUSEMOVE", "INBETWEEN_MOUSEMOVE"):
+                rb.move(mx, my, now, event.shift)
+                area.tag_redraw()
+                return {"RUNNING_MODAL"}
+            if et == "LEFTMOUSE" and not press:
+                rb.release(mx, my)
+                area.tag_redraw()
+                return {"RUNNING_MODAL"}
+            if et == "LEFTMOUSE" and press:
+                rb.press(mx, my, now)
+                area.tag_redraw()
+                return {"RUNNING_MODAL"}
+            if press and rb.key(et, event.unicode, event.ctrl, event.shift):
+                area.tag_redraw()
+                return {"RUNNING_MODAL"}
+            return {"RUNNING_MODAL"} if et not in ("TIMER", "TIMER_REPORT") else \
+                {"PASS_THROUGH"}
         if not inside:
             if rb.leave(now):
                 area.tag_redraw()
             return {"PASS_THROUGH"}
-        if event.type in ("MOUSEMOVE", "INBETWEEN_MOUSEMOVE"):
-            if rb.move(mx, my, now):
+        if et in ("MOUSEMOVE", "INBETWEEN_MOUSEMOVE"):
+            if rb.move(mx, my, now, event.shift):
                 area.tag_redraw()
             return {"PASS_THROUGH"}
-        over = rb.contains(mx, my) or rb.fly is not None
-        if event.type == "LEFTMOUSE":
-            if event.value == "PRESS" and over:
+        over = rb.contains(mx, my) or rb.fly is not None or rb.forms.drop is not None
+        if et == "LEFTMOUSE":
+            if press and over:
                 used = rb.press(mx, my, now)
                 area.tag_redraw()
                 if _STATE["close"]:
                     self._finish(context)
                     return {"FINISHED"}
                 return {"RUNNING_MODAL"} if used else {"PASS_THROUGH"}
+            if not press and rb.release(mx, my):
+                area.tag_redraw()
+                return {"RUNNING_MODAL"}
             if rb.contains(mx, my):
                 return {"RUNNING_MODAL"}
             return {"PASS_THROUGH"}
-        if event.type in ("RIGHTMOUSE", "MIDDLEMOUSE") and rb.contains(mx, my):
+        if et in ("RIGHTMOUSE", "MIDDLEMOUSE") and rb.contains(mx, my):
             return {"RUNNING_MODAL"}
-        if event.type in ("WHEELUPMOUSE", "WHEELDOWNMOUSE") and rb.contains(mx, my):
-            rb.wheel(mx, my, -1 if event.type == "WHEELUPMOUSE" else 1)
+        if et in ("WHEELUPMOUSE", "WHEELDOWNMOUSE") and rb.contains(mx, my):
+            rb.wheel(mx, my, -1 if et == "WHEELUPMOUSE" else 1)
             area.tag_redraw()
             return {"RUNNING_MODAL"}
-        if event.type == "ESC" and event.value == "PRESS" and rb.escape():
+        if et == "ESC" and press and rb.escape():
             area.tag_redraw()
             return {"RUNNING_MODAL"}
         return {"PASS_THROUGH"}
+
+
+def _close_tools():
+    """BlendCAD kapanınca CAD araçları da kapanır: taslak kaydedilir (eski palete / panele
+    düşülmez)."""
+    for mod in ("draw", "pick", "split"):
+        try:
+            m = __import__(f"{__package__}.{mod}", fromlist=["cleanup_all"])
+            m.cleanup_all()
+        except Exception as e:  # pragma: no cover
+            print(f"[BlendCAD] {mod} kapatılamadı:", e)
+
+
+# ---------------------------------------------------------------- araç pencereleri
+
+def _rna_meta(owner, name):
+    from .ribbon_forms import Meta
+    rna = owner.bl_rna.properties[name]
+    t = rna.type
+    if t == "ENUM":
+        return Meta("ENUM", rna.name, rna.description,
+                    items=[(i.identifier, i.name, i.description) for i in rna.enum_items])
+    if t in ("FLOAT", "INT"):
+        return Meta(t, rna.name, rna.description, min=rna.hard_min, max=rna.hard_max,
+                    soft_min=rna.soft_min, soft_max=rna.soft_max, step=float(rna.step),
+                    precision=getattr(rna, "precision", 0), unit=getattr(rna, "unit", "NONE"))
+    return Meta(t, rna.name, rna.description)
+
+
+def _fmt(meta, v):
+    from .ribbon_forms import default_fmt
+    us = bpy.context.scene.unit_settings
+    if meta.type == "FLOAT" and meta.unit == "LENGTH" and us.system != "NONE":
+        return bpy.utils.units.to_string(us.system, "LENGTH", v * us.scale_length,
+                                         precision=max(3, meta.precision or 3),
+                                         split_unit=False, compatible_unit=False)
+    if meta.type == "FLOAT" and meta.unit == "ROTATION" and us.system_rotation == "RADIANS":
+        return f"{v:.4f}"
+    return default_fmt(meta, v)
+
+
+def _parse(meta, text):
+    from .ribbon_forms import default_parse
+    us = bpy.context.scene.unit_settings
+    if meta.type == "FLOAT" and meta.unit == "LENGTH" and us.system != "NONE":
+        try:
+            return bpy.utils.units.to_value(us.system, "LENGTH", text) / (us.scale_length or 1.0)
+        except Exception:
+            pass
+    return default_parse(meta, text)
+
+
+def _undo_push(text):
+    try:
+        bpy.ops.ed.undo_push(message=f"BlendCAD: {text}")
+    except Exception:
+        pass
+
+
+def _setup_forms(rb):
+    f = rb.forms
+    f.meta_fn, f.fmt_fn, f.parse_fn = _rna_meta, _fmt, _parse
+    f.ctx_fn = lambda: bpy.context
+    f.on_commit = _undo_push
+
+    def message(text):
+        rb.toast = (text, _now())
+    f.on_message = message
+    ribbon_actions.HOOKS["message"] = message
+    ribbon_actions.HOOKS["open_form"] = lambda fid, title, icon, spec, width: \
+        rb.open_form(fid, title, icon, spec, width)
 
 
 def _hide_text(area):

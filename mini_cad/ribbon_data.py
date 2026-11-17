@@ -51,9 +51,26 @@ _SKETCH = [
           "Taslağı eğri objesine kaydeder; bağlı yüzey ve gövdeler güncellenir.",
           ["Taslaktaki bütün çizgiler hedef eğriye yazılır",
            "Hedef: Mevcut eğri ya da Yeni eğri (Seçenekler)"], key="Ctrl+Enter"),
-        B("SK_UNDO", "SK_UNDO", "Son çizgiyi geri al",
-          "Taslaktaki son çizgiyi / noktayı geri alır.",
-          ["Ctrl+Z / Ctrl+Shift+Z: taslakta geri al / yinele"], key="Backspace"),
+        B("SK_UNDO", "SK_UNDO", "Geri al",
+          "Taslakta son noktayı / çizgiyi geri alır; geri al / yinele geçmişi de burada.",
+          ["Türü seç: son nokta, geçmişte geri al ya da yinele"], key="Backspace",
+          variants=[
+              V("SK_UNDO", "SK_UNDO", "Son noktayı geri al",
+                "Süren çizginin son noktasını, yoksa son çizgiyi geri alır.", key="Backspace"),
+              V("SK_HIST_UNDO", "SK_UNDO", "Taslakta geri al",
+                "Taslak geçmişinde bir adım geri (Bitir'den önce).", key="Ctrl+Z"),
+              V("SK_REDO", "SK_REDO", "Taslakta yinele",
+                "Taslak geçmişinde bir adım ileri.", key="Ctrl+Shift+Z"),
+          ]),
+        B("SK_SURF", "SK_SURF", "Yüzey oluştur",
+          "Son kapalı çizgiden (iç içe olanlarla birlikte: delikli) yüzey yapar.",
+          ["Kapalı bir çizgi çiz (C: başa dönüp kapat)", "Yüzey: mevcut gövdeye · "
+           "Yeni gövde: ayrı gövde"], key="F",
+          variants=[
+              V("SK_SURF", "SK_SURF", "Yüzey", "Mevcut gövdeye yüzey ekler.", key="F"),
+              V("SK_SURF_NEW", "BODY", "Yeni gövde", "Yüzeyle yeni bir gövde başlatır.",
+                key="Ctrl+F"),
+          ]),
         B("SK_EDIT", "EDITSK", "Taslağa al",
           "Kaydedilmiş eğriyi taslakta düzenlemeye açar (Inventor: Edit Sketch).",
           ["Türü seç", "Kaydedilmiş eğriye tıkla ya da aktif çizimin tamamını aç"],
@@ -81,6 +98,15 @@ _SKETCH = [
               V("PL_XZ", "PLANE_XZ", "Ön (XZ)", "Y'ye dik düzlem.", key="Shift+Y"),
               V("PL_YZ", "PLANE_YZ", "Yan (YZ)", "X'e dik düzlem.", key="Shift+X"),
               V("PL_VIEW", "PLANE_VIEW", "Ekrana paralel", "Görüş düzlemi.", key="V"),
+          ]),
+        B("AXLOCK", "AXIS_X", "Eksen kilidi",
+          "İmleci bir eksen boyunca kilitler (çizerken ve taslak noktası sürüklerken). Tekrar "
+          "basınca kalkar.", ["Türü (X / Y / Z) seç", "Noktayı eksen boyunca ver"],
+          key="X / Y / Z",
+          variants=[
+              V("AX_X", "AXIS_X", "X ekseni", "X boyunca kilitle.", key="X"),
+              V("AX_Y", "AXIS_Y", "Y ekseni", "Y boyunca kilitle.", key="Y"),
+              V("AX_Z", "AXIS_Z", "Z ekseni", "Z boyunca kilitle.", key="Z"),
           ]),
     ]),
     ("Oluştur", [
@@ -144,6 +170,41 @@ _SKETCH = [
           "Gövde kenarını ya da tel kafes eğrisini çizim düzlemine izdüşürür.",
           ["Kenara ya da eğriye tıkla", "Sonuç taslağa normal çizgi olarak eklenir"]),
     ]),
+    ("Yardımcı", [
+        B("KEY_G", "TEMP_GROUND", "Geçici zemin",
+          "Çizerken ızgaranın yönünü / yüksekliğini geçici değiştirir; tekrar basınca asıl "
+          "düzleme döner.", ["Bir düzleme / yüze tıkla, yüksekliği ver", "Tekrar: normale dön"],
+          key="G", toggle=True, small=True, short="Geçici zemin"),
+        B("KEY_T", "TRACE", "İz", "Referans noktadan eksenler boyunca kesikli kılavuzla "
+          "başlangıç noktası bulur.", ["Referans noktaya gel", "Eksen boyunca adım ver"],
+          key="T", toggle=True, small=True),
+        B("KEY_C", "CLOSE_LOOP", "Başa kapat", "Süren çizgiyi başlangıç noktasına bağlar.",
+          key="C", small=True, short="Kapat"),
+        B("KEY_Q", "PREV_TOOL", "Önceki araç", "Son iki araç arasında geçer.", key="Q",
+          small=True, short="Önceki"),
+        B("KEY_D", "FLIP_DIR", "Yön", "Merkezli yayın yönünü, çokgende iç / dış teğeti "
+          "değiştirir.", key="D", small=True),
+        B("KEY_COORD", "COORD", "Hassas giriş", "Ölçü alanları ΔX / ΔY olur (ilk noktada mutlak "
+          "X / Y).", key="Shift+Tab", toggle=True, small=True, short="Hassas"),
+    ]),
+    ("Seçenekler", [
+        B("OPT_SNAP", "SNAP", "Yakalama", "Uç / orta / kesişim yakalama ve kılavuzlar.",
+          ["Ctrl basılıyken geçici olarak kapalı"], toggle=True, small=True),
+        B("OPT_GRID", "GRID", "Izgara", "Izgaraya hafif yakalama; aralık yakınlaştırmaya göre "
+          "değişir.", key="I", toggle=True, small=True),
+        B("OPT_LOOK", "LOOK", "Düzleme bak", "Düzlem seçince görünüm düzleme döner.",
+          toggle=True, small=True, short="Bak"),
+        B("OPT_FIRST", "PLANE_PICK", "Önce düzlem",
+          "Çizim açılınca önce düzlem seçtirir (Inventor gibi).", toggle=True, small=True),
+        B("OPT_NEW", "TARGET_NEW", "Yeni eğriye yaz",
+          "Açık: her Bitir yeni eğri objesi oluşturur · Kapalı: aktif / son eğriye ekler.",
+          toggle=True, small=True, short="Yeni eğri"),
+    ]),
+]
+
+# ================================================================ DEĞİŞTİR (eskiz düzenleme)
+
+_MODIFY = [
     ("Değiştir", [
         B("TRIM", "TRIM", "Kırp", "Parçayı en yakın kesişimler arasında siler.",
           ["Silinecek parçaya tıkla", "Sürükle: çoklu kırpma", "Shift: Uzat'a geç"], key="B"),
@@ -179,19 +240,6 @@ _SKETCH = [
           ["Seç", "Merkez", "Adet ve açı"]),
         B("MIRROR2D", "MIRROR", "Ayna", "Seçimin bir çizgiye göre aynalı kopyasını ekler.",
           ["Seç", "Ayna çizgisinin iki noktası"]),
-    ]),
-    ("Seçenekler", [
-        B("OPT_SNAP", "SNAP", "Yakalama", "Uç / orta / kesişim yakalama ve kılavuzlar.",
-          ["Ctrl basılıyken geçici olarak kapalı"], toggle=True, small=True),
-        B("OPT_GRID", "GRID", "Izgara", "Izgaraya hafif yakalama; aralık yakınlaştırmaya göre "
-          "değişir.", key="I", toggle=True, small=True),
-        B("OPT_LOOK", "LOOK", "Düzleme bak", "Düzlem seçince görünüm düzleme döner.",
-          toggle=True, small=True, short="Bak"),
-        B("OPT_FIRST", "PLANE_PICK", "Önce düzlem",
-          "Çizim açılınca önce düzlem seçtirir (Inventor gibi).", toggle=True, small=True),
-        B("OPT_NEW", "TARGET_NEW", "Yeni eğriye yaz",
-          "Açık: her Bitir yeni eğri objesi oluşturur · Kapalı: aktif / son eğriye ekler.",
-          toggle=True, small=True, short="Yeni eğri"),
     ]),
 ]
 
@@ -268,8 +316,10 @@ _SURFACE = [
           "Seçili mesh kenarlarından bezier tel kafes eğrileri üretir.",
           ["Mesh objesinde kenarları seç", "Düğmeye bas: eğriler oluşur"]),
         B("EDGE_PICK", "EDGE_PICK", "Kenar seçimi",
-          "Gövde kenarlarını üzerine gelip tıklayarak seçer (sarı vurgulu).",
-          ["Kenarın üzerine gel", "Tık: seç · Shift: ekle", "B: seçili kenarlara fillet"]),
+          "Tel kafes ve gövde kenarlarını seçer; seçimden yüzey, yeni gövde, fillet ya da "
+          "süpürme yapılır (pencerede).",
+          ["Kenarın üzerine gel, tıkla (Alt+tık: tek parça)",
+           "Pencereden: Yüzey · Yeni gövde · Fillet · Süpürme"], key="Enter / B / P"),
         B("SKETCH3D", "SKETCH3D", "3B eskiz",
           "Uzayda doğru / spline çizer; yüzey ve kenarlara bağlanır.",
           ["Nokta, kenar ya da yüzey üzerinden başla", "Eksen kilitleriyle uzayda ilerle"],
@@ -444,6 +494,7 @@ _TOOLS = [
 
 TABS = [
     ("SKETCH", "Eskiz", _SKETCH),
+    ("MODIFY", "Değiştir", _MODIFY),
     ("CONSTRAIN", "Kısıt", _CONSTRAIN),
     ("SURFACE", "Yüzey", _SURFACE),
     ("SOLID", "Katı", _SOLID),

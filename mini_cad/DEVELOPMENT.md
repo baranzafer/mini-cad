@@ -1,4 +1,4 @@
-# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.28.0)
+# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.29.0)
 
 > **Ad değişikliği (v0.27.0):** eklentinin görünen adı **BlendCAD** oldu. Paket kimliği
 > (`id = "mini_cad"`), klasör adı, `minicad.*` operatörleri ve `MINICAD_*` sınıfları
@@ -12,7 +12,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.28.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.29.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
 - Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
 - Kurulum zip'leri `dist/` klasöründe.
 - Her sürüm ayrı bir commit.
@@ -458,15 +458,47 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
       `_set_tool` ile verilir; çizim kapalıysa önce `minicad.draw` açılır (önce düzlem, sonra
       araç). Düzlem türleri palet mantığıyla (`_start_offset` / `_set_plane`). Eskiz: başlat
       (açıkken düzlemi yeniden seçtir), Seç, Bitir, Geri al, Taslağa al / Çizimi düzenle, Kapat.
-    - Ayar isteyen işlemler eski panellerin içeriğini **açılır pencerede** gösterir
-      (`POPUPS`; `BLENDCAD_PT_pop_*`, `HEADER` bölgesi, `wm.call_panel(keep_open=True)`).
-      Panel çizimi eski panel sınıfının `draw` / `draw_header`'ını çağırır: panel içeriği tek
-      yerde kalır. Gövde gerekmeyen / çekirdek yoksa yönerge gösterilir.
+    - **v0.29.0: araç pencereleri.** Ayar isteyen işlemler artık Blender açılır panelini
+      değil, şeridin altına (tıklanan düğmenin hizasına) açılan **BlendCAD araç penceresini**
+      kullanır (Inventor'daki araç iletişim kutuları gibi). Kurallar:
+      - Toolkit `ribbon_forms.py` (bpy'siz, şeritle aynı ressam ve renkler): `UI` kurucusu
+        (`prop` → sayı alanı / onay kutusu / aç-kapa / bölmeli seçim / açılır liste / obje
+        listesi, `button` (birincil, kısayol rozeti), `list` (satır listesi, hücreler,
+        tekerlekle kaydırma), `section`, `label` (ton: ok / err / warn / info / dim, uzun
+        yazı satırlara bölünür), `row`, `enabled`). `FormHost`: kurulum, isabet, olaylar,
+        çizim.
+      - **Anlık yapı:** pencere içeriği her çizimde ve her tıktan önce `spec(ui, ctx)` ile
+        yeniden kurulur; Blender verisine eski referans tutulmaz (geri alma sonrası güvenli).
+      - Sayı alanı: sürükle (Shift: ince), tıkla-yaz (Enter / Esc / Tab sonraki alan),
+        kenar oklarıyla adım; birimler sahne birim sisteminden (`blendcad._fmt / _parse`,
+        `bpy.utils.units`), açılar derece. Sürükleme / yazma sırasında olaylar pencerenin
+        (`ribbon_state.STATE["capture"]` → çizim / kenar seçimi / bölme araçları
+        PASS_THROUGH). Her değişiklik sonunda tek geri alma adımı (`ed.undo_push`).
+      - İçerikler `ribbon_formspecs.py` (`FORMS`): Fillet / pah, Boolean, Profil süpürme,
+        Yüzeyler, Ayna simetrisi, Gövde, İşlem sırası, Ayarlar (ızgara, doğruluk, motor),
+        Kısıtlar ve ilişkiler, Çekirdek, Mesh → tel kafes, Kenar seçimi, Yüzeyi böl. Eski
+        panel içeriklerinin tamamı karşılanır; panel sınıfları yalnızca geçiş tercihi için.
+      - Pencere düğmeleri operatörleri `ribbon_actions.call` ile çağırır (poll hatası
+        bildirime), açık araca tuş gönderir (`key_pick`, `key_split`).
     - Aç / kapa: `SCENE_TOGGLES` sahne ayarlarına yazar; düğme durumu her çizimde
       `ribbon_actions.state` ile okunur (Kenar seçimi, Yüzeyi böl, Ayna simetrisi, Düzlem
       seçimi de). Etkin araç `ribbon_actions.active` → şerit vurgusu; klavyeyle seçilen tür
       (O ×3 = Elips) tür düğmesine yansır (`Ribbon.sync`).
     - Operatörler `_override` ile şeridin 3D görünümünde çağrılır; poll hatası bildirime döner.
+  - **v0.29.0: kısayollar düğmede.** Yalnızca kısayolu olan her işlem şeritte de var:
+    Eskiz → Geri al türleri (Backspace / Ctrl+Z / Ctrl+Shift+Z), Yüzey oluştur (F / Ctrl+F),
+    Eksen kilidi (X / Y / Z), Yardımcı (G geçici zemin, T iz, C başa kapat, Q önceki araç,
+    D yön, Shift+Tab hassas giriş); Kenar seçimi penceresi (Enter yüzey, Ctrl+Enter yeni
+    gövde, B fillet, P süpürme, Backspace temizle, Tab tel kafesi düzenle); Yüzeyi böl
+    penceresi (R halka, K bıçak, C, V, kesim sayısı). Düğme, açık aracın modal'ına aynı
+    tuşu **yapay olay** olarak gönderir (`ribbon_actions.send_key`, imleç = aracın son fare
+    konumu): klavyeyle birebir aynı kod yolu çalışır, davranış iki yerde ayrı yazılmaz.
+    Şeritte eskiz düzenleme araçları ayrı **Değiştir** sekmesinde (Eskiz sekmesi 1920 px'e
+    sığsın diye).
+  - **v0.29.0: tek arayüz.** Çizimin eski kayan paleti yalnızca "Eski N panellerini göster"
+    tercihi açıkken görünür (`ribbon_state.palette_allowed`). BlendCAD düğmesiyle şerit
+    kapanınca açık CAD araçları da kapanır (taslak kaydedilir: `blendcad._close_tools`);
+    eski palete / panele düşülmez.
   - **Olay paylaşımı:** çizim, kenar seçimi ve yüzey bölme kalıcı operatörleri fare şeridin
     (ya da açılır listesinin) üstündeyken olayı `PASS_THROUGH` ile şeride bırakır
     (`ribbon_state.over_ribbon`). Şerit açıkken çizimin kayan paleti (`palette.py`) çizilmez
@@ -530,7 +562,9 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `ribbon_data.py` | 470 | Şerit içeriği: sekmeler, gruplar, düğmeler, kart metinleri |
 | `ribbon_icons.py` | 435 | 3B / delik / vida / araç / düzlem / seçenek simgeleri |
 | `ribbon_actions.py` | 420 | Şerit düğmeleri → Mini CAD işlevleri: çizim araçları, operatörler, açılır panel pencereleri, aç / kapa, düğme durumu |
-| `ribbon_state.py` | 73 | bpy'siz paylaşılan şerit durumu, `over_ribbon`, `insets` (başlık örtüşmesi) |
+| `ribbon_forms.py` | 846 | Araç pencereleri toolkit'i (bpy'siz): UI kurucusu, FormHost (olaylar, yazma, sürükleme, açılır liste, çizim) |
+| `ribbon_formspecs.py` | 604 | Araç pencerelerinin içerikleri (eski N paneli içeriği yeni tasarımla) |
+| `ribbon_state.py` | 91 | bpy'siz paylaşılan şerit durumu, `over_ribbon`, `insets` (başlık örtüşmesi) |
 | `recorder.py` | 632 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
 
@@ -1180,6 +1214,9 @@ Betiğin yaptıkları:
 | t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |
 | t71 | BlendCAD şeridi (sahte ressam): veri ve simge bütünlüğü, yerleşim, sekme, kart zamanlaması (gecikme / genişleme / sıcak geçiş), açılır liste ve tür seçimi, araç seçimi + bildirim, aç / kapa, daralt / kapat, dar görünümde kaydırma, başlatıcı konumu |
 | t72 | Şerit işlevleri (sahte bpy / çizim / kenar seçimi): bütün hazır düğmeler bağlı, çizim kapalıyken araç → çizim açılır + araç, düzlemler, eskiz komutları, aç / kapa sahne ayarları, açılır pencereler, poll hatası iletisi, etkin aracın / türün şeride yansıması, başlık örtüşmesine göre yerleşim, küçük düğmeler |
+| t73 | Araç pencereleri (sahte veri): devre dışı alan, onay kutusu, ok / sürükle / tıkla-yaz / sınır / geçersiz değer / Tab / Esc, açı derece, bölmeli seçim, enum ve obje açılır listesi, düğmeler, liste (seçim, satır içi onay kutusu, kaydırma), uzun yazı, kapatma, alçak görünümde kaydırma, şeritle birlikte olay yönlendirme |
+| tools/bpy_model_check.py | **GERÇEK Blender 5.x (bpy modülü) + GERÇEK OCC**: tel kafesten kutu → 6 yüzey → kapalı katı; Gövde, Yüzeyler, Fillet (ölçü yaz, Pah), Boolean (obje listesi, ekle → delik), İşlem sırası, Simetri, Ayarlar, Kısıtlar, Çekirdek, Mesh → tel kafes, Kenar seçimi, Süpürme pencereleri kendi denetimleriyle kullanılır, her biri PNG'ye çizilir, STEP yazılır. `python3 -m venv v && v/bin/pip install bpy "cadquery-ocp-novtk>=7.9.3,<8" pillow` sonra `v/bin/python devkit/tools/bpy_model_check.py <mini_cad'in üst klasörü> <çıktı>` |
+| tools/pil_painter.py | PIL ressamı (ribbon_preview ve bpy_model_check ortak) |
 | tools/ribbon_preview.py | Şeridi PIL ile PNG'ye çizer (aynı çizim kodu): `python3 devkit/tools/ribbon_preview.py mini_cad <çıktı klasörü>` |
 | t70 | Profil Süpürme: gather → motor → boolean (sıra, parametreler, açı derece), imza (ayar / profil), profil yoksa Model kaynaklı, çekirdek hatası, Ayrıntılı Teşhis (`deep` yalnız istenen işlemde), `is_bevel`, `after_bevel` ipucu bayrağı, görünüm uyarısı kısa biçimi |
 | tools/report_model.py | Kayıt raporundan gövdeyi birebir kurar (tel kafes bezier noktaları + yüzey kenar referansları) — kullanıcı modelini OCC ile yeniden üretmek için |
@@ -1432,3 +1469,11 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   ölçü kısıtları, Çöz, Kısıt / yüzey listesi). Şerit ve başlatıcı Blender başlıklarının altına
   yerleşir; görünüm adı yazısı şerit açıkken gizlenir; şerit açıkken çizim paleti gizli.
   Yeni modüller `ribbon_actions.py`, `ribbon_state.py`; test t72.
+- **0.29.0:** BlendCAD araç pencereleri: ayar isteyen her araç şeridin altına açılan, şeritle
+  aynı tasarımda pencere kullanır (sayı alanı sürükle / yaz, açılır listeler, bölmeli seçim,
+  listeler); eski panel parçaları açılmaz. Kısayolu olan her işlem şeritte düğme (G, T, C,
+  F, Q, D, X / Y / Z, Shift+Tab, Ctrl+Z; kenar seçiminde Enter / B / P; bölmede R / K) —
+  düğme aynı tuşu araca gönderir. Yeni Değiştir sekmesi. Eski çizim paleti yalnız geçiş
+  tercihiyle; BlendCAD kapanınca araçlar da kapanır. Yeni modüller `ribbon_forms.py`,
+  `ribbon_formspecs.py`; test t73; araçlar `bpy_model_check.py` (gerçek Blender + OCC
+  model denemesi), `pil_painter.py`.

@@ -53,8 +53,11 @@ r.layout(p, W, H)
 x0, y0, x1, y1 = r.box
 check(y1 <= H and y0 > H - 120 and x0 >= 0, f"şerit üstte: {r.box}")
 check(all(r._rect("tab", t[0]) for t in data.TABS), "bütün sekmeler var")
-check(len([i for i in r.items if i[4] == "btn"]) == sum(len(b) for _g, b in r.groups()),
-      "Eskiz: bütün düğmeler sığdı")
+r1920 = ribbon.Ribbon(1.0); r1920.layout(p, 1920, H)
+check(len([i for i in r1920.items if i[4] == "btn"]) == sum(len(b) for _g, b in r1920.groups()),
+      "Eskiz (1920 px): bütün düğmeler sığdı")
+r900 = ribbon.Ribbon(1.0); r900.layout(p, 900, H)
+check(r900.scroll_max > 0 and r900._rect("scroll", 1) is not None, "Eskiz (900 px): kaydırma oku")
 r.draw(p, W, H, now=0.0); check(p.n > 50, "çizim çağrıları yapıldı")
 
 # --- sekme
@@ -92,6 +95,7 @@ check(not r.press(5, 5, 21.2), "dışarı tık (liste yokken) görünüme geçer
 # --- araç seçimi, bildirim, aç / kapa
 acts = []
 r.on_action = lambda k, it: acts.append((k, it["id"] if it else None))
+r.tab = "MODIFY"; r.layout(p, W, H)
 mx, my = center(r, "btn", "TRIM")
 r.press(mx, my, 30.0)
 check(r.active == "TRIM" and acts[-1] == ("TOOL", "TRIM") and r.toast, "Kırp seçildi + bildirim")

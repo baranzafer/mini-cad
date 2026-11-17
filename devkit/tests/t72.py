@@ -72,8 +72,9 @@ rb = ribbon.Ribbon(1.0); rb.layout(p, 1600, 900, 46, 0, 52)
 check(rb.box[3] <= 900 - 52 and rb.box[0] >= 46, f"şerit başlıkların altında, araç çubuğunun sağında {rb.box}")
 lx0, ly0, lx1, ly1 = ribbon.launcher_rect(1600, 900, 1.0, 0, 60, 52)
 check(ly1 <= 900 - 52, "başlatıcı başlıkların altında")
+rb = ribbon.Ribbon(1.0); rb.layout(p, 2400, 900, 46, 0, 52)
 small = [i for i in rb.items if i[4] == "btn" and data.find(i[5]) and data.find(i[5]).get("small")]
-check(len(small) == 5 and all(i[3] - i[1] < 20 for i in small), "Seçenekler: 5 küçük düğme")
+check(len(small) == 11 and all(i[3] - i[1] < 20 for i in small), f"Yardımcı + Seçenekler: 11 küçük düğme ({len(small)})")
 
 # ---- sahte çizim / kenar seçimi / gövde
 class FakeDM:
@@ -110,6 +111,11 @@ sys.modules["mini_cad.kernel"] = fk
 rs.STATE["area"] = 4242
 
 ra = importlib.import_module("mini_cad.ribbon_actions")
+fs = importlib.import_module("mini_cad.ribbon_formspecs")
+opened = []
+ra.HOOKS["open_form"] = lambda fid, title, icon, spec, width: opened.append((fid, title, spec))
+msgs = []
+ra.HOOKS["message"] = msgs.append
 D = lambda i, kind="TOOL": ra.dispatch(ctx, kind, data.find(i) or {"id": i})
 
 # her düğme bir işleve bağlı mı (planlananlar hariç)
@@ -119,15 +125,15 @@ for b in data.all_buttons():
         if it["status"] != data.READY:
             continue
         i = it["id"]
-        known = (i in ra.DRAW_TOOLS or i in ra.CONS_TOOLS or i in ra.PLANES or i in ra.POPUPS or
-                 i in ra.SCENE_TOGGLES or i in ra.BOOL_TYPES or i in (
+        known = (i in ra.DRAW_TOOLS or i in ra.CONS_TOOLS or i in ra.PLANES or i in fs.FORMS or
+                 i in ra.SCENE_TOGGLES or i in ra.BOOL_TYPES or i in ra.DRAW_KEYS or i in (
                      "OPT_SNAP", "SK_START", "SK_FINISH", "SK_UNDO", "SK_CLOSE", "EDIT_ALL",
                      "EDGE_PICK", "PATCH", "PATCH_HOLE", "SPLIT_FACE", "REBUILD", "CONS_SOLVE",
                      "STEP", "DIAG", "REC"))
         if not known:
             unbound.append(i)
 check(not unbound, f"bütün hazır düğmeler bağlı {unbound}")
-check(len(ra._POPUP_CLASSES) >= 10, f"{len(ra._POPUP_CLASSES)} açılır panel sınıfı")
+check(len(fs.FORMS) >= 15, f"{len(fs.FORMS)} düğme araç penceresi açar")
 
 # çizim kapalıyken araç: önce çizimi açar, sonra araç
 msg = D("RECT3")
@@ -160,23 +166,46 @@ D("OPT_NEW", "TOGGLE"); check(scene.minicad_draw_target == "ACTIVE", "tekrar: AC
 check(D("OPT_SNAP", "TOGGLE") is not None, "çizim kapalıyken yakalama: ileti")
 
 # operatörler ve açılır pencereler
-D("EDGE_PICK"); check(fpick.run and ra.state(data.find("EDGE_PICK")) is True, "Kenar seçimi açıldı, düğme açık")
-m = D("PATCH"); check("Enter" in (m or "") and fpick.run, "Sınır yüzeyi: kenar seçimi açıkken yönerge")
-D("BOOL_UNION"); check(scene.minicad_bool_type == "UNION" and calls[-1][0] == "wm.call_panel", "Boolean Birleştir: tür + pencere")
-check(calls[-1][2]["name"] == ra.popup_idname("BOOL_UNION") and calls[-1][2]["keep_open"], "doğru panel, açık kalır")
+D("EDGE_PICK"); check(fpick.run and ra.state(data.find("EDGE_PICK")) is True and opened[-1][0] == "EDGE_PICK", "Kenar seçimi açıldı + penceresi")
+D("PATCH"); check(fpick.run and opened[-1][1] == "Kenar seçimi", "Sınır yüzeyi: kenar seçimi penceresi")
+D("BOOL_UNION"); check(scene.minicad_bool_type == "UNION" and opened[-1][1] == "Boolean", "Boolean Birleştir: tür + araç penceresi")
+check(not any(c[0] == "wm.call_panel" for c in calls), "eski Blender açılır paneli kullanılmıyor")
 D("BLEND_G1"); check(body.cad.surface_blend == "TANGENT", "Teğet (G1) gövde ayarı")
-D("SWEEP"); check(calls[-1][2]["name"].endswith("sweep"), "Profil süpürme penceresi")
+D("SWEEP"); check(opened[-1][1] == "Profil süpürme", "Profil süpürme penceresi")
 D("REBUILD"); check(calls[-1][0] == "minicad.rebuild", "Yenile")
 D("STEP"); check(calls[-1][0] == "minicad.export_step", "STEP")
 D("CONS_SOLVE"); check(calls[-1][0] == "minicad.constraint_solve", "Çöz")
 check(ra.state(data.find("SYM_BODY")) is True, "Ayna simetrisi açık görünür (gövde ayarı)")
-m = D("WIRE_MESH"); check("Mesh düzenleme" in (m or ""), "Mesh'ten tel kafes: nesne modunda yönerge + pencere")
-ctx.mode = "EDIT_MESH"; D("WIRE_MESH"); check(calls[-1][0] == "minicad.mesh_to_wire", "düzenleme modunda çalışır")
+D("WIRE_MESH"); check(opened[-1][0] == "WIRE_MESH", "Mesh'ten tel kafes: pencere")
 
 # hata iletisi (poll)
 def _boom(*a, **k): raise RuntimeError("Operator bpy.ops.minicad.split_surface.poll() failed, context is incorrect")
 HOOKS["minicad.split_surface"] = _boom
+fsplit._STATE = {"active": None}
 m = D("SPLIT_FACE"); check(m and "poll" in m, f"poll hatası iletiye döner: {m}")
+
+# kısayol düğmeleri: aynı tuş aracın modal'ına gider
+got_ev = []
+class KOp(FakeOp):
+    def __init__(s):
+        super().__init__()
+        s.region = NS(x=10, y=20, width=800, height=600); s.mouse = (100.0, 50.0)
+    def modal(s, c, ev):
+        got_ev.append((ev.type, ev.shift, ev.ctrl, ev.mouse_x, ev.mouse_y)); return {"RUNNING_MODAL"}
+fdraw._STATE["active"] = KOp()
+D("KEY_G"); check(got_ev[-1] == ("G", False, False, 110.0, 70.0), f"Geçici zemin: G, imleç son konumda {got_ev[-1]}")
+D("SK_SURF_NEW"); check(got_ev[-1][:3] == ("F", False, True), "Yeni gövde yüzeyi: Ctrl+F")
+D("KEY_COORD"); check(got_ev[-1][:3] == ("TAB", True, False), "Hassas giriş: Shift+Tab")
+D("AX_Y"); check(got_ev[-1][0] == "Y", "Eksen kilidi Y")
+D("SK_REDO"); check(got_ev[-1][:3] == ("Z", True, True), "Yinele: Ctrl+Shift+Z")
+fdraw._STATE["active"].axis_lock = 1
+check(ra.state(data.find("AXLOCK")) is True, "eksen kilidi açık görünür")
+pk = KOp(); fpick._STATE = {"active": pk}
+mod_pick = sys.modules["mini_cad.pick"]; mod_pick._STATE = fpick._STATE
+ra.key_pick("B"); check(got_ev[-1][0] == "B", "Fillet uygula düğmesi: kenar seçimine B")
+ra.key_pick("RET", ctrl=True); check(got_ev[-1][:3] == ("RET", False, True), "Yeni gövde: Ctrl+Enter")
+fdraw._STATE["active"] = None
+fdraw._STATE["active"] = None
 
 # şerit: durum kancası + tür eşitleme
 rb = ribbon.Ribbon(1.0); rb.state_fn = ra.state; rb.active_fn = ra.active

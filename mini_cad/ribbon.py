@@ -129,6 +129,14 @@ class Ribbon:
         self.state_fn = None                # (düğme) -> açık mı (None: şeridin kendi durumu)
         self.active_fn = None               # () -> etkin araç kimliği (Blender'dan)
         self.now = 0.0
+        self._anchor_x = 0.0                # son tıklanan düğmenin sol kenarı (pencere yeri)
+        from .ribbon_forms import FormHost
+        self.forms = FormHost(scale)        # araç pencereleri (şeridin altına açılır)
+
+    def open_form(self, fid, title, icon, spec, width=300):
+        """Son tıklanan düğmenin altında araç penceresi aç (aynısı açıksa kapatır)."""
+        self.forms.s = self.s
+        return self.forms.open(fid, title, icon, spec, self._anchor_x, width)
 
     # ------------------------------------------------------------ veri yardımcıları
 
@@ -323,6 +331,8 @@ class Ribbon:
         x0, y0, x1, y1 = self.box
         if x0 <= mx <= x1 and y0 <= my <= y1:
             return True
+        if self.forms.contains(mx, my):
+            return True
         if self.fly_box:
             fx0, fy0, fx1, fy1 = self.fly_box
             if fx0 <= mx <= fx1 and fy0 <= my <= fy1:
@@ -351,8 +361,15 @@ class Ribbon:
 
     # ------------------------------------------------------------ olaylar
 
-    def move(self, mx, my, now):
+    def move(self, mx, my, now, shift=False):
         self.now = now
+        fch = self.forms.move(mx, my, shift)
+        if self.forms.drag is not None or (self.forms.contains(mx, my) and
+                                           not self._in_box(mx, my)):
+            if self.hover is not None:
+                self.hover = None
+                return True
+            return fch
         h = self.hit(mx, my)
         if h and h[0] == "arrow":
             h = ("btn", h[1])
@@ -363,6 +380,19 @@ class Ribbon:
             self.hover_t0 = now
             return True
         return False
+
+    def _in_box(self, mx, my):
+        x0, y0, x1, y1 = self.box
+        return x0 <= mx <= x1 and y0 <= my <= y1
+
+    def release(self, mx, my):
+        return self.forms.release(mx, my)
+
+    def key(self, etype, unicode="", ctrl=False, shift=False):
+        return self.forms.key(etype, unicode, ctrl, shift)
+
+    def capturing(self):
+        return self.forms.capturing()
 
     def leave(self, now):
         if self.hover is not None:
@@ -375,6 +405,14 @@ class Ribbon:
     def press(self, mx, my, now):
         """Sol tık. Dönüş: True = olay şeritte tüketildi."""
         self.now = now
+        if self.fly is None and not self._in_box(mx, my) and (
+                self.forms.contains(mx, my) or self.forms.edit is not None or
+                self.forms.drop is not None):
+            used = self.forms.press(mx, my)
+            if used or self.forms.contains(mx, my):
+                return True
+        elif self.forms.edit is not None:
+            self.forms._commit_edit()
         h = self.hit(mx, my)
         if h is None:
             if self.fly is not None:
@@ -402,6 +440,9 @@ class Ribbon:
         elif kind == "btn":
             b = self._btn(ident)
             self.fly = None
+            r = self._rect("btn", ident)
+            if r is not None:
+                self._anchor_x = r[0]
             if b is not None:
                 if b["toggle"]:
                     if ident in self.toggles:
@@ -414,6 +455,9 @@ class Ribbon:
                     self.active = None if self.active == cur["id"] else cur["id"]
                     self._emit("TOOL", cur)
         elif kind == "fly":
+            r = self._rect("btn", self.fly)
+            if r is not None:
+                self._anchor_x = r[0]
             b = self._btn(self.fly)
             if b is not None:
                 self.variant[b["id"]] = ident
@@ -426,6 +470,8 @@ class Ribbon:
         return True
 
     def wheel(self, mx, my, direction):
+        if not self._in_box(mx, my) and self.forms.wheel(mx, my, direction):
+            return True
         if not self.contains(mx, my):
             return False
         if self.scroll_max > 0:
@@ -439,6 +485,8 @@ class Ribbon:
         return True
 
     def escape(self):
+        if self.forms.key("ESC"):
+            return True
         if self.fly is not None:
             self.fly = None
             return True
@@ -549,6 +597,9 @@ class Ribbon:
             elif kind == "btn":
                 self._draw_btn(p, ident, bx0, by0, bx1, by1, hov)
 
+        if self.forms.form is not None:
+            self.forms.s = s
+            self.forms.draw(p, y0 - 6 * s, region_w, region_h)
         if self.fly is not None:
             self._draw_fly(p)
         tip = self._draw_tip(p, now, region_w)

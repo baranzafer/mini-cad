@@ -200,7 +200,7 @@ class RenderMixin:
                 self._draw_sketch2d(region)
                 self._draw_offset2d(region)
             self._draw_gmenu(region)
-            if not ribbon_state.is_running():      # v0.28.0: şerit açıkken paleti şerit üstlenir
+            if ribbon_state.palette_allowed() and not ribbon_state.is_running():      # v0.28.0: şerit açıkken paleti şerit üstlenir
                 self.palette.draw(region, st)
             gpu.state.blend_set("NONE")
         except Exception as e:

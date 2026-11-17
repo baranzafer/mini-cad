@@ -1,10 +1,14 @@
-"""BlendCAD şerit düğmelerini Mini CAD işlevlerine bağlar (v0.28.0).
+"""BlendCAD şerit düğmelerini Mini CAD işlevlerine bağlar (v0.28.0; v0.29.0 araç pencereleri).
 
 - Çizim araçları ve kısıtlar: açık çizim aracına (minicad.draw) araç değiştirtir; çizim kapalıysa
   önce açar (önce düzlem seçimi, sonra araç — Inventor gibi).
 - Operatörler: kenar seçimi, yüzey bölme, mesh → tel kafes, çöz, yenile, STEP, tanı, kayıt.
 - Ayar gerektiren işlemler (Boolean, Fillet, Süpürme, Yüzeyler, Simetri, İşlem sırası, Ayarlar,
-  Kısıt listesi, Gövde, Çekirdek): eski N paneli içeriği açılır pencerede (wm.call_panel) gösterilir.
+  Kısıt listesi, Gövde, Çekirdek, Kenar seçimi, Yüzeyi böl, Mesh → tel kafes): şeridin altına
+  açılan BlendCAD araç penceresi (ribbon_forms + ribbon_formspecs).
+- Yalnızca kısayolu olan işlemler (G, T, C, F, Q, D, X / Y / Z, Shift+Tab, Ctrl+Z; kenar seçiminde
+  Enter / B / P / Backspace / Tab; yüzey bölmede R / K) düğmelerden de çalışır: düğme, açık
+  aracın kalıcı operatörüne aynı tuşu gönderir (key_*), yani klavyeyle birebir aynı kod çalışır.
 - Aç / kapa düğmeleri sahne ayarlarını değiştirir; düğmenin durumu her çizimde ayardan okunur.
 
 dispatch(context, kind, item) kullanıcıya gösterilecek kısa iletiyi (ya da None) döndürür.
@@ -32,26 +36,6 @@ CONS_TOOLS = {"DIM", "AUTODIM", "HORIZ", "VERT", "AXIS", "PARALLEL", "PERP", "CO
 
 PLANES = {"PL_PICK": "PICK", "PL_AUTO": "AUTO", "PL_XY": "XY", "PL_XZ": "XZ", "PL_YZ": "YZ",
           "PL_VIEW": "VIEW"}
-
-# şerit kimliği -> (panel sınıfı adı, gövde gerekir mi, başlık)
-POPUPS = {
-    "CONS_LIST": ("MINICAD_PT_constraints", False, "Kısıtlar ve ilişkiler"),
-    "SURF_LIST": ("MINICAD_PT_surfaces", True, "Yüzeyler"),
-    "BLEND_G0": ("MINICAD_PT_surfaces", True, "Yüzeyler"),
-    "BLEND_G1": ("MINICAD_PT_surfaces", True, "Yüzeyler"),
-    "SYM_BODY": ("MINICAD_PT_mirror", True, "Ayna simetrisi"),
-    "BODY": ("MINICAD_PT_main", False, "Gövde"),
-    "SWEEP": ("MINICAD_PT_sweep", True, "Profil süpürme"),
-    "BOOL_DIFF": ("MINICAD_PT_boolean", True, "Boolean"),
-    "BOOL_UNION": ("MINICAD_PT_boolean", True, "Boolean"),
-    "BOOL_INT": ("MINICAD_PT_boolean", True, "Boolean"),
-    "FILLET_R": ("MINICAD_PT_fillet", True, "Fillet / pah"),
-    "CHAMFER": ("MINICAD_PT_fillet", True, "Fillet / pah"),
-    "ORDER": ("MINICAD_PT_order", True, "İşlem sırası"),
-    "SETTINGS": ("MINICAD_PT_settings", True, "Ayarlar"),
-    "WIRE_MESH": ("MINICAD_PT_select", False, "Mesh'ten tel kafes"),
-    "KERNEL": (None, False, "Çekirdek (OpenCASCADE)"),
-}
 
 BOOL_TYPES = {"BOOL_DIFF": "CUT", "BOOL_UNION": "UNION", "BOOL_INT": "INTERSECT"}
 
@@ -162,71 +146,120 @@ def _split_running():
         return False
 
 
-# ---------------------------------------------------------------- açılır pencereler
+# ---------------------------------------------------------------- araç pencereleri için
 
-def _draw_kernel(self, context):
-    from . import core
-    from .ui import draw_kernel_box
-    layout = self.layout
-    draw_kernel_box(layout)
+form_state = {}          # pencerelerin oturum içi seçimleri (ör. kısıt listesinde seçili satır)
+HOOKS = {"open_form": None, "message": None}
+
+
+def prefs():
     try:
-        layout.label(text="Hesap motoru: " + core._client().describe())
+        a = bpy.context.preferences.addons.get(__package__)
+        return a.preferences if a else None
+    except Exception:
+        return None
+
+
+def pick_op():
+    try:
+        from . import pick
+        return pick._STATE["active"]
+    except Exception:
+        return None
+
+
+def split_op():
+    try:
+        from . import split
+        return split._STATE["active"]
+    except Exception:
+        return None
+
+
+def _msg(text):
+    if text and HOOKS["message"]:
+        HOOKS["message"](text)
+
+
+def call(opname, invoke=False, **kw):
+    """Pencere düğmesinden operatör çağır (şeridin görünümünde); hata bildirime gider."""
+    ns, name = opname.split(".")
+    fn = getattr(getattr(bpy.ops, ns), name)
+    err = _call(bpy.context, (lambda: fn("INVOKE_DEFAULT", **kw)) if invoke else
+                (lambda: fn(**kw)))
+    _msg(err)
+    return err
+
+
+class _Ev:
+    """Kalıcı operatöre gönderilen yapay tuş olayı (klavyeyle aynı kod yolu)."""
+
+    def __init__(self, etype, mx, my, shift=False, ctrl=False, alt=False):
+        self.type, self.value = etype, "PRESS"
+        self.shift, self.ctrl, self.alt, self.oskey = shift, ctrl, alt, False
+        self.unicode = ""
+        self.mouse_x, self.mouse_y = mx, my
+        self.is_repeat = False
+
+
+def send_key(op, etype, shift=False, ctrl=False, alt=False):
+    """Açık aracın modal'ına tuş gönder. İmleç olarak aracın son fare konumu (yoksa bölge
+    ortası) kullanılır."""
+    if op is None:
+        return False
+    region = getattr(op, "region", None)
+    if region is None:
+        return False
+    m = getattr(op, "mouse", None)
+    if not m or (m[0] == 0.0 and m[1] == 0.0):
+        m = (region.width / 2, region.height / 2)
+    ev = _Ev(etype, region.x + m[0], region.y + m[1], shift, ctrl, alt)
+    ctx = bpy.context
+    with _override(ctx):
+        try:
+            op.modal(bpy.context, ev)
+        except Exception as e:
+            _msg(f"Hata: {e}")
+            return False
+    try:
+        op.area.tag_redraw()
     except Exception:
         pass
-    layout.operator("minicad.check_kernel", icon="FILE_REFRESH")
+    return True
 
 
-def _make_popup(key, base_name, needs_target, title):
-    def draw(self, context):
-        from . import panels
-        layout = self.layout
-        row = layout.row()
-        row.label(text=title, icon="TOOL_SETTINGS")
-        if base_name is None:
-            _draw_kernel(self, context)
-            return
-        base = getattr(panels, base_name)
-        if base_name != "MINICAD_PT_main" and not _kernel_ready():
-            from .ui import draw_kernel_box
-            draw_kernel_box(layout)
-            return
-        if needs_target and _target(context) is None:
-            col = layout.column(align=True)
-            col.label(text="Gövde yok", icon="INFO")
-            col.label(text="Yüzey → Sınır yüzeyi ile ilk yüzeyi oluştur")
-            col.label(text="(Kenar seçimi: Enter yüzey · Ctrl+Enter yeni gövde)")
-            return
-        if hasattr(base, "draw_header"):
-            hdr = layout.row(align=True)
-            hdr.label(text="Açık:")
-            base.draw_header(types.SimpleNamespace(layout=hdr), context)
-        base.draw(self, context)
-
-    return type(f"BLENDCAD_PT_pop_{key.lower()}", (bpy.types.Panel,), {
-        "bl_idname": f"BLENDCAD_PT_pop_{key.lower()}",
-        "bl_label": title,
-        "bl_space_type": "VIEW_3D",
-        "bl_region_type": "HEADER",
-        "bl_ui_units_x": 17,
-        "draw": draw,
-    })
+def key_pick(etype, ctrl=False, shift=False):
+    op = pick_op()
+    if op is None:
+        _msg("Kenar seçimi kapalı: önce Kenar seç")
+        return False
+    return send_key(op, etype, shift=shift, ctrl=ctrl)
 
 
-_POPUP_CLASSES = {}
-for _k, (_base, _need, _title) in POPUPS.items():
-    _key = _base or "KERNEL"
-    if _key not in _POPUP_CLASSES:
-        _POPUP_CLASSES[_key] = _make_popup(_key.replace("MINICAD_PT_", ""), _base, _need, _title)
+def key_split(etype):
+    return send_key(split_op(), etype)
 
 
-def popup_idname(ident):
-    base = POPUPS[ident][0] or "KERNEL"
-    return _POPUP_CLASSES[base].bl_idname
+def key_draw(context, etype, shift=False, ctrl=False, start=True):
+    op = draw_op()
+    if op is None:
+        if not start:
+            _msg("Çizim açık değil (Eskiz başlat)")
+            return None
+        op, _s = _ensure_draw(context)
+    send_key(op, etype, shift=shift, ctrl=ctrl)
+    return op
 
 
-def _popup(context, ident):
-    name = popup_idname(ident)
-    return _call(context, lambda: bpy.ops.wm.call_panel(name=name, keep_open=True))
+# şerit kimliği -> (tuş, shift, ctrl): çizim aracına gönderilir
+DRAW_KEYS = {
+    "KEY_G": ("G", False, False), "KEY_T": ("T", False, False), "KEY_C": ("C", False, False),
+    "KEY_Q": ("Q", False, False), "KEY_D": ("D", False, False),
+    "KEY_COORD": ("TAB", True, False),
+    "AX_X": ("X", False, False), "AX_Y": ("Y", False, False), "AX_Z": ("Z", False, False),
+    "SK_SURF": ("F", False, False), "SK_SURF_NEW": ("F", False, True),
+    "SK_HIST_UNDO": ("Z", False, True), "SK_REDO": ("Z", True, True),
+}
 
 
 # ---------------------------------------------------------------- durum (düğme açık mı)
@@ -253,9 +286,30 @@ def state(btn):
     if bid == "SYM_BODY":
         t = _target(ctx)
         return bool(t is not None and t.cad.use_mirror)
-    if bid in ("PATCH", "FILLET"):
-        return False
+    if bid == "KEY_COORD":
+        return bool(op is not None and getattr(op, "coord_mode", False))
+    if bid == "KEY_G":
+        return bool(op is not None and getattr(op, "temp", None) is not None)
+    if bid == "KEY_T":
+        return bool(op is not None and getattr(op, "track", None) is not None)
+    if bid == "AXLOCK":
+        return bool(op is not None and getattr(op, "axis_lock", None) is not None)
+    if bid in ("PATCH", "FILLET", "BOOL", "SWEEP", "BODY", "ORDER", "SETTINGS", "CONS_LIST",
+               "SURF_LIST", "BLEND", "KERNEL", "WIRE_MESH"):
+        return _form_open(bid)
     return None
+
+
+FORM_BUTTONS = {"FILLET": ("FILLET_R", "CHAMFER"), "BOOL": ("BOOL_DIFF", "BOOL_UNION", "BOOL_INT"),
+                "BLEND": ("BLEND_G0", "BLEND_G1")}
+
+
+def _form_open(bid):
+    rb = ribbon_state.STATE.get("ribbon")
+    if rb is None or rb.forms.form is None:
+        return False
+    fid = rb.forms.form["id"]
+    return fid == bid or fid in FORM_BUTTONS.get(bid, ())
 
 
 def active():
@@ -354,41 +408,52 @@ def _dispatch(context, kind, ident):
         err = _call(context, lambda: bpy.ops.minicad.edit_sketch("EXEC_DEFAULT"))
         return "Önce düzenlenecek çizimi (eğri objesi) seç" if err else None
 
+    # ---- kısayol düğmeleri (tuş aktarımı)
+    if ident in DRAW_KEYS:
+        k, sh, ct = DRAW_KEYS[ident]
+        op = key_draw(context, k, sh, ct, start=ident not in ("SK_HIST_UNDO", "SK_REDO"))
+        return None if op is not None else None
+
     # ---- tel kafes · yüzey
     if ident in ("EDGE_PICK", "PATCH"):
-        if ident == "PATCH" and _pick_running():
-            return "Kenar seçimi açık: döngüyü seç · Enter: yüzey · Ctrl+Enter: yeni gövde"
-        err = _call(context, lambda: bpy.ops.minicad.pick_edges("INVOKE_DEFAULT"))
-        if err:
-            return err
-        if ident == "PATCH":
-            return "Döngünün kenarlarını seç · Enter: yüzey · Ctrl+Enter: yeni gövde"
+        if not _pick_running():
+            err = _call(context, lambda: bpy.ops.minicad.pick_edges("INVOKE_DEFAULT"))
+            if err:
+                return err
+        elif ident == "EDGE_PICK" and _form_is(ident):
+            _call(context, lambda: bpy.ops.minicad.pick_edges("INVOKE_DEFAULT"))   # kapat
+            _close_form()
+            return "Kenar seçimi kapatıldı"
+        _open(ident, keep=True)
         return None
     if ident == "PATCH_HOLE":
         op, _s = _ensure_draw(context)
         _after(context, op)
-        return "Dış döngüyü ve delikleri aynı düzlemde çiz · F: yüzey · Ctrl+F: yeni gövde"
+        return "Dış döngüyü ve delikleri aynı düzlemde çiz · F (Yüzey düğmesi): yüzey"
     if ident == "SPLIT_FACE":
-        return _call(context, lambda: bpy.ops.minicad.split_surface("INVOKE_DEFAULT"))
-    if ident == "WIRE_MESH":
-        if context.mode == "EDIT_MESH":
-            return _call(context, lambda: bpy.ops.minicad.mesh_to_wire("INVOKE_DEFAULT"))
-        return _popup(context, ident) or "Mesh düzenleme modunda kenarları seçip tekrar bas"
+        if not _split_running():
+            err = _call(context, lambda: bpy.ops.minicad.split_surface("INVOKE_DEFAULT"))
+            if err:
+                return err
+        _open(ident, keep=True)
+        return None
     if ident in ("BLEND_G0", "BLEND_G1"):
         t = _target(context)
         if t is not None:
             t.cad.surface_blend = "SHARP" if ident == "BLEND_G0" else "TANGENT"
-        return _popup(context, ident)
+        _open(ident, keep=True)
+        return None
 
     # ---- katı
     if ident in BOOL_TYPES:
         sc.minicad_bool_type = BOOL_TYPES[ident]
-        return _popup(context, ident)
+        _open(ident, keep=True)
+        return None
     if ident in ("FILLET_R", "CHAMFER"):
-        msg = None
-        if not _pick_running() and _target(context) is not None:
-            msg = _call(context, lambda: bpy.ops.minicad.pick_edges("INVOKE_DEFAULT"))
-        return _popup(context, ident) or msg or "Kenarları seç · B: uygula"
+        if not _pick_running() and _target(context) is not None and _kernel_ready():
+            _call(context, lambda: bpy.ops.minicad.pick_edges("INVOKE_DEFAULT"))
+        _open(ident)
+        return None
     if ident == "REBUILD":
         return _call(context, lambda: bpy.ops.minicad.rebuild())
 
@@ -402,19 +467,45 @@ def _dispatch(context, kind, ident):
     if ident == "REC":
         return _call(context, lambda: bpy.ops.minicad.record("INVOKE_DEFAULT"))
 
-    if ident in POPUPS:
-        return _popup(context, ident)
+    if _forms().get(ident):
+        _open(ident)
+        return None
     return None
 
 
-classes = tuple(_POPUP_CLASSES.values())
+def _forms():
+    from . import ribbon_formspecs
+    return ribbon_formspecs.FORMS
+
+
+def _form_is(ident):
+    rb = ribbon_state.STATE.get("ribbon")
+    return rb is not None and rb.forms.is_open(ident)
+
+
+def _close_form():
+    rb = ribbon_state.STATE.get("ribbon")
+    if rb is not None:
+        rb.forms.close()
+
+
+def _open(ident, keep=False):
+    """Araç penceresini aç. keep: aynı pencere açıksa kapatma (araç yeniden seçildi)."""
+    spec = _forms().get(ident)
+    if spec is None or HOOKS["open_form"] is None:
+        return
+    if keep and _form_is(ident):
+        return
+    title, icon, fn, width = spec
+    HOOKS["open_form"](ident, title, icon, fn, width)
+
+
+classes = ()
 
 
 def register():
-    for c in classes:
-        bpy.utils.register_class(c)
+    pass
 
 
 def unregister():
-    for c in reversed(classes):
-        bpy.utils.unregister_class(c)
+    pass

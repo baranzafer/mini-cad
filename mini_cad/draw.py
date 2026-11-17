@@ -540,7 +540,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             self._refresh(context)
             return {"PASS_THROUGH"}
 
-        if inside and not ribbon_state.is_running() and \
+        if inside and ribbon_state.palette_allowed() and not ribbon_state.is_running() and \
                 self._palette_event(context, event, mx, my, press):
             if getattr(self, "stop_request", False):
                 self._finish_sketch(context)
