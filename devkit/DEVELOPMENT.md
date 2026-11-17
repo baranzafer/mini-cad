@@ -1,4 +1,8 @@
-# Mini CAD — Geliştirme Notları (v0.26.0)
+# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.27.0)
+
+> **Ad değişikliği (v0.27.0):** eklentinin görünen adı **BlendCAD** oldu. Paket kimliği
+> (`id = "mini_cad"`), klasör adı, `minicad.*` operatörleri ve `MINICAD_*` sınıfları
+> bilerek **değişmedi**: tercihler, kayıtlı .blend verisi ve testler bunlara bağlı.
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -8,21 +12,21 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`** dalı.
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.27.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
 - Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
 - Kurulum zip'leri `dist/` klasöründe.
 - Her sürüm ayrı bir commit.
 
 **A) Claude Code (web) ile — önerilen, zip gerekmez**
 1. Yeni oturumu `baranzafer/mini-cad` deposuyla aç.
-2. Açılış mesajı: "Mini CAD projesine devam ediyoruz. Kod `claude/mini-cad-continue-4zvqyj`
+2. Açılış mesajı: "Mini CAD projesine devam ediyoruz. Kod `claude/charming-mayer-zekilm`
    dalında; önce o dalı al ve DEVELOPMENT.md'yi oku." Ardından isteklerini yaz.
 3. Claude'un yapacağı kurulum:
    - Yeni oturumun kendi çalışma dalı farklı adda olabilir. O dal bu dalın son commit'inden
      başlatılır:
      ```bash
-     git fetch origin claude/mini-cad-continue-4zvqyj
-     git checkout -B <oturumun dalı> origin/claude/mini-cad-continue-4zvqyj
+     git fetch origin claude/charming-mayer-zekilm
+     git checkout -B <oturumun dalı> origin/claude/charming-mayer-zekilm
      ```
    - Başlangıç durumu için testler çalıştırılır:
      ```bash
@@ -61,7 +65,14 @@ sürüm artırılır ve paketlenir (§8).
 
 - **Daha önce düzeltilmiş hiçbir davranış bozulmamalı.** Bir değişiklik eski bir davranışı
   etkileyecekse önce söylenir.
-- N panelleri **düz ve ayrı** kalır: her biri `Mini CAD: X` başlıklı (sekme içinde iç içe değil).
+- **Arayüz (v0.27.0'dan itibaren): BlendCAD şeridi.** Araçlar N panelinde değil, 3D görünümün
+  üstünde yatay **şeritte** (Inventor ribbon benzeri) durur. Sağ üstteki **BlendCAD** düğmesi
+  şeridi tek tıkla açar / kapatır (Forge v2'deki gibi). Düğmeler **simge ağırlıklı**; üzerine
+  gelince aşağı doğru **açıklama kartı** açılır (kısa → bekleyince kullanım adımları).
+  Eski N panelleri (`BlendCAD: X`) varsayılan gizli; Tercihler → "Eski N panellerini göster"
+  ile geçiş döneminde açılabilir.
+- Çalışma sırası: önce arayüz (frontend), kullanıcıyla birlikte bitirilir; sonra işlevler
+  (backend) bağlanır. Ardından Inventor'daki delik, vida / diş gibi özellikler eklenir.
 - **Canlı güncelleme:** eğri değişince gövde kendiliğinden yeniden hesaplanır, ağır iş arka
   planda yapılır.
 - Davranışlar **Inventor / SolidWorks gibi sezgisel** olmalı. Teğet, düzlem seçimi, kısıtlar ve
@@ -419,6 +430,32 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 
 ---
 
+- **BlendCAD arayüzü** (v0.27.0, yalnızca arayüz — işlev bağlı değil):
+  - `blendcad.py`: başlatıcı 2B gizmo (`BLENDCAD_GGT_launcher` / `BLENDCAD_GT_launcher`,
+    `bl_options` içinde `'3D'` yok → bölge piksellerinde çizilir, `test_select` ile tıklanır,
+    `target_set_operator("blendcad.workspace")`); şerit operatörü `BLENDCAD_OT_workspace`
+    (kalıcı modal, yalnızca açıldığı 3D görünümde çizer, şerit üzerindeki tık / tekerlek /
+    Esc'yi tüketir, gerisi PASS_THROUGH; 0.05 sn zamanlayıcı kart zamanlaması için);
+    `GPUPainter`; başlık çubuğu düğmesi (tercihe bağlı); `legacy_panels()`.
+  - `ribbon.py` (bpy / gpu'suz): `Ribbon` yerleşim + durum + olaylar + çizim. Çizim bir
+    **ressam** arayüzüyle yapılır (`rect / outline / lines / tri / circle / text / measure`):
+    Blender'da `GPUPainter`, devkit'te PIL. Böylece aynı çizim kodu
+    `devkit/tools/ribbon_preview.py` ile PNG'ye dökülüp görsel olarak denetlenir.
+  - `ribbon_data.py`: sekmeler (Eskiz · Kısıt · Yüzey · Katı · Delik · Vida · Araçlar), gruplar,
+    düğmeler; her düğmede `title / desc / steps / key / status / variants / toggle`.
+    `status`: `ready` = Mini CAD'de karşılığı var (bağlanacak), `planned` = yeni (turuncu nokta).
+    `variants`: Inventor'daki açılır liste (sağ alt üçgen); seçilen tür düğmede kalır.
+  - `ribbon_icons.py`: 3B özellik / delik / vida / araç simgeleri ([-1,1]² çizgi parçaları);
+    2B çizim simgeleri `palette.icon_lines`'tan gelir.
+  - Kart zamanlaması: 0.45 sn kısa kart, 1.4 sn kullanım adımları; kart açıkken başka düğmeye
+    geçince yeni kart beklemeden açılır (0.6 sn "sıcak" süre). Tıklayınca kart kapanır.
+  - Dar görünümde taşan düğmeler gizlenir, kenar okları / tekerlek kaydırır; taşmıyorsa
+    tekerlek sekmeler arasında gezer. Daralt (˄): yalnızca sekme şeridi.
+  - **Sıradaki adım (backend):** `BLENDCAD_OT_workspace._on_action` içinde araç kimliklerini
+    `minicad.draw` araçlarına ve mevcut operatörlere bağlamak; panellerdeki ayarlar için şerit
+    altında bağlamsal ayar şeridi / açılır pencere. Çizim aracı açıkken kendi kayan paleti
+    (`palette.py`) hâlâ görünür; bağlanınca şerit bu paletin yerini alacak.
+
 ## 4. Modül haritası
 
 | Dosya | Satır | Görev |
@@ -465,6 +502,10 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `panels.py` | 566 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
 | `bool_overlay.py` | 177 | Boolean vurgusu, CAD kenarları, hayalet çizimi |
 | `wire.py` | 308 | Mesh kenarlarından bezier tel kafes |
+| `blendcad.py` | 404 | BlendCAD başlatıcı gizmo, şerit operatörü (`blendcad.workspace`), GPU ressamı, başlık düğmesi |
+| `ribbon.py` | 688 | bpy'siz şerit: yerleşim, olaylar, açılır liste, açıklama kartı, bildirim, başlatıcı çizimi |
+| `ribbon_data.py` | 396 | Şerit içeriği: sekmeler, gruplar, düğmeler, kart metinleri |
+| `ribbon_icons.py` | 351 | 3B / delik / vida / araç simgeleri |
 | `recorder.py` | 632 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
 
@@ -1112,6 +1153,8 @@ Betiğin yaptıkları:
 | t68 | Eğriye bağlanan çizgi: X kilidiyle iki kare arası (Yakın başlangıç, eksen ∩ eğri, köşe yakınında kilit, nokta ekleme, kısıtlar, biçim), XY kilidinde dik kare (düzlem ∩ eğri), kilitsiz çok parçalı, taslaktaki kareye, taşınmış uç, daire hedef (bezier üstünde, biçim), surfmath kesişimleri |
 | t67 | Çizimi Düzenle → Çizimi Kapat geri yazma, 4 kez düzenle / kapat / Bitir döngüsü (referanslar, konumlar), gövde dondurma (depsgraph / kuyruk / rebuild, yüzey referansı, çözülünce yeniden hesap, değişiklik yoksa hesap yok), save_pre, load_pre |
 | t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |
+| t71 | BlendCAD şeridi (sahte ressam): veri ve simge bütünlüğü, yerleşim, sekme, kart zamanlaması (gecikme / genişleme / sıcak geçiş), açılır liste ve tür seçimi, araç seçimi + bildirim, aç / kapa, daralt / kapat, dar görünümde kaydırma, başlatıcı konumu |
+| tools/ribbon_preview.py | Şeridi PIL ile PNG'ye çizer (aynı çizim kodu): `python3 devkit/tools/ribbon_preview.py mini_cad <çıktı klasörü>` |
 | t70 | Profil Süpürme: gather → motor → boolean (sıra, parametreler, açı derece), imza (ayar / profil), profil yoksa Model kaynaklı, çekirdek hatası, Ayrıntılı Teşhis (`deep` yalnız istenen işlemde), `is_bevel`, `after_bevel` ipucu bayrağı, görünüm uyarısı kısa biçimi |
 | tools/report_model.py | Kayıt raporundan gövdeyi birebir kurar (tel kafes bezier noktaları + yüzey kenar referansları) — kullanıcı modelini OCC ile yeniden üretmek için |
 | tools/occ_diag_check.py | GERÇEK OCC ile teşhis kaynakları: ince plaka (GEO, sınır ölçü), eş düzlemli kenar (MODEL), normal kenar; `[rapor]` ile kullanıcı modeli (KERNEL + işlem sırası ipucu, "küçült" yok) |
@@ -1350,3 +1393,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - Yeni modüller `split.py` ve `surfmath.py`; test t61; araç `occ_split_check.py`.
 - **0.24.1:** köşe yaması tam koni (köşe uyumu düzeltmesi), eğri 3 kenarlı yama Coons,
   tekil köşede patlayan yüzey ve üçgenleyici donması düzeltildi, ızgara 33.
+- **0.27.0:** **BlendCAD** adı ve yeni arayüz (yalnızca arayüz, işlevler bağlanmadı): sağ üstte
+  BlendCAD başlatıcı düğmesi, üstte yatay simge şeridi (6 sekme, 77 düğme, türler için açılır
+  listeler), aşağı açılan açıklama kartları, planlanan özellikler (ekstrüzyon, döndürme, loft,
+  kabuk, delik, dişli delik, diş, vida, somun...) turuncu işaretli; eski N panelleri tercihe
+  bağlı gizli. Yeni modüller `blendcad.py`, `ribbon.py`, `ribbon_data.py`, `ribbon_icons.py`;
+  test t71; araç `ribbon_preview.py`.

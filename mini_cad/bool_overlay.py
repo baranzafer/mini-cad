@@ -268,7 +268,7 @@ def _draw_errors():
             pass
         blf.color(0, *COL_ERR)
         blf.position(0, x, y, 0)
-        blf.draw(0, "Mini CAD: hata / uyarı")
+        blf.draw(0, "BlendCAD: hata / uyarı")
         for i, t in enumerate(lines):
             blf.position(0, x, y - (i + 1) * size * 1.45, 0)
             blf.draw(0, "⚠ " + t)

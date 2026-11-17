@@ -1,6 +1,6 @@
 """N paneli (CAD sekmesi): açılır kapanır modüller ve kompakt listeler.
 
-Bağımsız, "Mini CAD: ..." ön ekli paneller (her biri ayrı açılır/kapanır):
+Bağımsız, "BlendCAD: ..." ön ekli paneller (her biri ayrı açılır/kapanır):
   Gövde · Seçim ve Tel Kafes · Yüzeyler · Simetri [☑] · Boolean [☑] · Fillet [☑] ·
   Profil Süpürme · İşlem Sırası · Ayarlar · Export
 """
@@ -137,12 +137,17 @@ class MINICAD_UL_features(bpy.types.UIList):
 # ================================================================ ana panel
 
 class MINICAD_PT_main(bpy.types.Panel):
-    bl_label = "Mini CAD: Gövde"
+    bl_label = "BlendCAD: Gövde"
     bl_idname = "MINICAD_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = CATEGORY
     bl_order = 0
+
+    @classmethod
+    def poll(cls, context):
+        from . import blendcad
+        return blendcad.legacy_panels()
 
     def draw(self, context):
         layout = self.layout
@@ -191,19 +196,21 @@ class _Sub:
 
     @classmethod
     def poll(cls, context):
-        return _ready() and get_target(context) is not None
+        from . import blendcad
+        return blendcad.legacy_panels() and _ready() and get_target(context) is not None
 
 
 # ================================================================ seçim ve tel kafes
 
 class MINICAD_PT_select(_Sub, bpy.types.Panel):
-    bl_label = "Mini CAD: Seçim ve Tel Kafes"
+    bl_label = "BlendCAD: Seçim ve Tel Kafes"
     bl_idname = "MINICAD_PT_select"
     bl_order = 1
 
     @classmethod
     def poll(cls, context):
-        return _ready()
+        from . import blendcad
+        return blendcad.legacy_panels() and _ready()
 
     def draw(self, context):
         layout = self.layout
@@ -280,14 +287,15 @@ class MINICAD_PT_select(_Sub, bpy.types.Panel):
 # ================================================================ kısıtlar
 
 class MINICAD_PT_constraints(_Sub, bpy.types.Panel):
-    bl_label = "Mini CAD: Kısıtlar"
+    bl_label = "BlendCAD: Kısıtlar"
     bl_idname = "MINICAD_PT_constraints"
     bl_order = 2
     bl_options = {"DEFAULT_CLOSED"}
 
     @classmethod
     def poll(cls, context):
-        return _ready()
+        from . import blendcad
+        return blendcad.legacy_panels() and _ready()
 
     def draw(self, context):
         from . import constraints
@@ -362,7 +370,7 @@ class MINICAD_PT_constraints(_Sub, bpy.types.Panel):
 # ================================================================ yüzeyler
 
 class MINICAD_PT_surfaces(_Sub, bpy.types.Panel):
-    bl_label = "Mini CAD: Yüzeyler"
+    bl_label = "BlendCAD: Yüzeyler"
     bl_idname = "MINICAD_PT_surfaces"
     bl_order = 2
 
@@ -404,7 +412,7 @@ class MINICAD_PT_surfaces(_Sub, bpy.types.Panel):
 # ================================================================ simetri
 
 class MINICAD_PT_mirror(_Sub, bpy.types.Panel):
-    bl_label = "Mini CAD: Simetri"
+    bl_label = "BlendCAD: Simetri"
     bl_idname = "MINICAD_PT_mirror"
     bl_order = 3
     bl_options = {"DEFAULT_CLOSED"}
@@ -426,7 +434,7 @@ class MINICAD_PT_mirror(_Sub, bpy.types.Panel):
 # ================================================================ boolean
 
 class MINICAD_PT_boolean(_Sub, bpy.types.Panel):
-    bl_label = "Mini CAD: Boolean"
+    bl_label = "BlendCAD: Boolean"
     bl_idname = "MINICAD_PT_boolean"
     bl_order = 4
     bl_options = {"DEFAULT_CLOSED"}
@@ -501,7 +509,7 @@ class MINICAD_PT_boolean(_Sub, bpy.types.Panel):
 # ================================================================ fillet
 
 class MINICAD_PT_fillet(_Sub, bpy.types.Panel):
-    bl_label = "Mini CAD: Fillet"
+    bl_label = "BlendCAD: Fillet"
     bl_idname = "MINICAD_PT_fillet"
     bl_order = 5
     bl_options = {"DEFAULT_CLOSED"}
@@ -550,7 +558,7 @@ class MINICAD_PT_fillet(_Sub, bpy.types.Panel):
 # ================================================================ profil süpürme (v0.26.0)
 
 class MINICAD_PT_sweep(_Sub, bpy.types.Panel):
-    bl_label = "Mini CAD: Profil Süpürme"
+    bl_label = "BlendCAD: Profil Süpürme"
     bl_idname = "MINICAD_PT_sweep"
     bl_order = 6
     bl_options = {"DEFAULT_CLOSED"}
@@ -632,7 +640,7 @@ class MINICAD_PT_sweep(_Sub, bpy.types.Panel):
 # ================================================================ işlem sırası
 
 class MINICAD_PT_order(_Sub, bpy.types.Panel):
-    bl_label = "Mini CAD: İşlem Sırası"
+    bl_label = "BlendCAD: İşlem Sırası"
     bl_idname = "MINICAD_PT_order"
     bl_order = 7
     bl_options = {"DEFAULT_CLOSED"}
@@ -661,7 +669,7 @@ class MINICAD_PT_order(_Sub, bpy.types.Panel):
 # ================================================================ ayarlar
 
 class MINICAD_PT_settings(_Sub, bpy.types.Panel):
-    bl_label = "Mini CAD: Ayarlar"
+    bl_label = "BlendCAD: Ayarlar"
     bl_idname = "MINICAD_PT_settings"
     bl_order = 8
     bl_options = {"DEFAULT_CLOSED"}
@@ -697,7 +705,7 @@ class MINICAD_PT_settings(_Sub, bpy.types.Panel):
 # ================================================================ export
 
 class MINICAD_PT_export(_Sub, bpy.types.Panel):
-    bl_label = "Mini CAD: Export"
+    bl_label = "BlendCAD: Export"
     bl_idname = "MINICAD_PT_export"
     bl_order = 9
     bl_options = {"DEFAULT_CLOSED"}

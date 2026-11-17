@@ -574,7 +574,7 @@ class Palette:
             hov = self.hover == (kind, ident)
             if kind == "title":
                 rect(bx0, by0, bx1, by1, COL_TITLE)
-                text(bx0 + 7 * s, by0 + 6 * s, "Mini CAD · Çizim", COL_ICON, int(11 * s))
+                text(bx0 + 7 * s, by0 + 6 * s, "BlendCAD · Çizim", COL_ICON, int(11 * s))
                 text(bx1 - 14 * s, by0 + 6 * s, "X", COL_DIM, int(11 * s))
             elif kind == "label":
                 text(bx0, by0 + 3 * s, ident, COL_SECTION, int(9 * s))

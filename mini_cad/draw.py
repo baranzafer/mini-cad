@@ -895,7 +895,7 @@ def _menu_edit_sketch(self, context):
     except Exception:
         return
     self.layout.separator()
-    self.layout.operator("minicad.edit_sketch", text="Mini CAD: Çizimi Düzenle",
+    self.layout.operator("minicad.edit_sketch", text="BlendCAD: Çizimi Düzenle",
                          icon="CURVE_BEZCURVE")
 
 

@@ -1,4 +1,8 @@
-# Mini CAD — Geliştirme Notları (v0.25.13)
+# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.27.0)
+
+> **Ad değişikliği (v0.27.0):** eklentinin görünen adı **BlendCAD** oldu. Paket kimliği
+> (`id = "mini_cad"`), klasör adı, `minicad.*` operatörleri ve `MINICAD_*` sınıfları
+> bilerek **değişmedi**: tercihler, kayıtlı .blend verisi ve testler bunlara bağlı.
 
 Bu dosya, projeyi **yeni bir sohbette** kaldığı yerden sürdürmek için yazıldı. Yeni sohbete
 başlarken bu dosyayı oku. Kodun tamamını baştan okumak gerekmez; aşağıdaki modül haritası
@@ -8,21 +12,21 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/mini-cad-continue-4zvqyj`** dalı.
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.27.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
 - Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
 - Kurulum zip'leri `dist/` klasöründe.
 - Her sürüm ayrı bir commit.
 
 **A) Claude Code (web) ile — önerilen, zip gerekmez**
 1. Yeni oturumu `baranzafer/mini-cad` deposuyla aç.
-2. Açılış mesajı: "Mini CAD projesine devam ediyoruz. Kod `claude/mini-cad-continue-4zvqyj`
+2. Açılış mesajı: "Mini CAD projesine devam ediyoruz. Kod `claude/charming-mayer-zekilm`
    dalında; önce o dalı al ve DEVELOPMENT.md'yi oku." Ardından isteklerini yaz.
 3. Claude'un yapacağı kurulum:
    - Yeni oturumun kendi çalışma dalı farklı adda olabilir. O dal bu dalın son commit'inden
      başlatılır:
      ```bash
-     git fetch origin claude/mini-cad-continue-4zvqyj
-     git checkout -B <oturumun dalı> origin/claude/mini-cad-continue-4zvqyj
+     git fetch origin claude/charming-mayer-zekilm
+     git checkout -B <oturumun dalı> origin/claude/charming-mayer-zekilm
      ```
    - Başlangıç durumu için testler çalıştırılır:
      ```bash
@@ -61,7 +65,14 @@ sürüm artırılır ve paketlenir (§8).
 
 - **Daha önce düzeltilmiş hiçbir davranış bozulmamalı.** Bir değişiklik eski bir davranışı
   etkileyecekse önce söylenir.
-- N panelleri **düz ve ayrı** kalır: her biri `Mini CAD: X` başlıklı (sekme içinde iç içe değil).
+- **Arayüz (v0.27.0'dan itibaren): BlendCAD şeridi.** Araçlar N panelinde değil, 3D görünümün
+  üstünde yatay **şeritte** (Inventor ribbon benzeri) durur. Sağ üstteki **BlendCAD** düğmesi
+  şeridi tek tıkla açar / kapatır (Forge v2'deki gibi). Düğmeler **simge ağırlıklı**; üzerine
+  gelince aşağı doğru **açıklama kartı** açılır (kısa → bekleyince kullanım adımları).
+  Eski N panelleri (`BlendCAD: X`) varsayılan gizli; Tercihler → "Eski N panellerini göster"
+  ile geçiş döneminde açılabilir.
+- Çalışma sırası: önce arayüz (frontend), kullanıcıyla birlikte bitirilir; sonra işlevler
+  (backend) bağlanır. Ardından Inventor'daki delik, vida / diş gibi özellikler eklenir.
 - **Canlı güncelleme:** eğri değişince gövde kendiliğinden yeniden hesaplanır, ağır iş arka
   planda yapılır.
 - Davranışlar **Inventor / SolidWorks gibi sezgisel** olmalı. Teğet, düzlem seçimi, kısıtlar ve
@@ -229,6 +240,94 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
   - Kayıt raporu (`recorder._bezier_points`): eğrilerin kontrol noktaları (dünya; nokta, sol /
     sağ tutamaç, en fazla 400 nokta) ve komşu segmentin %2'sinden kısa tutamaçlara
     "KISA … tutamaç" işareti. Böylece model birebir kurulabilir.
+- **v0.26.0: başarısızlık teşhisi — kaynak etiketi** (kullanıcı raporu: 0.5 fillet'li kemik
+  gövdeyi kesen Kesim 3'te "14 yeni kenar yuvarlanamadı · ölçüyü küçült", sonra aynı 14 gövde
+  kenarına B → "çekirdek bu ölçüyle hesaplayamadı · ölçüyü küçült". İstek: hata verirken
+  sebebin model / tel kafes / seçim mi, geometrik imkânsızlık mı, yoksa CAD çekirdeği mi
+  olduğu söylensin).
+  - Rapordan model birebir kuruldu (`devkit/tools/report_model.py`: "Tel kafes eğrileri" ve
+    yüzey kenarlarının segment referanslarından gövde). Ölçüm: 14 kenarın HİÇBİRİ tek başına
+    bile, 0.005'e kadar hiçbir ölçüde yuvarlanamıyor; gövde geçerli, her kenar iki yüz
+    arasında, açılar 55–120°, toleranslar 1e-5. Yani "ölçüyü küçült" yanlış öneriydi. OCC tek
+    kenarı bütün teğet zincire (14 kenar) yayıyor ve ChFiDS_Error veriyor. Kesim fillet'lerden
+    ÖNCE yapılınca aynı kesim + 0.2 yuvarlama 1 sn'de uygulanıyor → asıl sebep: kesim önceki
+    fillet (B-spline) yüzeylerini kesiyor, OCC o birleşimde fillet kuramıyor.
+  - `geometry.diagnose(shape, edges, kind, r, stripe, deep, hint)` → (kaynak, metin);
+    kaynaklar `SOURCE_TEXT`: **Model kaynaklı** (MODEL), **Geometrik olarak mümkün değil**
+    (GEO), **Ölçü sınırı** (SIZE), **Çekirdek sınırı (OCC)** (KERNEL). Sıra:
+    1. gövde geçersiz (BRepCheck) → MODEL;
+    2. ucuz ölçümler (`probe_edges`, fillet kurmadan): açık kenar, komşu yüz katlanıyor
+       (`face_folded`), iki yan yüz teğet (açı < 3°), bıçak sırtı (> 177°), kenar eğrisi sivri
+       (eğrilik yarıçapı < %5 r: kısa tutamaç) → MODEL; yer yok (yuvarlanan topun temas
+       noktası yan yüzün dışına düşüyor; `BRepClass_FaceClassifier` ile, kenar uçlarından
+       uzakta, en az 2 örnekte), iç kavis r'den dar, açı kenar boyunca sıfıra iniyor → GEO;
+    3. küçük ölçü denemesi (r/10, tek yapım): olmuyorsa KERNEL (GEO bulgusu varsa "ayrıca"
+       diye eklenir); oluyorsa GEO bulgusu varsa GEO, yoksa SIZE.
+    4. `deep=True` (panelde **Ayrıntılı Teşhis**, `minicad.diagnose_feature` →
+       `props.diag_uid` → `job["deep"]`): SIZE'da sınır ölçü 4 adım ikiye bölmeyle aranır;
+       KERNEL'de kenarlar tek tek denenir (hangisi olmuyor / hepsi tek tek oluyor = köşe
+       birleşimi). Bütçe 40 sn.
+    Sonuçlar `_DIAG_CACHE`'te (şekil + kenar + ölçü anahtarı); ayrıntılı sonuç varsa sonraki
+    normal hesap da onu gösterir (canlı güncelleme silmesin). Önizlemede (fast) teşhis yok.
+  - Bağlantılar: `_apply_features.explain` (grup başındaki şekille, her başarısız özellik
+    için), `apply_boolean` yeni kenar yuvarlaması (`after_bevel`: motor bu boolean'dan önce
+    fillet uygulandıysa "İşlem Sırası'nda boolean'ı fillet'lerin önüne al" ipucu),
+    `safe_boolean` başarısızlığı (`boolean_failure`: girdilerden biri geçersizse MODEL, değilse
+    KERNEL + çakışık yüz uyarısı), açık kullanıcı hatalarına "Model kaynaklı: " ön eki.
+  - Kullanıcı modelinde mesaj artık: "Çekirdek sınırı (OCC): fillet 0.02 gibi küçük bir
+    ölçüyle bile kurulamıyor: asıl engel ölçü değil … 14 kenar tek teğet zincir … bu boolean
+    önceki fillet yüzeylerini kesiyor: İşlem Sırası'nda boolean'ı fillet'lerin önüne almak
+    çoğu zaman çözer …". Ölçüm `devkit/tools/occ_diag_check.py` (ince plaka → GEO "en fazla
+    ≈0.095", eş düzlemli kenar → MODEL "teğet", rapor verilirse kullanıcı modeli → KERNEL).
+  - Panel: `panels.draw_info` uzun bilgiyi " · " parçalarına ve satırlara böler (tek
+    etikette kesiliyordu), başa "Kaynak: …" + açıklama, başarısızsa Ayrıntılı Teşhis düğmesi.
+    Görünüm uyarısı `bool_overlay.short_error`: "[Kaynak] ilk cümle" (140 karakter sınırı).
+    Kayıt raporu işlem bilgisini 700 karaktere kadar yazar.
+- **v0.26.0: `geometry.volume` düzeltmesi.** OCC'nin varsayılan hacim integrali (sabit Gauss)
+  B-spline yüzlü gövdede %0.6 sapıyordu (kullanıcı gövdesi 17.333; gerçek 17.2305). 0.004'lük
+  pah kesimi "hacim +%0.4" görünüyor, boolean denetimleri (araç kesişmiyor / tamamen içinde)
+  yanlış karar verebiliyordu. Artık `VolumeProperties(shape, props, 1e-3)` (uyarlamalı):
+  hem doğru (bağıl 1e-5) hem varsayılandan hızlı (82 → 40 ms).
+- **v0.26.0: Profil Süpürme** (`sweep.py`, işlem `op="SWEEP"`; Inventor "Süpür"). İstek:
+  fillet'in kuramadığı kenarı seçip ikinci bir eğriyi (yay, kıvrım) profil olarak o kenar
+  boyunca süpürmek, gövdeden çıkarmak / pah / yontma — ayrıca genel bir CAD aracı olarak.
+  - Veri: yol = `segs` (tel kafes) + `geo_edges` (boolean'ın gövde kenarları, bevel'le aynı
+    çözüm `_resolve_geo`), profil = `profile` (eğri objesi), işlem = `bool_type`, ayarlar
+    `sw_*` (yerleşim AUTO / KEEP, yön FACES / Z, açık profil ORIGIN / CHORD / NONE, açı,
+    kaydırma, ölçek, aynala, ters, uzat), yeni kenar fillet'i `edge_size`. `core.is_bevel(f)`:
+    eskiden "BOOLEAN olmayan = bevel" sayılan yerler (liste süzgeci, has_bevel, pick'in
+    beveled kümesi) artık süpürmeyi bevel saymaz.
+  - Akış: Kenar Seç'te yol kenarları + **P** (ya da panel düğmesi) → `ui.add_sweep`
+    (sahne `minicad_sweep_profile`, `minicad_sweep_type`); başarısız olsa da silinmez
+    (yerleşim panelden ayarlanır). `core._sweep_stage` → motor `engine._sweep_stage` →
+    `sweep.make_tool` → `geometry.apply_boolean` (aynala, yeni kenar fillet'i, `want_edges`
+    ile sonraki fillet'ler süpürmenin kenarlarını seçebilir). Araç kenarları
+    `res["sweep_lines"]` → `core._display[ad]["sweeps"]` → `bool_overlay._draw_sweep`
+    (listede seçili süpürme turuncu tel).
+  - Yerleşim (AUTO): profil kendi düzleminde (SVD ile düzlem, objenin X'i U ekseni) çizilir;
+    profil objesinin ORİJİNİ yolun başına, profil düzlemi yola dik, profilin **+Y'si dışarı**
+    (gövde kenarında iki yan yüzün dışa bakan açıortayı). Kullanıcıya: "XY'de çiz, orijin =
+    kenar, +Y = dışarı, gövde -Y tarafında".
+  - **Kenarı izle (FACES)**: boru süpürme (düzeltilmiş Frenet) profili yolun çatısıyla taşır;
+    3B döngüde çatı dönüyor, kullanıcı modelinde profil yolun ortasında yan dönüp gövdeye
+    daldı (gövde 3 parçaya bölündü). Bunun yerine her istasyonda (≈ yarım profil boyu
+    aralık, 5–41) o noktadaki yüz normallerinin açıortayı hesaplanıp profil yeniden
+    yerleştirilir ve kesitlerden katı örülür (`BRepOffsetAPI_ThruSections`). Yol keskin
+    köşelerden (> 12°) koşulara bölünür, her koşu iki ucundan tam uzatılır (köşede iki aracın
+    birleşimi gönye gibi kapanır). Köşesiz kapalı döngü TEK periyodik örgüdür (ilk kesit tel
+    nesnesi sona yeniden eklenir); ikiye bölüp iki araçla kesmek olmadı: bindirmede yüzeyler
+    çakışıyor, OCC ikinci kesimi yutuyordu (ayrı çatılarla da birleşimde basamak kalıyordu).
+    Yol gövdede değilse ya da Z / KEEP seçiliyse `BRepOffsetAPI_MakePipe` (yüz, düzeltilmiş
+    Frenet), olmazsa `MakePipeShell` (RightCorner / RoundCorner köşe geçişi, ayrık, sabit).
+  - Açık profil **dışarıdan kapatılır** (ORIGIN): uçlar +Y yönünde köşenin üstüne çıkıp
+    birleşir. Önce köşeden (orijinden) kapatılıyordu: aracın iki yan yüzü gövde yüzeyleriyle
+    tam çakışıyor, düz kutuda olsa da eğrisel yüzde boolean bozuluyordu. Açık yol iki
+    ucundan profil boyu kadar teğet doğrultusunda uzatılır (çakışık uç yüzleri olmasın).
+  - Ölçüm `devkit/tools/occ_sweep_check.py`: kutu kenarına 45° pah = d² (kapalı ve açık
+    profil), üst yüzün kapalı köşeli döngüsü = 4d² − 4d³/3, çeyrek yay = d²(1 − π/4)·L,
+    yüzeydeki çizgi boyunca yarım daire oluk = πr²/2·L (hepsi analitik değerle aynı); rapor
+    verilirse kullanıcı modelinde fillet'in kuramadığı 14 kenarlık döngüye 0.05 pah (tek
+    parça, temiz). Motor uçtan uca: `occ_engine_sweep_check.py`. Blender tarafı: t70.
 - **Hata uyarısı** (v0.25.4, `bool_overlay.error_lines` / `_draw_errors`, POST_PIXEL): görünür
   CAD gövdelerinde başarısız yüzey / işlemler 3D görünümün sol üstünde kırmızı yazılır (en
   fazla 5 satır). Önce yalnız panelde ve durum satırında ("Hatalı: Kesim 1") görünüyordu.
@@ -331,6 +430,32 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 
 ---
 
+- **BlendCAD arayüzü** (v0.27.0, yalnızca arayüz — işlev bağlı değil):
+  - `blendcad.py`: başlatıcı 2B gizmo (`BLENDCAD_GGT_launcher` / `BLENDCAD_GT_launcher`,
+    `bl_options` içinde `'3D'` yok → bölge piksellerinde çizilir, `test_select` ile tıklanır,
+    `target_set_operator("blendcad.workspace")`); şerit operatörü `BLENDCAD_OT_workspace`
+    (kalıcı modal, yalnızca açıldığı 3D görünümde çizer, şerit üzerindeki tık / tekerlek /
+    Esc'yi tüketir, gerisi PASS_THROUGH; 0.05 sn zamanlayıcı kart zamanlaması için);
+    `GPUPainter`; başlık çubuğu düğmesi (tercihe bağlı); `legacy_panels()`.
+  - `ribbon.py` (bpy / gpu'suz): `Ribbon` yerleşim + durum + olaylar + çizim. Çizim bir
+    **ressam** arayüzüyle yapılır (`rect / outline / lines / tri / circle / text / measure`):
+    Blender'da `GPUPainter`, devkit'te PIL. Böylece aynı çizim kodu
+    `devkit/tools/ribbon_preview.py` ile PNG'ye dökülüp görsel olarak denetlenir.
+  - `ribbon_data.py`: sekmeler (Eskiz · Kısıt · Yüzey · Katı · Delik · Vida · Araçlar), gruplar,
+    düğmeler; her düğmede `title / desc / steps / key / status / variants / toggle`.
+    `status`: `ready` = Mini CAD'de karşılığı var (bağlanacak), `planned` = yeni (turuncu nokta).
+    `variants`: Inventor'daki açılır liste (sağ alt üçgen); seçilen tür düğmede kalır.
+  - `ribbon_icons.py`: 3B özellik / delik / vida / araç simgeleri ([-1,1]² çizgi parçaları);
+    2B çizim simgeleri `palette.icon_lines`'tan gelir.
+  - Kart zamanlaması: 0.45 sn kısa kart, 1.4 sn kullanım adımları; kart açıkken başka düğmeye
+    geçince yeni kart beklemeden açılır (0.6 sn "sıcak" süre). Tıklayınca kart kapanır.
+  - Dar görünümde taşan düğmeler gizlenir, kenar okları / tekerlek kaydırır; taşmıyorsa
+    tekerlek sekmeler arasında gezer. Daralt (˄): yalnızca sekme şeridi.
+  - **Sıradaki adım (backend):** `BLENDCAD_OT_workspace._on_action` içinde araç kimliklerini
+    `minicad.draw` araçlarına ve mevcut operatörlere bağlamak; panellerdeki ayarlar için şerit
+    altında bağlamsal ayar şeridi / açılır pencere. Çizim aracı açıkken kendi kayan paleti
+    (`palette.py`) hâlâ görünür; bağlanınca şerit bu paletin yerini alacak.
+
 ## 4. Modül haritası
 
 | Dosya | Satır | Görev |
@@ -371,11 +496,16 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `palette.py` | 615 | Kayan araç paleti (GPU): araç / düzlem / kısıt / taslak / hedef / seçenek düğmeleri, ikon çizgileri |
 | `split.py` | 1001 | **Yüzeyi Böl** (v0.25): kenara nokta ekleme (`insert_point`), yüzey sınırı (`PatchGeom`), döngü kesimi halkası (`ring_cuts`), bıçak (`knife_cut`), uygulama (`apply_cuts`, `split_patch`), modal araç `minicad.split_surface` |
 | `surfmath.py` | 442 | bpy'siz bölme matematiği: bezier bölme / en yakın parametre, kenar parametresi, Coons (3 / 4 kenar), üçgen ağda en yakın nokta ve ışın (`Mesh`), izdüşüm, bezier zinciri uydurma (`fit_chain`) |
-| `pick.py` | 579 | Kenar seçim modu (hover + tık), sarı gövde kenarları, B ile fillet |
+| `pick.py` | 642 | Kenar seçim modu (hover + tık), sarı gövde kenarları, B ile fillet, P ile profil süpürme |
+| `sweep.py` | 651 | **Profil Süpürme** (v0.26, bpy'siz, OCC): yol zinciri, profil yerleşimi, kenarı izleyen örgü (ThruSections), boru süpürme, açık profili dışarıdan kapatma |
 | `ui.py` | 590 | Operatörler, tercihler (`background`), `add_feature` (BODY ref) |
 | `panels.py` | 566 | N panelleri: Gövde, Seçim ve Tel Kafes, Kısıtlar, Yüzeyler, Simetri, Boolean, Fillet, İşlem Sırası, Ayarlar, Export |
 | `bool_overlay.py` | 177 | Boolean vurgusu, CAD kenarları, hayalet çizimi |
 | `wire.py` | 308 | Mesh kenarlarından bezier tel kafes |
+| `blendcad.py` | 404 | BlendCAD başlatıcı gizmo, şerit operatörü (`blendcad.workspace`), GPU ressamı, başlık düğmesi |
+| `ribbon.py` | 688 | bpy'siz şerit: yerleşim, olaylar, açılır liste, açıklama kartı, bildirim, başlatıcı çizimi |
+| `ribbon_data.py` | 396 | Şerit içeriği: sekmeler, gruplar, düğmeler, kart metinleri |
+| `ribbon_icons.py` | 351 | 3B / delik / vida / araç simgeleri |
 | `recorder.py` | 632 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
 
@@ -1023,6 +1153,13 @@ Betiğin yaptıkları:
 | t68 | Eğriye bağlanan çizgi: X kilidiyle iki kare arası (Yakın başlangıç, eksen ∩ eğri, köşe yakınında kilit, nokta ekleme, kısıtlar, biçim), XY kilidinde dik kare (düzlem ∩ eğri), kilitsiz çok parçalı, taslaktaki kareye, taşınmış uç, daire hedef (bezier üstünde, biçim), surfmath kesişimleri |
 | t67 | Çizimi Düzenle → Çizimi Kapat geri yazma, 4 kez düzenle / kapat / Bitir döngüsü (referanslar, konumlar), gövde dondurma (depsgraph / kuyruk / rebuild, yüzey referansı, çözülünce yeniden hesap, değişiklik yoksa hesap yok), save_pre, load_pre |
 | t60 | Teğet ağırlığı (gövde / yüzey, imza, motora iletim, eski dosya) ve Teğet – serbest dolgu |
+| t71 | BlendCAD şeridi (sahte ressam): veri ve simge bütünlüğü, yerleşim, sekme, kart zamanlaması (gecikme / genişleme / sıcak geçiş), açılır liste ve tür seçimi, araç seçimi + bildirim, aç / kapa, daralt / kapat, dar görünümde kaydırma, başlatıcı konumu |
+| tools/ribbon_preview.py | Şeridi PIL ile PNG'ye çizer (aynı çizim kodu): `python3 devkit/tools/ribbon_preview.py mini_cad <çıktı klasörü>` |
+| t70 | Profil Süpürme: gather → motor → boolean (sıra, parametreler, açı derece), imza (ayar / profil), profil yoksa Model kaynaklı, çekirdek hatası, Ayrıntılı Teşhis (`deep` yalnız istenen işlemde), `is_bevel`, `after_bevel` ipucu bayrağı, görünüm uyarısı kısa biçimi |
+| tools/report_model.py | Kayıt raporundan gövdeyi birebir kurar (tel kafes bezier noktaları + yüzey kenar referansları) — kullanıcı modelini OCC ile yeniden üretmek için |
+| tools/occ_diag_check.py | GERÇEK OCC ile teşhis kaynakları: ince plaka (GEO, sınır ölçü), eş düzlemli kenar (MODEL), normal kenar; `[rapor]` ile kullanıcı modeli (KERNEL + işlem sırası ipucu, "küçült" yok) |
+| tools/occ_sweep_check.py | GERÇEK OCC ile profil süpürme hacimleri (analitik) ve `[rapor]` ile kullanıcı modelindeki 14 kenarlık döngü |
+| tools/occ_engine_sweep_check.py | GERÇEK OCC ile motor uçtan uca: SWEEP aşaması, sığmayan fillet teşhisi, açık profil hatası, önizleme telleri |
 
 **Test yazma kalıbı:**
 - t41–t43, `exec(open("t.py")...)` ile stub'ları yükler. Üstten ortografik görünüm
@@ -1084,6 +1221,11 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   önce kaydedilir; taslağa alınmış çizim asla kaybolmaz (v0.25.11). Yalnız dosya yüklenirken
   yazılmaz.
 - Motor süreci açılamazsa Blender içinde hesaplamaya düşülür, hata verip durmaz.
+- Başarısız fillet / pah / boolean / süpürme mesajı kaynağı söyler (Model kaynaklı /
+  Geometrik olarak mümkün değil / Ölçü sınırı / Çekirdek sınırı (OCC)); küçük ölçüyle de
+  olmayan durumda "ölçüyü küçült" denmez (v0.26.0).
+- Süpürme bevel sayılmaz (`core.is_bevel`); Fillet listesi / has_bevel / pick yalnız bevel'i
+  görür.
 
 ---
 
@@ -1097,6 +1239,12 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - GPU görselleri (palet, pivot, kılavuzlar, simgeler) yalnızca stub'larla test edildi.
   Görünüşe dair geri bildirim kullanıcıdan gelir.
 - t6 / t14 bayat testler; istenirse güncellenebilir.
+- Profil Süpürme (v0.26.0) sınırları: profil tek döngü (delikli profil yok, birden çok
+  döngüde en uzun zincir alınır); burulma / koniklik (Inventor Twist / Taper) ve kılavuz eğri
+  yok; Kenarı İzle örgüsü yaklaşık (istasyon aralığı ≈ yarım profil boyu); kapalı döngüde
+  profil dönüşü periyodik örgüye bırakılır. GPU teli yalnız stub'la denendi.
+- Teşhis sezgiseldir: "yer yok" ölçümü düz yaklaşım (temas noktası teğet düzlemde), çok
+  eğrisel yüzde tahmindir (≈ ile yazılır); kesin karar küçük ölçü denemesiyle verilir.
 - `core.py` (1950) ve `geometry.py` (2792) hâlâ büyük; bölünmemesinin nedeni §4'te.
 - Aşama 2 kısıtları çalışıyor. Simetrik / açı gibi kısıtların Inventor'daki tüm etkileşimleri
   henüz incelenmedi.
@@ -1220,6 +1368,12 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
 - **0.25.8:** karşılıklı kenarlar yay uzunluğuna göre eşleşir (iki uçta farklı parçalanmış profilde çapraz kırışık / katlanma düzeltmesi); sınır yüzeyi uydurma denetimi.
 - **0.25.9:** Kenar Seç düzenleme modunda bekler (tutamaç çoklu / kutu seçimi), Tab ile tel kafesi düzenleme, gövde düzenleme modundayken kaybolan güncelleme.
 - **0.25.10:** Shift+X/Y/Z düzlem kilidi: kenardan bakışta çalışır, eksen kilidini kapatır, yakalama düzleme izdüşer; taslak sürüklemede de düzlem kilidi.
+- **0.26.0:** başarısızlık teşhisi (kaynak: model / geometri / ölçü / çekirdek, Ayrıntılı
+  Teşhis, işlem sırası ipucu, panelde satırlara bölünen bilgi); Profil Süpürme (kenarı izleyen
+  örgü, boru süpürme, açık profili dışarıdan kapatma, P kısayolu, turuncu tel önizleme);
+  `volume()` uyarlamalı integral (B-spline gövdede %0.6 sapma düzeltildi); yeni araçlar
+  `report_model.py`, `occ_diag_check.py`, `occ_sweep_check.py`, `occ_engine_sweep_check.py`;
+  test t70.
 - **0.25.6:** X / Y / Z Blender gibi eksen kilidi (dünya ekseni, yakalama bozmaz, tekrar
   basana kadar); düzlem Shift+X/Y/Z; geçici zemin U → G. Test t65.
 - **0.25.5:** taslakta Teğet / Pürüzsüz anında ve biçimi bozmadan (yay yeniden kurulur, doğru
@@ -1239,3 +1393,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   - Yeni modüller `split.py` ve `surfmath.py`; test t61; araç `occ_split_check.py`.
 - **0.24.1:** köşe yaması tam koni (köşe uyumu düzeltmesi), eğri 3 kenarlı yama Coons,
   tekil köşede patlayan yüzey ve üçgenleyici donması düzeltildi, ızgara 33.
+- **0.27.0:** **BlendCAD** adı ve yeni arayüz (yalnızca arayüz, işlevler bağlanmadı): sağ üstte
+  BlendCAD başlatıcı düğmesi, üstte yatay simge şeridi (6 sekme, 77 düğme, türler için açılır
+  listeler), aşağı açılan açıklama kartları, planlanan özellikler (ekstrüzyon, döndürme, loft,
+  kabuk, delik, dişli delik, diş, vida, somun...) turuncu işaretli; eski N panelleri tercihe
+  bağlı gizli. Yeni modüller `blendcad.py`, `ribbon.py`, `ribbon_data.py`, `ribbon_icons.py`;
+  test t71; araç `ribbon_preview.py`.

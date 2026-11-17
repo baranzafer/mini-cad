@@ -212,7 +212,7 @@ def add_sweep(context, refs):
     sc = context.scene
     prof = getattr(sc, "minicad_sweep_profile", None)
     if prof is None:
-        return False, ("Önce N panelde 'Mini CAD: Profil Süpürme' bölümünden profil eğrisini "
+        return False, ("Önce N panelde 'BlendCAD: Profil Süpürme' bölümünden profil eğrisini "
                        "seç")
     if not refs:
         return False, "Yol yok: Kenar Seç'te yol kenarlarını seç"
@@ -680,9 +680,28 @@ class MINICAD_Preferences(bpy.types.AddonPreferences):
         description="Ağır OCC hesaplarını (fillet, boolean) ayrı bir süreçte yapar: Blender "
         "donmaz, OCC çökerse Blender kapanmaz. Kapalıysa her şey Blender içinde hesaplanır",
         default=True, update=_on_background_pref)
+    show_launcher: bpy.props.BoolProperty(
+        name="BlendCAD düğmesi (görünüm sağ üstü)",
+        description="3D görünümün sağ üstünde, gezinme gizmosunun solunda BlendCAD başlatıcı "
+        "düğmesini göster (görünümde Gizmo katmanı açık olmalı)",
+        default=True)
+    header_button: bpy.props.BoolProperty(
+        name="Başlık çubuğunda da BlendCAD düğmesi",
+        description="3D görünüm başlık çubuğunun sağ ucuna da BlendCAD düğmesi ekle",
+        default=False)
+    legacy_panels: bpy.props.BoolProperty(
+        name="Eski N panellerini göster (geçiş dönemi)",
+        description="BlendCAD şeridine taşınan eski 'CAD' sekmesi panellerini N panelinde göster. "
+        "Şerit işlevlere bağlanana kadar mevcut araçlara buradan ulaşılabilir",
+        default=False)
 
     def draw(self, context):
         layout = self.layout
+        box = layout.box()
+        box.label(text="BlendCAD arayüzü", icon="WINDOW")
+        box.prop(self, "show_launcher")
+        box.prop(self, "header_button")
+        box.prop(self, "legacy_panels")
         layout.prop(self, "background")
         layout.label(text="Hesap motoru: " + core._client().describe())
         layout.label(text=f"Blender Python: {sys.version.split()[0]}")

@@ -1,9 +1,10 @@
-"""Mini CAD: Blender içinde OpenCASCADE tabanlı, eğri güdümlü hard-surface modelleme.
+"""BlendCAD (eski adı Mini CAD; paket kimliği hâlâ mini_cad): Blender içinde OpenCASCADE
+tabanlı, eğri güdümlü hard-surface modelleme.
 
 Tel kafes -> yüzeyler (ortak topoloji) -> katı gövde -> bevel.
 """
 
-from . import (bool_overlay, constraints, core, draw, kernel, links, panels, pick, recorder,
+from . import (blendcad, bool_overlay, constraints, core, draw, kernel, links, panels, pick, recorder,
                split, ui, wire)
 
 
@@ -16,6 +17,7 @@ def register():
     links.register()
     ui.register()
     panels.register()
+    blendcad.register()
     pick.register()
     draw.register()
     split.register()
@@ -29,6 +31,7 @@ def unregister():
     split.unregister()
     draw.unregister()
     pick.unregister()
+    blendcad.unregister()
     panels.unregister()
     ui.unregister()
     links.unregister()

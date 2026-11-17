@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "mini_cad"
-version = "0.26.0"
-name = "Mini CAD"
-tagline = "Bezier tel kafesten parametrik CAD yuzeyleri"
+version = "0.27.0"
+name = "BlendCAD"
+tagline = "Blender icinde CAD: eskiz, kisit, tel kafes ve yuzeyden kati"
 maintainer = "Mini CAD"
 type = "add-on"
 
