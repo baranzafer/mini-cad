@@ -71,20 +71,21 @@ def wrap(text, size, maxw, measure):
 
 # ---------------------------------------------------------------- başlatıcı (BlendCAD düğmesi)
 
-def launcher_rect(region_w, region_h, s, right_reserve=0.0, text_w=None):
+def launcher_rect(region_w, region_h, s, right_reserve=0.0, text_w=None, top_reserve=0.0):
     """Sağ üstte, gezinme gizmosunun solunda duran 'BlendCAD' düğmesi."""
     tw = text_w if text_w is not None else 58 * s
     w = 34 * s + tw
     h = 26 * s
     x1 = region_w - right_reserve - 104 * s
-    y1 = region_h - 10 * s
+    y1 = region_h - top_reserve - 10 * s
     return (x1 - w, y1 - h, x1, y1)
 
 
-def draw_launcher(p, region_w, region_h, s, right_reserve=0.0, hover=False, active=False):
+def draw_launcher(p, region_w, region_h, s, right_reserve=0.0, hover=False, active=False,
+                  top_reserve=0.0):
     tsz = int(12 * s)
     tw = p.measure("BlendCAD", tsz)[0]
-    x0, y0, x1, y1 = launcher_rect(region_w, region_h, s, right_reserve, tw)
+    x0, y0, x1, y1 = launcher_rect(region_w, region_h, s, right_reserve, tw, top_reserve)
     r = (y1 - y0) / 2
     p.rect(x0 + 1 * s, y0 - 2 * s, x1 + 1 * s, y1 - 2 * s, COL_SHADOW, r)
     bg = COL_ACTIVE if active else (COL_HOVER if hover else (0.16, 0.16, 0.18, 0.96))
@@ -125,6 +126,8 @@ class Ribbon:
         self.scroll_max = 0.0
         self.toast = None                   # (metin, t0)
         self.on_action = on_action
+        self.state_fn = None                # (düğme) -> açık mı (None: şeridin kendi durumu)
+        self.active_fn = None               # () -> etkin araç kimliği (Blender'dan)
         self.now = 0.0
 
     # ------------------------------------------------------------ veri yardımcıları
@@ -153,14 +156,58 @@ class Ribbon:
         return None
 
     def is_on(self, btn):
+        if self.state_fn is not None:
+            try:
+                v = self.state_fn(btn)
+            except Exception:
+                v = None
+            if v is not None:
+                return bool(v)
         if btn["toggle"]:
             return btn["id"] in self.toggles
         cur = self.current(btn)
         return self.active is not None and (self.active == cur["id"] or self.active == btn["id"])
 
+    def sync(self):
+        """Etkin aracı Blender'dan al; tür düğmesi o türü göstersin (O'ya iki kez basınca
+        Teğet daire gibi)."""
+        if self.active_fn is None:
+            return
+        try:
+            self.active = self.active_fn()
+        except Exception:
+            self.active = None
+        if self.active is None:
+            return
+        for b in data.all_buttons():
+            for v in b["variants"]:
+                if v["id"] == self.active and not v.get("keep"):
+                    self.variant[b["id"]] = v["id"]
+
+    @staticmethod
+    def _small(b):
+        return bool(b.get("small"))
+
+    def _gwidth(self, p, btns):
+        """Grup genişliği: büyük düğmeler yan yana, küçükler iki satırlık sütunlar."""
+        s = self.s
+        BS, GAP = 34 * s, 2 * s
+        w = 0.0
+        big = [b for b in btns if not self._small(b)]
+        w += len(big) * (BS + GAP)
+        small = [b for b in btns if self._small(b)]
+        for c in range(0, len(small), 2):
+            w += self._scol(p, small[c:c + 2]) + GAP
+        return w - GAP if btns else 0.0
+
+    def _scol(self, p, col):
+        s = self.s
+        return max(p.measure(b["short"], int(9 * s))[0] for b in col) + 24 * s
+
     # ------------------------------------------------------------ yerleşim
 
-    def layout(self, p, region_w, region_h, left=0.0, right=0.0):
+    def layout(self, p, region_w, region_h, left=0.0, right=0.0, top_reserve=0.0):
+        self.sync()
         s = self.s
         M = 6 * s
         TH = 24 * s           # sekme şeridi
@@ -170,7 +217,7 @@ class Ribbon:
         LH = 15 * s           # grup adı
         PAD = 8 * s
         x0 = left + M
-        top = region_h - M
+        top = region_h - top_reserve - M
         avail = max(region_w - right - x0 - M, 200 * s)
         items = []
 
@@ -190,8 +237,7 @@ class Ribbon:
         bw = 0.0
         groups = self.groups()
         for gi, (_g, btns) in enumerate(groups):
-            bw += len(btns) * (BS + GAP) + (GG * 2 if gi else 0)
-        bw -= GAP
+            bw += self._gwidth(p, btns) + (GG * 2 if gi else 0)
         width = min(max(tabs_w, bw + 2 * PAD), avail)
         rows_h = 0 if self.collapsed else BS + 2 * 4 * s + LH
         bottom = top - TH - rows_h
@@ -216,10 +262,23 @@ class Ribbon:
                     x += GG * 2
                 g0 = x
                 for b in btns:
+                    if self._small(b):
+                        continue
                     if x >= inner0 - 0.5 and x + BS <= inner1 + 0.5:
                         items.append((x, by0, x + BS, by1, "btn", b["id"]))
                     x += BS + GAP
+                small = [b for b in btns if self._small(b)]
+                SH = (BS - GAP) / 2
+                for c in range(0, len(small), 2):
+                    col = small[c:c + 2]
+                    cw = self._scol(p, col)
+                    for k, b in enumerate(col):
+                        yy1 = by1 - k * (SH + GAP)
+                        if x >= inner0 - 0.5 and x + cw <= inner1 + 0.5:
+                            items.append((x, yy1 - SH, x + cw, yy1, "btn", b["id"]))
+                    x += cw + GAP
                 g1 = x - GAP
+                x = g1
                 gc = (g0 + g1) / 2
                 gw = p.measure(gname, int(9 * s))[0] / 2
                 if inner0 <= gc - gw and gc + gw <= inner1 - 14 * s:
@@ -399,17 +458,19 @@ class Ribbon:
         return self.toast is not None
 
     def _emit(self, kind, btn):
-        if kind == "TOOL" or kind == "TOGGLE":
-            if btn["status"] == data.PLANNED:
-                msg = f"“{btn['title']}” yeni özellik olarak planlandı (arayüz önizlemesi)"
-            else:
-                msg = f"“{btn['title']}” seçildi · işlev bir sonraki adımda bağlanacak"
-            if kind == "TOGGLE":
-                msg = f"“{btn['title']}” {'açık' if btn['id'] in self.toggles else 'kapalı'}" \
-                      " · işlev bir sonraki adımda bağlanacak"
-            self.toast = (msg, self.now)
+        msg = None
         if self.on_action:
-            self.on_action(kind, btn)
+            try:
+                msg = self.on_action(kind, btn)
+            except Exception as e:          # arayüz çökmesin; hatayı bildir
+                msg = f"Hata: {e}"
+        if kind in ("TOOL", "TOGGLE"):
+            if btn["status"] == data.PLANNED:
+                msg = f"“{btn['title']}” yeni özellik olarak planlandı (yakında)"
+            elif msg is None and self.on_action is None:
+                msg = f"“{btn['title']}” seçildi"
+        if msg:
+            self.toast = (msg, self.now)
 
     # ------------------------------------------------------------ kart
 
@@ -437,11 +498,11 @@ class Ribbon:
 
     # ------------------------------------------------------------ çizim
 
-    def draw(self, p, region_w, region_h, left=0.0, right=0.0, now=None):
+    def draw(self, p, region_w, region_h, left=0.0, right=0.0, now=None, top_reserve=0.0):
         if now is not None:
             self.now = now
         now = self.now
-        self.layout(p, region_w, region_h, left, right)
+        self.layout(p, region_w, region_h, left, right, top_reserve)
         s = self.s
         x0, y0, x1, y1 = self.box
         R = 6 * s
@@ -502,6 +563,17 @@ class Ribbon:
         cur = self.current(b)
         on = self.is_on(b)
         R = 5 * s
+        if self._small(b):
+            if on:
+                p.rect(x0, y0, x1, y1, COL_TOGGLE, 3 * s)
+                p.outline(x0, y0, x1, y1, COL_ACCENT, 3 * s, 1.0)
+            elif hov:
+                p.rect(x0, y0, x1, y1, COL_HOVER, 3 * s)
+            cy = (y0 + y1) / 2
+            _icon(p, cur["icon"], x0 + 9 * s, cy, 12 * s, COL_ICON if on else COL_ICON_DIM, 1.3)
+            p.text(x0 + 19 * s, cy - 3 * s, b["short"], COL_TEXT if (on or hov) else COL_TEXT_DIM,
+                   int(9 * s))
+            return
         if on:
             p.rect(x0, y0, x1, y1, COL_TOGGLE if b["toggle"] else COL_ACTIVE, R)
             if b["toggle"]:
@@ -653,7 +725,7 @@ class Ribbon:
         p.rect(x0 + PAD, fy + 14 * s, x0 + W - PAD, fy + 14 * s + 1, _mix(COL_SEP, a), 0)
         planned = item["status"] == data.PLANNED
         p.circle(x0 + PAD + 4 * s, fy + 4 * s, 3.2 * s, _mix(COL_PLANNED if planned else COL_READY, a))
-        st = "Yakında · yeni özellik" if planned else "Mini CAD işlevi · bağlanacak"
+        st = "Yakında · yeni özellik" if planned else "Hazır"
         p.text(x0 + PAD + 12 * s, fy, st, _mix(COL_TEXT_DIM, a), int(9 * s))
         hint = "▾ türler" if var else ("" if expanded or not item["steps"] else "bekleyin: ayrıntı")
         if hint:

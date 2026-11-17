@@ -689,6 +689,11 @@ class MINICAD_Preferences(bpy.types.AddonPreferences):
         name="Başlık çubuğunda da BlendCAD düğmesi",
         description="3D görünüm başlık çubuğunun sağ ucuna da BlendCAD düğmesi ekle",
         default=False)
+    hide_view_text: bpy.props.BoolProperty(
+        name="Şerit açıkken görünüm adı yazısını gizle",
+        description="'User Perspective' / koleksiyon yazısı şeridin üstüne biner: şerit açıkken "
+        "gizlenir, kapanınca geri gelir",
+        default=True)
     legacy_panels: bpy.props.BoolProperty(
         name="Eski N panellerini göster (geçiş dönemi)",
         description="BlendCAD şeridine taşınan eski 'CAD' sekmesi panellerini N panelinde göster. "
@@ -701,6 +706,7 @@ class MINICAD_Preferences(bpy.types.AddonPreferences):
         box.label(text="BlendCAD arayüzü", icon="WINDOW")
         box.prop(self, "show_launcher")
         box.prop(self, "header_button")
+        box.prop(self, "hide_view_text")
         box.prop(self, "legacy_panels")
         layout.prop(self, "background")
         layout.label(text="Hesap motoru: " + core._client().describe())

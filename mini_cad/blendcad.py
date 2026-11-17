@@ -1,4 +1,4 @@
-"""BlendCAD arayüzü (v0.27.0): sağ üstte 'BlendCAD' başlatıcı düğmesi ve üstte yatay şerit.
+"""BlendCAD arayüzü (v0.27.0, işlevler v0.28.0): sağ üstte 'BlendCAD' başlatıcı düğmesi ve üstte yatay şerit.
 
 - Başlatıcı: 3D görünümün sağ üstünde, gezinme gizmosunun solunda duran 2B gizmo düğmesi
   (Forge v2'deki gibi tek tıkla başlatma). İsteğe bağlı olarak başlık çubuğunda da düğme
@@ -7,8 +7,9 @@
   çizilir, şerit üzerindeki tık / tekerlek olaylarını tüketir, geri kalan her olay Blender'a
   geçer (PASS_THROUGH).
 
-Bu sürüm yalnızca arayüzdür: araç seçimleri ribbon.Ribbon.on_action ile bildirilir, Mini CAD
-işlevlerine henüz bağlanmaz.
+v0.28.0: düğmeler ribbon_actions.dispatch ile Mini CAD işlevlerine bağlı; düğme durumları
+(açık / etkin araç) ribbon_actions.state / active ile Blender'dan okunur. Şerit, görünümün üst
+üste binen başlık / araç başlığı bölgelerinin altına yerleşir.
 """
 
 import time
@@ -18,9 +19,9 @@ import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
 
-from . import ribbon
+from . import ribbon, ribbon_actions, ribbon_state
 
-_STATE = {"running": False, "close": False, "ribbon": None, "area": None}
+_STATE = ribbon_state.STATE
 
 
 def _now():
@@ -143,30 +144,14 @@ def _scale(context):
 
 
 def _reserves(context, area, s):
-    """(sol, sağ): üst üste binen araç çubuğu / N paneli genişliği."""
-    left = right = 0.0
-    if not context.preferences.system.use_region_overlap:
-        return left, right
-    for r in area.regions:
-        if r.type == "TOOLS" and r.width > 1:
-            left = r.width
-        elif r.type == "UI" and r.width > 1:
-            right = r.width
-    return left, right
+    """(sol, sağ, üst): görünümün üstüne binen araç çubuğu / N paneli / başlıklar."""
+    return ribbon_state.insets(area, context.preferences.system.use_region_overlap)
 
 
 def _window_region(area):
     for r in area.regions:
         if r.type == "WINDOW":
             return r
-    return None
-
-
-def _find_area(context, ptr):
-    for win in context.window_manager.windows:
-        for a in win.screen.areas:
-            if a.as_pointer() == ptr:
-                return a
     return None
 
 
@@ -184,12 +169,12 @@ def _draw_ribbon():
     try:
         s = _scale(ctx)
         rb.s = s
-        left, right_ui = _reserves(ctx, area, s)
+        left, right_ui, top = _reserves(ctx, area, s)
         p = GPUPainter(region.width, region.height)
         lw = 34 * s + p.measure("BlendCAD", int(12 * s))[0]
         right = right_ui + 104 * s + lw + 10 * s if _pref("show_launcher", True) else right_ui
         gpu.state.blend_set("ALPHA")
-        rb.draw(p, region.width, region.height, left, right, now=_now())
+        rb.draw(p, region.width, region.height, left, right, now=_now(), top_reserve=top)
     except Exception as e:  # pragma: no cover - yalnızca Blender'da
         print("[BlendCAD] şerit çizilemedi:", e)
     finally:
@@ -218,9 +203,12 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
             _STATE["ribbon"] = ribbon.Ribbon(_scale(context))
         rb = _STATE["ribbon"]
         rb.on_action = self._on_action
+        rb.state_fn = ribbon_actions.state
+        rb.active_fn = ribbon_actions.active
         rb.hover = None
         rb.fly = None
         _STATE.update(running=True, close=False, area=context.area.as_pointer())
+        _hide_text(context.area)
         BLENDCAD_OT_workspace._handle = bpy.types.SpaceView3D.draw_handler_add(
             _draw_ribbon, (), "WINDOW", "POST_PIXEL")
         BLENDCAD_OT_workspace._timer = context.window_manager.event_timer_add(
@@ -232,7 +220,8 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
     def _on_action(self, kind, item):
         if kind == "CLOSE":
             _STATE["close"] = True
-        # v0.27.0: yalnızca arayüz. İşlevler bir sonraki adımda burada bağlanacak.
+            return None
+        return ribbon_actions.dispatch(bpy.context, kind, item)
 
     def _finish(self, context):
         if BLENDCAD_OT_workspace._handle is not None:
@@ -241,6 +230,7 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
         if BLENDCAD_OT_workspace._timer is not None:
             context.window_manager.event_timer_remove(BLENDCAD_OT_workspace._timer)
             BLENDCAD_OT_workspace._timer = None
+        _restore_text(context)
         _STATE.update(running=False, close=False, area=None)
         _redraw_all(context)
 
@@ -249,7 +239,7 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
 
     def modal(self, context, event):
         rb = _STATE["ribbon"]
-        area = _find_area(context, _STATE["area"]) if _STATE["area"] else None
+        area = ribbon_state.find_area(context, _STATE["area"])
         if _STATE["close"] or rb is None:
             self._finish(context)
             return {"FINISHED"}
@@ -257,7 +247,9 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
             # alan kapandı / büyütüldü (Ctrl+Space): fare altındaki 3D görünüme taşın
             a = context.area
             if a is not None and a.type == "VIEW_3D":
+                _restore_text(context)
                 _STATE["area"] = a.as_pointer()
+                _hide_text(a)
                 area = a
             else:
                 return {"PASS_THROUGH"}
@@ -303,6 +295,34 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
         return {"PASS_THROUGH"}
 
 
+def _hide_text(area):
+    """Görünüm adı / istatistik yazısı GPU çizimlerinin üstüne çizilir ve şeridin üstüne biner:
+    şerit açıkken gizlenir, kapanınca eski hâline döner (tercihe bağlı)."""
+    _STATE["text"] = None
+    if not _pref("hide_view_text", True):
+        return
+    try:
+        ov = area.spaces.active.overlay
+        _STATE["text"] = (area.as_pointer(), bool(ov.show_text))
+        ov.show_text = False
+    except Exception:
+        _STATE["text"] = None
+
+
+def _restore_text(context):
+    saved = _STATE.get("text")
+    _STATE["text"] = None
+    if not saved:
+        return
+    area = ribbon_state.find_area(context, saved[0])
+    if area is None:
+        return
+    try:
+        area.spaces.active.overlay.show_text = saved[1]
+    except Exception:
+        pass
+
+
 def _redraw_all(context):
     try:
         for win in context.window_manager.windows:
@@ -318,13 +338,13 @@ def _redraw_all(context):
 def _launcher_geom(context, p=None):
     region = context.region
     s = _scale(context)
-    _left, right = _reserves(context, context.area, s)
+    _left, right, top = _reserves(context, context.area, s)
     if p is None:
         GPUPainter._size(int(12 * s))
         tw = blf.dimensions(0, "BlendCAD")[0]
     else:
         tw = p.measure("BlendCAD", int(12 * s))[0]
-    return region, s, right, ribbon.launcher_rect(region.width, region.height, s, right, tw)
+    return region, s, right, ribbon.launcher_rect(region.width, region.height, s, right, tw, top)
 
 
 class BLENDCAD_GT_launcher(bpy.types.Gizmo):
@@ -333,12 +353,12 @@ class BLENDCAD_GT_launcher(bpy.types.Gizmo):
     def draw(self, context):
         region = context.region
         s = _scale(context)
-        _left, right = _reserves(context, context.area, s)
+        _left, right, top = _reserves(context, context.area, s)
         p = GPUPainter(region.width, region.height)
         gpu.state.blend_set("ALPHA")
         try:
             ribbon.draw_launcher(p, region.width, region.height, s, right,
-                                 hover=self.is_highlight, active=is_running())
+                                 hover=self.is_highlight, active=is_running(), top_reserve=top)
         finally:
             gpu.state.blend_set("NONE")
 
@@ -385,6 +405,7 @@ classes = (BLENDCAD_OT_workspace, BLENDCAD_GT_launcher, BLENDCAD_GGT_launcher)
 def register():
     for c in classes:
         bpy.utils.register_class(c)
+    ribbon_actions.register()
     bpy.types.VIEW3D_HT_header.append(_header_button)
     bpy.app.handlers.load_pre.append(_on_load_pre)
 
@@ -400,5 +421,6 @@ def unregister():
             pass
         BLENDCAD_OT_workspace._handle = None
     _STATE.update(running=False, close=False, area=None)
+    ribbon_actions.unregister()
     for c in reversed(classes):
         bpy.utils.unregister_class(c)

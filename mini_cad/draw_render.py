@@ -7,7 +7,7 @@ import gpu
 import math
 import numpy as np
 
-from . import core
+from . import core, ribbon_state
 from . import drawmath as dm
 from .draw_common import (
     COL_ACTIVE, COL_BOX, COL_DONE, COL_GUIDE, COL_REF, COL_RUBBER, COL_SNAP, COL_TEXT,
@@ -200,7 +200,8 @@ class RenderMixin:
                 self._draw_sketch2d(region)
                 self._draw_offset2d(region)
             self._draw_gmenu(region)
-            self.palette.draw(region, st)
+            if not ribbon_state.is_running():      # v0.28.0: şerit açıkken paleti şerit üstlenir
+                self.palette.draw(region, st)
             gpu.state.blend_set("NONE")
         except Exception as e:
             print("[Mini CAD] çizim etiketi hatası:", e)

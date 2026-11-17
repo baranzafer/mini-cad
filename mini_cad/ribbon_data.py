@@ -13,15 +13,21 @@ Düğme alanları:
             "planned"= yeni özellik, sonraki sürümlerde
   variants: aynı düğmenin açılır listedeki türleri (Inventor'daki gibi; seçilen tür düğmede kalır)
   toggle  : True ise aç / kapa düğmesi (seçenek)
+  small   : küçük düğme (simge + kısa ad, iki satırlık sütunlarda; seçenekler için)
+  short   : küçük düğmenin kısa adı
+  action  : işlevin türü (blendcad.py bağlar): "tool" çizim aracı, "op" operatör, "panel"
+            açılır ayar paneli ... — boşsa düğme kimliğine göre bağlanır
 """
 
 READY = "ready"
 PLANNED = "planned"
 
 
-def B(id, icon, title, desc, steps=(), key="", status=READY, variants=(), toggle=False):
+def B(id, icon, title, desc, steps=(), key="", status=READY, variants=(), toggle=False,
+      small=False, short=""):
     return {"id": id, "icon": icon, "title": title, "desc": desc, "steps": list(steps),
-            "key": key, "status": status, "variants": list(variants), "toggle": toggle}
+            "key": key, "status": status, "variants": list(variants), "toggle": toggle,
+            "small": small, "short": short or title}
 
 
 def V(id, icon, title, desc, steps=(), key="", status=READY):
@@ -33,17 +39,49 @@ def V(id, icon, title, desc, steps=(), key="", status=READY):
 _SKETCH = [
     ("Eskiz", [
         B("SK_START", "SKETCH_NEW", "Eskiz başlat",
-          "Bir düzlem ya da gövde yüzü seçip 2B çizime başlar.",
+          "Çizimi açar; önce bir düzlem ya da gövde yüzü seçilir. Çizim açıkken düzlemi "
+          "yeniden seçtirir.",
           ["Eksen düzlemine (XY / XZ / YZ) ya da bir gövde yüzüne tıkla",
            "Yüksekliği fareyle ya da değer yazarak ver",
            "Çizim araçlarıyla taslağı çiz"], key="Shift+Q"),
+        B("SELECT", "SELECT", "Seç / duraklat",
+          "Çizim açık kalır ama tıklamalar Blender'a gider (seçim, G / R / S).",
+          ["Çizime dönmek için bir çizim aracı seç ya da Q"], key="W · Esc"),
         B("SK_FINISH", "FINISH", "Eskizi bitir",
           "Taslağı eğri objesine kaydeder; bağlı yüzey ve gövdeler güncellenir.",
           ["Taslaktaki bütün çizgiler hedef eğriye yazılır",
-           "Hedef: Mevcut eğri ya da Yeni eğri (eskiz ayarları)"], key="Ctrl+Enter"),
+           "Hedef: Mevcut eğri ya da Yeni eğri (Seçenekler)"], key="Ctrl+Enter"),
+        B("SK_UNDO", "SK_UNDO", "Son çizgiyi geri al",
+          "Taslaktaki son çizgiyi / noktayı geri alır.",
+          ["Ctrl+Z / Ctrl+Shift+Z: taslakta geri al / yinele"], key="Backspace"),
         B("SK_EDIT", "EDITSK", "Taslağa al",
-          "Kaydedilmiş bir eğriyi yeniden taslakta düzenlemeye açar (Edit Sketch).",
-          ["Kaydedilmiş eğriye tıkla", "Taslakta düzenle", "Bitir ile aynı objeye geri yazılır"]),
+          "Kaydedilmiş eğriyi taslakta düzenlemeye açar (Inventor: Edit Sketch).",
+          ["Türü seç", "Kaydedilmiş eğriye tıkla ya da aktif çizimin tamamını aç"],
+          variants=[
+              V("EDITSK", "EDITSK", "Eğriyi taslağa al",
+                "Tıklanan kaydedilmiş eğri taslağa alınır; Bitir'de geri yazılır.",
+                ["Kaydedilmiş eğriye tıkla", "Taslakta düzenle", "Bitir"]),
+              V("EDIT_ALL", "EDIT_ALL", "Çizimi düzenle (tamamı)",
+                "Aktif eğri objesinin (çizimin) tamamını taslağa alır.",
+                ["Eğri objesini seç (aktif)", "Düğmeye bas", "Bitir / Çizimi kapat"]),
+          ]),
+        B("SK_CLOSE", "SK_CLOSE", "Çizimi kapat",
+          "Taslağı kaydedip çizim aracını kapatır.", key="Esc ×2"),
+    ]),
+    ("Düzlem", [
+        B("PLANE", "PLANE_PICK", "Çizim düzlemi",
+          "Çizim düzlemini seçer: görünümde seç, otomatik, eksen düzlemleri ya da ekrana paralel.",
+          ["Türü açılır listeden seç", "Eksen düzleminde yüksekliği ver"],
+          variants=[
+              V("PL_PICK", "PLANE_PICK", "Görünümde seç",
+                "Eksen düzlemi ya da gövde yüzü tıklanarak seçilir.", key="Shift+Q"),
+              V("PL_AUTO", "PLANE_AUTO", "Otomatik",
+                "Görüşe göre eksen düzlemi; gövde yüzüne tıklarsan yüz düzlemi."),
+              V("PL_XY", "PLANE_XY", "Üst (XY)", "Z yukarı bakan düzlem.", key="Shift+Z"),
+              V("PL_XZ", "PLANE_XZ", "Ön (XZ)", "Y'ye dik düzlem.", key="Shift+Y"),
+              V("PL_YZ", "PLANE_YZ", "Yan (YZ)", "X'e dik düzlem.", key="Shift+X"),
+              V("PL_VIEW", "PLANE_VIEW", "Ekrana paralel", "Görüş düzlemi.", key="V"),
+          ]),
     ]),
     ("Oluştur", [
         B("LINE", "LINE", "Doğru", "Noktadan noktaya doğru parçaları çizer.",
@@ -142,6 +180,19 @@ _SKETCH = [
         B("MIRROR2D", "MIRROR", "Ayna", "Seçimin bir çizgiye göre aynalı kopyasını ekler.",
           ["Seç", "Ayna çizgisinin iki noktası"]),
     ]),
+    ("Seçenekler", [
+        B("OPT_SNAP", "SNAP", "Yakalama", "Uç / orta / kesişim yakalama ve kılavuzlar.",
+          ["Ctrl basılıyken geçici olarak kapalı"], toggle=True, small=True),
+        B("OPT_GRID", "GRID", "Izgara", "Izgaraya hafif yakalama; aralık yakınlaştırmaya göre "
+          "değişir.", key="I", toggle=True, small=True),
+        B("OPT_LOOK", "LOOK", "Düzleme bak", "Düzlem seçince görünüm düzleme döner.",
+          toggle=True, small=True, short="Bak"),
+        B("OPT_FIRST", "PLANE_PICK", "Önce düzlem",
+          "Çizim açılınca önce düzlem seçtirir (Inventor gibi).", toggle=True, small=True),
+        B("OPT_NEW", "TARGET_NEW", "Yeni eğriye yaz",
+          "Açık: her Bitir yeni eğri objesi oluşturur · Kapalı: aktif / son eğriye ekler.",
+          toggle=True, small=True, short="Yeni eğri"),
+    ]),
 ]
 
 # ================================================================ KISIT
@@ -152,16 +203,26 @@ _CONSTRAIN = [
           "Seçime göre uzunluk, yarıçap, çap, açı ya da mesafe ölçüsü ekler.",
           ["Doğru → uzunluk · yay → yarıçap · daire → çap",
            "2 doğru → açı · 2 nokta → mesafe",
-           "Ölçüye tıkla: değeri düzenle"], key="D"),
+           "Ölçüye tık: değeri düzenle"]),
         B("AUTODIM", "AUTODIM", "Otomatik ölçü",
           "Ölçüsüz doğrulara uzunluk, yaylara yarıçap ölçüsü verir.",
           ["Eğriye tıkla"]),
+        B("DIMFIX", "DISTANCE", "Ölçü kısıtı",
+          "Tek tür ölçü kısıtı: uzunluk, açı ya da yarıçap / çap.",
+          ["Türü seç", "Kenar(lar)ı seç", "Değeri Kısıt listesinden düzenle"],
+          variants=[
+              V("DISTANCE", "DISTANCE", "Uzunluk", "1 kenarın boyu."),
+              V("ANGLE", "ANGLE", "Açı", "2 kenar arasındaki açı."),
+              V("RADIUS", "RADIUS", "Yarıçap / çap", "1 yay / daire."),
+          ]),
     ]),
     ("Geometrik", [
         B("HORIZ", "HORIZ", "Yatay", "Kenarı çizim düzleminin yatay eksenine hizalar.",
           ["1 kenar seç"]),
         B("VERT", "VERT", "Dikey", "Kenarı çizim düzleminin dikey eksenine hizalar.",
           ["1 kenar seç"]),
+        B("AXIS", "AXIS", "Eksene hizala", "Kenarı en yakın dünya eksenine (yatay / dikey) "
+          "hizalar.", ["1 kenar seç"]),
         B("PARALLEL", "PARALLEL", "Paralel", "İki kenarı paralel yapar.", ["2 kenar seç"]),
         B("PERP", "PERP", "Dik", "İki kenarı birbirine dik yapar.", ["2 kenar seç"]),
         B("COLLINEAR", "COLLINEAR", "Doğrusal", "İki kenarı aynı doğru üzerine alır.",
@@ -180,18 +241,22 @@ _CONSTRAIN = [
         B("SYM", "SYMMETRIC", "Simetrik", "İki noktayı bir çizgiye ya da eksen düzlemine göre "
           "simetrik yapar.", ["2 nokta seç", "Simetri çizgisini seç"],
           variants=[
-              V("SYMLINE", "SYMMETRIC", "Çizgiye göre", "2 nokta + simetri doğrusu."),
+              V("SYMLINE", "SYMLINE", "Çizgiye göre", "2 nokta + simetri doğrusu."),
               V("SYMMETRIC", "SYMMETRIC", "Eksen düzlemine göre", "2 nokta, dünya eksen düzlemi."),
           ]),
     ]),
+    ("Yönet", [
+        B("CONS_SOLVE", "SOLVE", "Çöz", "Bütün kısıtları yeniden çözer."),
+        B("CONS_LIST", "CONS_LIST", "Kısıt listesi",
+          "Kısıtları ve ilişkileri (desen / yansıtma) listeler: aç / kapa, değer, sil.",
+          ["Değerleri listeden düzenle", "Otomatik kısıtları toplu sil"]),
+    ]),
     ("Görünüm", [
         B("CONS_SHOW", "SHOW", "Kısıtları göster", "Kısıt simgelerini görünümde açar / kapatır.",
-          ["Simgeye sağ tık: dondur / sil"], toggle=True),
+          ["Simgeye sağ tık: dondur / sil"], toggle=True, small=True, short="Göster"),
         B("CONS_AUTO", "AUTOCONS", "Oto kısıt",
           "Çizerken yakalanan yatay / dikey, paralel, dik ve çakışmaları kısıt olarak kaydeder.",
-          toggle=True),
-        B("LINKS", "LINKS", "İlişkiler",
-          "Desen ve yansıtma ilişkilerini (adet / aralık / açı) listeler ve düzenler."),
+          toggle=True, small=True),
     ]),
 ]
 
@@ -212,17 +277,23 @@ _SURFACE = [
     ]),
     ("Yüzey", [
         B("PATCH", "PATCH", "Sınır yüzeyi",
-          "Kapalı tel kafes döngüsünden yüzey yaması kurar (ortak kenarlarla).",
-          ["Döngüyü oluşturan eğrileri seç", "F: yüzey · Ctrl+F: yeni gövde"], key="F"),
+          "Kapalı tel kafes döngüsünden yüzey yaması kurar (ortak kenarlarla). Kenar seçimini "
+          "açar.",
+          ["Döngünün kenarlarına tıkla (Alt+tık: tek parça)", "Enter: yüzey",
+           "Ctrl+Enter: yeni gövde"], key="Enter"),
         B("PATCH_HOLE", "PATCH_HOLE", "Delikli yüzey",
-          "İç içe kapalı döngülerden delikli düzlemsel yüz kurar (B harfi gibi).",
-          ["Dış döngü ve delik döngülerini aynı düzlemde çiz", "F ile birlikte gönder"]),
+          "İç içe kapalı döngülerden delikli düzlemsel yüz kurar (B harfi gibi). Çizimde F.",
+          ["Dış döngü ve delikleri aynı düzlemde çiz", "Son kapalı çizgide F: yüzey",
+           "Ctrl+F: yeni gövde"], key="F"),
+        B("SURF_LIST", "SURF_LIST", "Yüzey listesi",
+          "Gövdenin yüzeyleri: durum, eğrilerini seç, sil, yüzey başına birleşim.",
+          ["Listeden yüzeyi seç", "Birleşim / teğet ağırlığı ayarla"]),
         B("BLEND", "BLEND", "Yüzey birleşimi",
           "Komşu yüzeylerin ortak kenarda keskin (G0) ya da teğet (G1) buluşmasını seçer.",
           ["Yüzeyi seç", "Keskin / Teğet seç"],
           variants=[
-              V("BLEND_G0", "BLEND_G0", "Keskin (G0)", "Yüzler yalnızca kenarda buluşur."),
-              V("BLEND_G1", "BLEND", "Teğet (G1)", "Komşu yüze teğet kaynaşır."),
+              V("BLEND_G0", "BLEND_G0", "Keskin (G0)", "Gövde ayarı: yüzler kenarda buluşur."),
+              V("BLEND_G1", "BLEND", "Teğet (G1)", "Gövde ayarı: komşu yüze teğet kaynaşır."),
           ]),
         B("SPLIT_FACE", "SPLIT_FACE", "Yüzeyi böl",
           "Yüzeyi bir tel kafes eğrisi boyunca ikiye ayırır.",
@@ -242,8 +313,8 @@ _SURFACE = [
     ]),
     ("Simetri", [
         B("SYM_BODY", "MIRROR_BODY", "Ayna simetrisi",
-          "Gövdeyi bir eksen düzlemine göre aynalayıp ortadan birleştirir.",
-          ["Simetri eksenini seç (X / Y / Z)", "Dikiş kenarı ortak olur"], toggle=True),
+          "Gövdeyi bir eksen düzlemine göre aynalayıp ortadan birleştirir (ayar penceresi).",
+          ["Simetriyi aç", "Eksenleri seç (X / Y / Z)", "Dikiş kenarı ortak olur"]),
     ]),
 ]
 
@@ -251,9 +322,10 @@ _SURFACE = [
 
 _SOLID = [
     ("Gövde", [
-        B("BODY_NEW", "BODY", "Yeni gövde",
-          "Seçili yüzeylerden yeni bir CAD gövdesi oluşturur.",
-          ["Yüzeyleri seç", "Ctrl+Enter: yeni gövde"], key="Ctrl+Enter"),
+        B("BODY", "BODY", "Gövde",
+          "Çalışılan gövdeyi seçer; durum ve hesap bilgisini gösterir.",
+          ["Listeden gövdeyi seç ya da aktif objeyi gövde yap",
+           "Yeni gövde: Kenar seçiminde Ctrl+Enter"]),
         B("REBUILD", "REBUILD", "Yenile",
           "Gövdeyi yeniden hesaplar (canlı güncelleme zaten açıktır)."),
     ]),
@@ -277,18 +349,20 @@ _SOLID = [
           "Bir gövdeyi diğeriyle birleştirir, çıkarır ya da kesişimini alır.",
           ["Hedef gövdeyi seç", "Araç gövdeyi seç", "İşlem türünü seç"],
           variants=[
-              V("BOOL_UNION", "BOOL_UNION", "Birleştir", "İki gövde tek gövde olur."),
               V("BOOL_DIFF", "BOOL_DIFF", "Çıkar", "Araç gövde hedeften oyulur."),
+              V("BOOL_UNION", "BOOL_UNION", "Birleştir", "İki gövde tek gövde olur."),
               V("BOOL_INT", "BOOL_INT", "Kesişim", "Yalnızca ortak hacim kalır."),
           ]),
     ]),
     ("Kenar", [
-        B("FILLET", "FILLET3D", "Fillet",
-          "Seçili gövde kenarlarını verilen yarıçapla yuvarlar.",
-          ["Kenar seçimi modunda kenarları seç", "Yarıçap ver", "B: uygula"], key="B"),
-        B("CHAMFER", "CHAMFER3D", "Pah",
-          "Seçili gövde kenarlarına pah kırar.",
-          ["Kenarları seç", "Mesafe ver"]),
+        B("FILLET", "FILLET3D", "Fillet / pah",
+          "Seçili gövde kenarlarını yuvarlar ya da pah kırar. Kenar seçimini ve ayarları açar.",
+          ["Kenarları seç", "B: uygula (yeni fillet ölçüsü ayarlardan)",
+           "Listeden fillet'i seçip türünü Pah yapabilirsin"], key="B",
+          variants=[
+              V("FILLET_R", "FILLET3D", "Fillet", "Kenarı yarıçapla yuvarlar."),
+              V("CHAMFER", "CHAMFER3D", "Pah", "Kenara pah kırar (fillet listesinde tür: Pah)."),
+          ]),
         B("SHELL", "SHELL", "Kabuk",
           "Katının içini boşaltır; seçilen yüzleri açık bırakır.",
           ["Açık kalacak yüzleri seç", "Et kalınlığı ver"], status=PLANNED),

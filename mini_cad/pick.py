@@ -19,7 +19,7 @@ import gpu
 import numpy as np
 from gpu_extras.batch import batch_for_shader
 
-from . import core
+from . import core, ribbon_state
 
 SAMPLES = 24          # bezier segmenti başına örnek nokta
 PICK_RADIUS_PX = 10   # seçim yarıçapı (ui ölçeğiyle çarpılır)
@@ -506,6 +506,8 @@ class MINICAD_OT_pick_edges(bpy.types.Operator):
             return {"CANCELLED"}
         inside, mx, my = self._mouse_in_region(event)
         press = event.value == "PRESS"
+        if ribbon_state.over_ribbon(event):
+            return {"PASS_THROUGH"}          # v0.28.0: fare BlendCAD şeridinde
 
         if event.type == "ESC" and press and getattr(context, "mode", "OBJECT") == "OBJECT":
             self._finish(context)

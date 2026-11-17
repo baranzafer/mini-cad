@@ -109,20 +109,45 @@ class PILPainter:
             d.line([(cx * SS, cy * SS), (ex * SS, ey * SS)], fill=col, width=3)
             d.ellipse([(ex - 8) * SS, (ey - 8) * SS, (ex + 8) * SS, (ey + 8) * SS], fill=col)
 
+    def headers(self, top):
+        """Saydam başlık + araç başlığı (Blender 4.x / 5.x bölge örtüşmesi) ve araç çubuğu."""
+        d, w, h = self.d, self.w, self.h
+        d.rectangle([0, 0, w * SS, top * SS], fill=(48, 48, 48, 235))
+        d.line([(0, 26 * SS), (w * SS, 26 * SS)], fill=(40, 40, 40), width=SS)
+        f = self.font(11)
+        x = 12
+        for t in ("Object Mode", "View", "Select", "Add", "Object"):
+            d.text((x * SS, 18 * SS), t, font=f, fill=(210, 210, 210), anchor="ls")
+            x += self.measure(t, 11)[0] + 18
+        x = 12
+        for t in ("Global", "Snap", "Options"):
+            d.text((x * SS, 44 * SS), t, font=f, fill=(190, 190, 190), anchor="ls")
+            x += self.measure(t, 11)[0] + 26
+        d.rectangle([4 * SS, (top + 6) * SS, 40 * SS, (top + 150) * SS], fill=(45, 45, 45, 230))
+        for k in range(4):
+            y = top + 12 + k * 34
+            d.rectangle([9 * SS, y * SS, 35 * SS, (y + 26) * SS], fill=(70, 70, 70))
+
     def save(self, path):
         self.img.resize((self.w * SS // 2 * 2 // SS * 1, self.h), Image.LANCZOS) if False else None
         self.img.save(path)
 
 
+TOP, LEFT = 52, 44            # saydam başlıklar (2 × 26 px) ve araç çubuğu
+
+
 def frame(name, setup, w=1500, h=560, scale=1.0, collapsed=False):
     p = PILPainter(w, h)
     p.viewport()
+    p.headers(TOP)
     r = ribbon.Ribbon(scale)
     r.collapsed = collapsed
-    r.layout(p, w, h, left=0, right=0)
+    lw = 34 * scale + p.measure("BlendCAD", int(12 * scale))[0]
+    right = 104 * scale + lw + 10 * scale
+    r.layout(p, w, h, LEFT, right, TOP)
     now = setup(r, p, w, h) or 0.0
-    ribbon.draw_launcher(p, w, h, scale, 0, hover=False, active=True)
-    r.draw(p, w, h, left=0, right=0, now=now)
+    ribbon.draw_launcher(p, w, h, scale, 0, hover=False, active=True, top_reserve=TOP)
+    r.draw(p, w, h, LEFT, right, now=now, top_reserve=TOP)
     p.save(os.path.join(OUT, name))
     return r
 
@@ -180,6 +205,8 @@ def toast(r, p, w, h):
 
 frame("11_secim_bildirim.png", toast)
 frame("12_dar_gorunum_kaydirma.png", lambda r, p, w, h: 0.0, w=820)
+frame("13_eskiz_genis.png", lambda r, p, w, h: 0.0, w=1920)
+frame("14_secenek_karti.png", hover_btn("OPT_NEW", 2.0), w=1920)
 
 # simge sayfası: bütün simgeler büyük
 items = []

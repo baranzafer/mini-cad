@@ -56,7 +56,7 @@ import numpy as np
 from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
-from . import constraints, core, palette
+from . import constraints, core, palette, ribbon_state
 from . import drawmath as dm
 
 # Ortak adlar draw_common'da; burada geriye dönük uyum için yeniden dışa aktarılır.
@@ -485,6 +485,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         inside, mx, my = self._mouse_in_region(event)
         press = event.value == "PRESS"
         self.shift, self.ctrl = event.shift, event.ctrl
+        if self.sk_drag is None and ribbon_state.over_ribbon(event):
+            return {"PASS_THROUGH"}          # v0.28.0: fare BlendCAD şeridinde: olay şeridin
 
         if getattr(self, "txt", None) is not None and self.phase == "DRAW":
             r = self._txt_event(context, event)             # metin yazılıyor
@@ -538,7 +540,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
             self._refresh(context)
             return {"PASS_THROUGH"}
 
-        if inside and self._palette_event(context, event, mx, my, press):
+        if inside and not ribbon_state.is_running() and \
+                self._palette_event(context, event, mx, my, press):
             if getattr(self, "stop_request", False):
                 self._finish_sketch(context)
                 self._finish(context)

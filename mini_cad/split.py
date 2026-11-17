@@ -22,7 +22,7 @@ import math
 import bpy
 import numpy as np
 
-from . import core
+from . import core, ribbon_state
 from . import surfmath as sm
 from .errors import CadError
 
@@ -964,6 +964,8 @@ class MINICAD_OT_split_surface(bpy.types.Operator):
         mx, my = event.mouse_x - r.x, event.mouse_y - r.y
         inside = 0 <= mx < r.width and 0 <= my < r.height
         et, press = event.type, event.value == "PRESS"
+        if ribbon_state.over_ribbon(event):
+            return {"PASS_THROUGH"}          # v0.28.0: fare BlendCAD şeridinde
         if et in self.PASS or not inside:
             return {"PASS_THROUGH"}
         if press and (event.ctrl or event.alt or event.oskey) and et not in {"LEFTMOUSE"}:
