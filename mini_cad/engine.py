@@ -251,6 +251,7 @@ def _build(job, res, geometry):
             errors.append(p["name"])
     faces = [built[(p["idx"], p.get("sub", 0))] for p in job["patches"]
              if (p["idx"], p.get("sub", 0)) in built]
+    face_src = [p["idx"] for p in job["patches"] if (p["idx"], p.get("sub", 0)) in built]
     _builders[name] = builder
     if not faces:
         if errors:
@@ -374,6 +375,18 @@ def _build(job, res, geometry):
     res["tris"] = np.asarray(tris, dtype=np.int32).reshape(-1, 3)
     res["normals"] = None if normals is None else \
         np.asarray(normals, dtype=np.float64).reshape(-1, 3)
+    res["tri_patch"] = None
+    if not preview and hasattr(geometry, "face_labels"):
+        # v0.30.0: üçgen başına kaynak yama (görünümde yüzey üzerine gelme / sağ tık menüsü)
+        try:
+            pts = list(getattr(geometry, "LAST_FACE_PTS", ()))
+            cnt = list(getattr(geometry, "LAST_FACE_TRIS", ()))
+            if pts and len(pts) == len(cnt) and sum(cnt) == len(res["tris"]):
+                lab = geometry.face_labels(pts, faces, mirrors, max(lin * 1.5, tol * 10.0))
+                idx = np.asarray([face_src[i] if i >= 0 else -1 for i in lab], dtype=np.int32)
+                res["tri_patch"] = np.repeat(idx, np.asarray(cnt, dtype=np.int64))
+        except Exception:
+            traceback.print_exc()
     res["ghost"] = _merge_ghosts(ghosts) if want_ghost else None
     res["sweep_lines"] = _sweep_lines.get(name, {}) if stages else {}
     if not preview:

@@ -129,3 +129,35 @@ for i, b in enumerate(uniq):
     p.text(cx - tw / 2, cy - 46, b["icon"], ribbon.COL_TEXT_DIM, 9)
 p.save(os.path.join(OUT, "00_simgeler.png"))
 print("tamam:", sorted(os.listdir(OUT)))
+
+# v0.30.0: sağ tık menüsü + bildirim merkezi
+notify = importlib.import_module("mini_cad.notify")
+
+
+def ctx_frame(r, p, w, h):
+    noop = lambda: None  # noqa: E731
+    items = [{"id": "del", "text": "Yüzeyi sil", "icon": "DELETE", "key": "Del", "fn": noop},
+             {"id": "off", "text": "Devre dışı bırak", "icon": "SHOW", "fn": noop},
+             {"id": "sel", "text": "Eğrilerini seç", "icon": "SELECT", "fn": noop},
+             {"id": "split", "text": "Yüzeyi böl", "icon": "SPLIT_FACE", "fn": noop},
+             {"sep": True}, {"head": "Birleşim"},
+             {"id": "b0", "text": "Gövde ayarı", "fn": noop, "check": True},
+             {"id": "b1", "text": "Keskin (G0)", "fn": noop},
+             {"id": "b2", "text": "Teğet (G1)", "fn": noop},
+             {"sep": True},
+             {"id": "set", "text": "Yüzey ayarları…", "icon": "SURF_LIST", "fn": noop},
+             {"id": "fil", "text": "Fillet / pah…", "icon": "FILLET3D", "fn": noop}]
+    r.menu.open("CAD_Govde · Yüzey 4", items, 700, 330, "PATCH")
+    r.menu.layout(p, w, h)
+    rr = r.menu.rows[0][0]
+    r.menu.move((rr[0] + rr[2]) / 2, (rr[1] + rr[3]) / 2)
+    c = notify.Center()
+    c.push("error", "CAD_Govde · Kesim 2: [Çekirdek sınırı (OCC)] ikincil gövde kapalı katı değil", 0)
+    c.push("warn", "Geçersiz değer: 0,0.2x", 1)
+    c.push("info", "Kısıtlar çözüldü", 2)
+    c.push("hint", "“Delik” yeni özellik olarak planlandı (yakında)", 3)
+    c.draw(p, 1.0, LEFT + 10, 10, 420, 4)
+    return 0.0
+
+
+frame("15_sag_tik_ve_bildirim.png", ctx_frame, w=1500, h=640)

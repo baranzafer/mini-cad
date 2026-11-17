@@ -279,8 +279,7 @@ def _draw_errors():
 
 def register():
     _handles.append(bpy.types.SpaceView3D.draw_handler_add(_draw, (), "WINDOW", "POST_VIEW"))
-    _handles.append(bpy.types.SpaceView3D.draw_handler_add(_draw_errors, (), "WINDOW",
-                                                           "POST_PIXEL"))
+    # v0.30.0: hata / uyarılar BlendCAD bildirim merkezinde (sol alt); sol üst liste kalktı
     _handles.append(bpy.types.SpaceView3D.draw_handler_add(_draw_ghosts, (), "WINDOW",
                                                            "POST_VIEW"))
 

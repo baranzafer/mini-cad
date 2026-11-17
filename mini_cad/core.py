@@ -954,6 +954,24 @@ def write_mesh(me, verts, tris, normals):
             traceback.print_exc()
 
 
+def write_patch_labels(me, labels):
+    """v0.30.0: yüz başına kaynak yama sırası ('cad_patch', -1: fillet / boolean yüzü).
+    Görünümde yüzeyin üzerine gelme ve sağ tık menüsü bunu okur."""
+    try:
+        attr = me.attributes.get("cad_patch")
+        if labels is None or len(labels) != len(me.polygons):
+            if attr is not None:
+                me.attributes.remove(attr)
+            return
+        if attr is None or attr.domain != "FACE" or attr.data_type != "INT":
+            if attr is not None:
+                me.attributes.remove(attr)
+            attr = me.attributes.new("cad_patch", "INT", "FACE")
+        attr.data.foreach_set("value", [int(v) for v in labels])
+    except Exception:
+        traceback.print_exc()
+
+
 # ================================================================ yeniden hesaplama
 
 def weld_all(segs, tol):
@@ -1380,6 +1398,7 @@ def _apply(obj, job, res, cmd="build"):
     try:
         verts, normals = _to_local(obj, res["verts"], res["normals"])
         write_mesh(obj.data, verts, res["tris"], normals)
+        write_patch_labels(obj.data, res.get("tri_patch"))
     except Exception as e:
         traceback.print_exc()
         props.status = f"Mesh yazılamadı: {e}"

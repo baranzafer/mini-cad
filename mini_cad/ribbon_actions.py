@@ -29,6 +29,8 @@ DRAW_TOOLS = {k: k for k in (
     "PEN", "POINT", "TEXT", "PROJECT", "EDITSK", "TRIM", "EXTEND", "SPLIT", "OFFSET", "FILLET2D",
     "CHAMFER2D", "MOVE", "COPY", "ROTATE", "SCALE", "STRETCH", "RPAT", "CPAT")}
 DRAW_TOOLS["MIRROR2D"] = "MIRROR"
+DRAW_TOOLS["DELETE"] = "DELETE"
+DRAW_TOOLS["DELETE_SK"] = "DELETE"            # Eskiz sekmesindeki kopya (v0.30.0)
 
 CONS_TOOLS = {"DIM", "AUTODIM", "HORIZ", "VERT", "AXIS", "PARALLEL", "PERP", "COLLINEAR", "EQUAL",
               "COINCIDENT", "FIX", "TANGENT", "SMOOTH", "CONCENTRIC", "SYMLINE", "SYMMETRIC",
@@ -64,7 +66,14 @@ def draw_op():
         return None
 
 
-def _override(context):
+def _override(context, **extra):
+    if not hasattr(context, "temp_override"):        # test / arka plan bağlamı
+        import contextlib
+        return contextlib.nullcontext()
+    return _override_real(context, **extra)
+
+
+def _override_real(context, **extra):
     """Şeridin açık olduğu 3D görünümün bağlamı (operatörler orada çalışsın)."""
     area = ribbon_state.find_area(context, ribbon_state.STATE["area"]) or context.area
     region = ribbon_state.window_region(area) if area is not None else None
@@ -77,12 +86,16 @@ def _override(context):
     kw = {"window": win, "area": area}
     if region is not None:
         kw["region"] = region
+    kw.update(extra)
+    if not hasattr(context, "temp_override"):        # test / arka plan bağlamı
+        import contextlib
+        return contextlib.nullcontext()
     return context.temp_override(**kw)
 
 
-def _call(context, fn):
+def _call(context, fn, **extra):
     """Operatörü şeridin görünümünde çağır; poll hatasını okunur iletiye çevir."""
-    with _override(context):
+    with _override(context, **extra):
         try:
             fn()
             return None
@@ -91,10 +104,11 @@ def _call(context, fn):
             return txt.replace("Error: ", "")
 
 
-def _ensure_draw(context):
+def _ensure_draw(context, start_plane="DEFAULT"):
     op = draw_op()
     if op is None:
-        err = _call(context, lambda: bpy.ops.minicad.draw("INVOKE_DEFAULT"))
+        err = _call(context, lambda: bpy.ops.minicad.draw("INVOKE_DEFAULT",
+                                                          start_plane=start_plane))
         op = draw_op()
         if op is None:
             raise RuntimeError(err or "Çizim açılamadı")
@@ -181,12 +195,14 @@ def _msg(text):
         HOOKS["message"](text)
 
 
-def call(opname, invoke=False, **kw):
-    """Pencere düğmesinden operatör çağır (şeridin görünümünde); hata bildirime gider."""
+def call(opname, invoke=False, _obj=None, **kw):
+    """Pencere düğmesinden operatör çağır (şeridin görünümünde); hata bildirime gider.
+    _obj: işlemin hedef gövdesi (aktif obje sayılır; sağ tık menüsü)."""
     ns, name = opname.split(".")
     fn = getattr(getattr(bpy.ops, ns), name)
+    extra = {"active_object": _obj, "object": _obj} if _obj is not None else {}
     err = _call(bpy.context, (lambda: fn("INVOKE_DEFAULT", **kw)) if invoke else
-                (lambda: fn(**kw)))
+                (lambda: fn(**kw)), **extra)
     _msg(err)
     return err
 
@@ -286,6 +302,8 @@ def state(btn):
     if bid == "SYM_BODY":
         t = _target(ctx)
         return bool(t is not None and t.cad.use_mirror)
+    if bid == "DELETE_SK":
+        return bool(op is not None and getattr(op, "tool", "") == "DELETE")
     if bid == "KEY_COORD":
         return bool(op is not None and getattr(op, "coord_mode", False))
     if bid == "KEY_G":
@@ -386,8 +404,8 @@ def _dispatch(context, kind, ident):
     if ident == "SK_START":
         op = draw_op()
         if op is None:
-            _ensure_draw(context)
-            return None
+            _ensure_draw(context, "PICK")          # Eskiz başlat: düzlemi açıkça seçtir
+            return "Çizim düzlemini seç (eksen düzlemi ya da gövde yüzü)"
         op._set_plane("PICK")
         _after(context, op)
         return "Düzlemi yeniden seç"

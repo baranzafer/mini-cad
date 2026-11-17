@@ -33,6 +33,7 @@ MOD_HELP = {
               "tık / Enter",
     "FILLET2D": "Köşe yuvarla: yarıçap yaz · köşeye tıkla",
     "CHAMFER2D": "Pah: mesafe yaz (Tab: 2. mesafe) · köşeye tıkla",
+    "DELETE": "Sil: nesnenin ya da noktanın üzerine gel, tıkla (sürükleyerek çoklu)",
 }
 
 
@@ -127,6 +128,9 @@ class ModifyMixin:
         self.cursor, self.preview, self.info, self.snap_kind = None, [], None, None
         tool = self._mod_tool()
         self.mod = None
+        if tool == "DELETE":
+            self._del_update(mx, my)
+            return
         if not self.sketch:
             return
         if tool == "OFFSET":
@@ -186,6 +190,33 @@ class ModifyMixin:
                 self.mod["from"], self.mod["tip"] = tip0, res["tip"]
                 n_old = len(st["segs"])
                 self.mod["prev"] = res["segs"][n_old:] if len(res["segs"]) > n_old else []
+
+    def _del_update(self, mx, my):
+        """Sil (v0.30.0): imlecin altındaki taslak nesnesinin tamamı ya da taslak noktası."""
+        pts = getattr(self, "sk_points", None) or []
+        best = None
+        for j, q in enumerate(pts):
+            p = self._px(q)
+            if p is not None:
+                d = math.hypot(p[0] - mx, p[1] - my)
+                if d <= self.radius and (best is None or d < best[0]):
+                    best = (d, j)
+        if best is not None:
+            self.mod = {"kind": "DELPT", "j": best[1], "pos": np.asarray(pts[best[1]])}
+            return
+        if not self.sketch:
+            return
+        hit = self._pick_seg(mx, my)
+        if hit is None:
+            return
+        k, i, t, pos = hit
+        st = self.sketch[k]
+        ent = sm.entity_of(st, i)
+        if ent is None:
+            return
+        i0, i1 = ent
+        self.mod = {"kind": "DELETE", "k": k, "i0": i0, "i1": i1, "u": (i - i0) + t,
+                    "prev": [st["segs"][j] for j in range(i0, i1)], "pos": pos}
 
     def _extend_end(self, st, i0, i1, u, pos):
         """Uzatılacak uç: 1 son, 0 baş; imlecin üzerindeki nesne uçta değilse None."""
@@ -429,6 +460,20 @@ class ModifyMixin:
             new = sm.trim(self.sketch, m["k"], m["i0"], m["i1"], m["u"], m["cuts"])
             self._set_sketch(context, new, "Kırpıldı")
             return True
+        if kind == "DELETE":                   # kesişimsiz kırpma = nesnenin tamamı
+            new = sm.trim(self.sketch, m["k"], m["i0"], m["i1"], m["u"], [])
+            self._set_sketch(context, new, "Silindi")
+            return True
+        if kind == "DELPT":
+            pts = list(getattr(self, "sk_points", None) or [])
+            if 0 <= m["j"] < len(pts):
+                pts.pop(m["j"])
+                self.sk_points = pts
+                self.dirty = True
+                self.mod = None
+                self._status(context, "Nokta silindi")
+                return True
+            return False
         if kind == "SPLIT":
             if not m["ok"]:
                 self._status(context, "Böl: " + m.get("why", "kapalı nesne için iki kesişim "
@@ -486,7 +531,7 @@ class ModifyMixin:
                 self._mod_update(context, mx, my)
                 self._mod_apply(context)
                 self._mod_update(context, mx, my)
-                self.mod_drag = tool in ("TRIM", "EXTEND")
+                self.mod_drag = tool in ("TRIM", "EXTEND", "DELETE")
                 self._drag_last = (mx, my)
             self.area.tag_redraw()
             return {"RUNNING_MODAL"}
@@ -549,7 +594,7 @@ class ModifyMixin:
         if m is None:
             return
         kind = m["kind"]
-        if kind == "TRIM":
+        if kind in ("TRIM", "DELETE"):
             for sg in m["prev"]:
                 _poly([tuple(p) for p in dm.sample(sg, 2 if sg["kind"] == "line" else 24)],
                       COL_CUT, 3.5, region)
@@ -597,6 +642,13 @@ class ModifyMixin:
             kind = m["kind"]
             if kind == "TRIM":
                 label = "Kırp" if m["cuts"] else "Kırp: kesişim yok, tamamı silinir"
+            elif kind == "DELETE":
+                label = "Sil"
+            elif kind == "DELPT":
+                p = self._px(m["pos"])
+                if p is not None:
+                    _marker("Uç", p[0], p[1], 7 * s, region)
+                label = "Sil: nokta"
             elif kind == "EXTEND":
                 label = "Uzat" if m.get("ok") else f"Uzat: {m.get('why') or 'sınır yok'}"
                 if m.get("ok"):

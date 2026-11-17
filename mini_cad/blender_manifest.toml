@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "mini_cad"
-version = "0.29.0"
+version = "0.30.0"
 name = "BlendCAD"
 tagline = "Blender icinde CAD: eskiz, kisit, tel kafes ve yuzeyden kati"
 maintainer = "Mini CAD"

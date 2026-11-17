@@ -99,6 +99,12 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
     # v0.23.0: açılışta bu eğri objesinin (çizimin) tamamı taslağa alınır (minicad.edit_sketch)
     edit_curve: bpy.props.StringProperty(name="Düzenlenecek çizim", default="",
                                          options={"HIDDEN", "SKIP_SAVE"})
+    # v0.30.0: açılışta düzlem: DEFAULT = sahne ayarı (Önce düzlem), AUTO = otomatik düzlemle
+    # hemen çiz, PICK = önce düzlem seçtir (Eskiz başlat)
+    start_plane: bpy.props.EnumProperty(
+        name="Başlangıç düzlemi", items=[("DEFAULT", "Ayar", ""), ("AUTO", "Otomatik", ""),
+                                         ("PICK", "Seç", "")],
+        default="DEFAULT", options={"HIDDEN", "SKIP_SAVE"})
 
     @classmethod
     def poll(cls, context):
@@ -188,7 +194,12 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self.sk_cons, self.sk_pats = [], {}   # Bitir'de yazılacak kısıtlar / desen ilişkileri
         self.edit_obj = None             # tamamı taslağa alınmış çizim (Bitir'de ona yazılır)
         self.fillet_eq = None
-        self.phase = "PLANE" if getattr(sc, "minicad_pick_plane", True) else "DRAW"
+        sp = getattr(self, "start_plane", "DEFAULT")
+        if not isinstance(sp, str):
+            sp = "DEFAULT"
+        self.phase = "PLANE" if (sp == "PICK" or (sp == "DEFAULT" and
+                                                  getattr(sc, "minicad_pick_plane", False))) \
+            else "DRAW"
         self.palette = palette.Palette(self.ui_scale)
         self.created = 0
         self.msg = ""
@@ -487,6 +498,11 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self.shift, self.ctrl = event.shift, event.ctrl
         if self.sk_drag is None and ribbon_state.over_ribbon(event):
             return {"PASS_THROUGH"}          # v0.28.0: fare BlendCAD şeridinde: olay şeridin
+        if ribbon_state.is_running():         # v0.30.0: üzerine gelme + sağ tık menüsü
+            from . import ribbon_ctx
+            r = ribbon_ctx.draw_event(self, context, event, mx, my, inside)
+            if r is not None:
+                return r
 
         if getattr(self, "txt", None) is not None and self.phase == "DRAW":
             r = self._txt_event(context, event)             # metin yazılıyor
@@ -955,7 +971,8 @@ def register():
         default=True)
     bpy.types.Scene.minicad_pick_plane = bpy.props.BoolProperty(
         name="Önce Düzlem Seç", description="Çizim açılınca önce çizim düzlemini seçtir "
-        "(Inventor gibi)", default=True)
+        "(Inventor gibi). v0.30.0: varsayılan kapalı — araçlar otomatik düzlemle açılır, "
+        "düzlemi Eskiz başlat ya da Shift+Q seçtirir", default=False)
     bpy.app.handlers.load_pre.append(_on_load_pre)
     if hasattr(bpy.app.handlers, "save_pre"):
         bpy.app.handlers.save_pre.append(_on_save_pre)

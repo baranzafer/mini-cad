@@ -71,6 +71,11 @@ _SKETCH = [
               V("SK_SURF_NEW", "BODY", "Yeni gövde", "Yüzeyle yeni bir gövde başlatır.",
                 key="Ctrl+F"),
           ]),
+        B("DELETE_SK", "DELETE", "Sil",
+          "Taslaktaki nesnenin (doğru, yay, spline, daire...) ya da noktanın tamamını siler; "
+          "Kırp'tan farklı olarak kesişimlere bakmaz.",
+          ["Silinecek nesnenin üzerine gel (kırmızı vurgulanır)", "Tıkla · sürükleyerek çoklu",
+           "Kaydedilmiş eğri için önce Taslağa al"], key="Del"),
         B("SK_EDIT", "EDITSK", "Taslağa al",
           "Kaydedilmiş eğriyi taslakta düzenlemeye açar (Inventor: Edit Sketch).",
           ["Türü seç", "Kaydedilmiş eğriye tıkla ya da aktif çizimin tamamını aç"],
@@ -206,6 +211,11 @@ _SKETCH = [
 
 _MODIFY = [
     ("Değiştir", [
+        B("DELETE", "DELETE", "Sil",
+          "Taslaktaki nesnenin (doğru, yay, spline, daire...) ya da noktanın tamamını siler; "
+          "Kırp'tan farklı olarak kesişimlere bakmaz.",
+          ["Silinecek nesnenin üzerine gel (kırmızı vurgulanır)", "Tıkla · sürükleyerek çoklu",
+           "Kaydedilmiş eğri için önce Taslağa al"], key="Del"),
         B("TRIM", "TRIM", "Kırp", "Parçayı en yakın kesişimler arasında siler.",
           ["Silinecek parçaya tıkla", "Sürükle: çoklu kırpma", "Shift: Uzat'a geç"], key="B"),
         B("EXTEND", "EXTEND", "Uzat", "Çizgi ucunu en yakın sınıra kadar uzatır.",

@@ -2752,6 +2752,31 @@ def _mesh_face_alone(face, lin, ang):
 
 
 LAST_FAILED = 0   # son üçgenlemede görüntülenemeyen yüz sayısı
+LAST_FACE_TRIS = []   # v0.30.0: son üçgenlemede yüz başına üçgen sayısı (yüz sırası)
+LAST_FACE_PTS = []    # v0.30.0: yüz başına birbirinden uzak en çok 3 örnek nokta (üçgen merkezleri)
+
+
+def _face_samples(fverts, ftris, n=3):
+    """Yüzün içinden birbirinden uzak örnek noktalar: en büyük üçgenin merkezi, sonra
+    seçilenlere en uzak üçgen merkezleri. Tek nokta yetmez: fillet yüzünün teğet kenarındaki
+    üçgeni komşu düzleme 'yakın' görünür (v0.30.0 ölçümü)."""
+    cents, areas = [], []
+    step = max(1, len(ftris) // 400)
+    for (a, b, c) in ftris[::step]:
+        g = _cross(_sub(fverts[b], fverts[a]), _sub(fverts[c], fverts[a]))
+        areas.append(g[0] * g[0] + g[1] * g[1] + g[2] * g[2])
+        cents.append(tuple((fverts[a][k] + fverts[b][k] + fverts[c][k]) / 3.0 for k in range(3)))
+    if not cents:
+        return None
+    out = [cents[max(range(len(cents)), key=lambda i: areas[i])]]
+    while len(out) < min(n, len(cents)):
+        def far(i):
+            return min(sum((cents[i][k] - q[k]) ** 2 for k in range(3)) for q in out)
+        j = max(range(len(cents)), key=far)
+        if far(j) <= 0.0:
+            break
+        out.append(cents[j])
+    return out
 
 
 def tessellate(shape, lin_defl, ang_defl):
@@ -2779,6 +2804,7 @@ def tessellate(shape, lin_defl, ang_defl):
 def _tessellate(shape, lin_defl, ang_defl):
     BRepMesh_IncrementalMesh(shape, lin_defl, False, ang_defl, True)
     verts, tris, normals = [], [], []
+    face_tris, face_pts = [], []
     n_faces = n_failed = 0
     have_normals = True
     exp = TopExp_Explorer(shape, TopAbs_FACE)
@@ -2793,6 +2819,7 @@ def _tessellate(shape, lin_defl, ang_defl):
                 tri = _TRIANGULATION(face, loc)
             else:
                 n_failed += 1
+        ntri, sample = 0, None
         if tri is not None and tri.NbNodes() > 0:
             trsf = loc.Transformation()
             off = len(verts)
@@ -2824,14 +2851,81 @@ def _tessellate(shape, lin_defl, ang_defl):
 
             verts += fverts
             tris += [(a + off, b + off, c + off) for (a, b, c) in ftris]
+            ntri = len(ftris)
+            sample = _face_samples(fverts, ftris)
+        face_tris.append(ntri)
+        face_pts.append(sample)
         exp.Next()
-    global LAST_FAILED
+    global LAST_FAILED, LAST_FACE_TRIS, LAST_FACE_PTS
     LAST_FAILED = n_failed
+    LAST_FACE_TRIS, LAST_FACE_PTS = face_tris, face_pts
     if not tris:
         if n_faces == 0:
             raise CadError("Gövdede hiç yüz yok (yüzey üretilemedi)")
         raise CadError(f"Üçgenleme başarısız: {n_failed}/{n_faces} yüz üçgenlenemedi")
     return verts, tris, (normals if have_normals else None)
+
+
+def _reflect(p, origin, normal):
+    n = normal
+    ln = math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) or 1.0
+    n = (n[0] / ln, n[1] / ln, n[2] / ln)
+    d = sum((p[k] - origin[k]) * n[k] for k in range(3))
+    return tuple(p[k] - 2.0 * d * n[k] for k in range(3))
+
+
+def face_labels(points, src_faces, mirrors, tol, limit=40000):
+    """v0.30.0: son gövdenin her yüzü hangi kaynak yüzeyden (yama) geldi?
+
+    points: yüz başına örnek nokta (tessellate'in LAST_FACE_PTS'i); src_faces: yamaların OCC
+    yüzleri. Örnek nokta (aynalı kopyalarda yansıması) bir kaynak yüze tol içinde yakınsa o
+    yamanın sırası, değilse -1 (fillet / boolean / süpürme yüzü). Önce sınır kutusuyla elenir.
+    Fillet / boolean sonrasında kırpılan yüzler de doğru yamaya düşer (geçmişe bakmaz)."""
+    n = len(points)
+    if _DistSS is None or not src_faces or n * len(src_faces) > limit:
+        return [-1] * n
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    add = _static(BRepBndLib, "Add")
+    boxes = []
+    for f in src_faces:
+        b = Bnd_Box()
+        add(f, b)
+        b.Enlarge(tol)
+        boxes.append(b)
+    out = []
+    for P in points:
+        if P is None:
+            out.append(-1)
+            continue
+        samples = [tuple(P)] if len(P) == 3 and not hasattr(P[0], "__len__") else \
+            [tuple(q) for q in P]
+        refl = [lambda q: q]
+        for origin, normal in mirrors or ():
+            refl += [(lambda q, r=r, o=origin, nn=normal: _reflect(r(q), o, nn)) for r in refl]
+        best = (tol, -1)
+        for rf in refl:                        # aynalı kopya: yansıyan noktalar kaynakta
+            pts = [rf(q) for q in samples]
+            gps = [_pnt(q) for q in pts]
+            for i, (f, b) in enumerate(zip(src_faces, boxes)):
+                if any(b.IsOut(g) for g in gps):
+                    continue
+                worst = 0.0
+                try:
+                    for g in gps:              # BÜTÜN örnekler aynı kaynak yüzde olmalı
+                        d = _DistSS(BRepBuilderAPI_MakeVertex(g).Vertex(), f)
+                        if not d.IsDone():
+                            worst = tol
+                            break
+                        worst = max(worst, d.Value())
+                        if worst >= best[0]:
+                            break
+                except Exception:
+                    continue
+                if worst < best[0]:
+                    best = (worst, i)
+        out.append(best[1])
+    return out
 
 
 # ================================================================ STEP dışa aktarma

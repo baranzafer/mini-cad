@@ -1,4 +1,4 @@
-# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.29.0)
+# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.30.0)
 
 > **Ad değişikliği (v0.27.0):** eklentinin görünen adı **BlendCAD** oldu. Paket kimliği
 > (`id = "mini_cad"`), klasör adı, `minicad.*` operatörleri ve `MINICAD_*` sınıfları
@@ -12,7 +12,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.29.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.30.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
 - Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
 - Kurulum zip'leri `dist/` klasöründe.
 - Her sürüm ayrı bir commit.
@@ -499,6 +499,44 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
     tercihi açıkken görünür (`ribbon_state.palette_allowed`). BlendCAD düğmesiyle şerit
     kapanınca açık CAD araçları da kapanır (taslak kaydedilir: `blendcad._close_tools`);
     eski palete / panele düşülmez.
+  - **v0.30.0: bağlam (üzerine gelme + sağ tık menüsü)** — `ribbon_ctx.py`, `ribbon_menu.py`:
+    - Şerit açıkken öğeler üzerine gelince vurgulanır: araç kapalıyken gövde yüzeyi (yarı
+      saydam, `cad_patch` etiketiyle bütün yama) ve eğriler (kalın); çizim açıkken taslak
+      nesnesi / noktası (yalnız süren çizgi yokken: `sketch_idle`).
+    - Sağ tık mini menüsü (imlecin sağına, sığmazsa soluna): Yüzey (sil, devre dışı, eğrilerini
+      seç, böl, birleşim Gövde / Keskin / Teğet, ayarlar, fillet), işlem yüzü (fillet /
+      boolean / süpürme / sıra pencereleri, yenile), eğri (çizimi düzenle, eğriyi sil —
+      `links.remove_splines` ile referanslar eşlenir, kenar seçimi, seç, profil yap), taslak
+      nesnesi (Sil, Kırp, Böl, Uzat, Ötele, Taşı, Kopyala, Döndür, Ayna, Yatay, Dikey, Ölçü,
+      Eşit, Teğet), taslak noktası (sil, sabitle, çakışık, taşı), kenar seçiminde kenar
+      (fillet, süpürme yolu, yüzey, yeni gövde, seçime ekle, temizle).
+    - Taslak eylemleri araç + yapay tık (+ gerekirse tuş) gönderir (`ribbon_ctx.send_click`):
+      klavye / fareyle birebir aynı kod yolu. Şerit kapalıyken sağ tık eski davranışında;
+      çizgi çizerken sağ tık çizgiyi bitirir (menü açılmaz); kısıt simgesinin kendi sağ tık
+      menüsü önceliklidir. Ana şeritten hiçbir düğme kaldırılmadı.
+    - Menü eylemleri sağ tıklanan gövdeyi hedef alır (`ra.call(..., _obj=gövde)`: aktif obje
+      geçersiz kılınır; başka gövde aktifken yanlış gövdeyi değiştirmez).
+  - **v0.30.0: yüz → yüzey etiketi.** Motor son gövdenin her OCC yüzü için en fazla 3 uzak
+    örnek nokta alır (`geometry._face_samples`, üçgenleme sırasında) ve `face_labels` ile
+    hepsi aynı kaynak yama yüzüne tol içinde mi bakar (aynalı kopyalar yansıtılarak; önce
+    sınır kutusu). Fillet / boolean / süpürme yüzleri -1. Tek nokta yetmiyordu: fillet yüzünün
+    teğet kenarındaki üçgeni komşu düzleme yakın görünüyordu (ölçüldü). Üçgen başına etiket
+    `res["tri_patch"]` → `core.write_patch_labels` → mesh yüz özniteliği `cad_patch`.
+    Önizleme hesaplarında yazılmaz (öznitelik kaldırılır). Ölçüm (`bpy_model_check.py`):
+    delikli + filletli kutunun üst yüzü tek yamada, alan 0.5051 ≈ 0.5048.
+  - **v0.30.0: bildirim merkezi** (`notify.py`): bütün hata / uyarı / bilgi / öneri iletileri
+    görünümün sol altında (araç çubuğunun sağında, alttaki bölgelerin üstünde), önem
+    derecesine göre gruplu, renkli. Her ileti 45 sn kalır; köşedeki çarpı hepsini kapatır.
+    Gövdelerin süren hataları (`blendcad.body_entries`) kaynak olarak eşitlenir: düzelince
+    kalkar, kapatılınca değişmedikçe geri gelmez. Sol üstteki kırmızı liste
+    (`bool_overlay._draw_errors`) ve şerit altı bildirim artık çizilmez.
+  - **v0.30.0: Sil aracı** (`DELETE`, `draw_modify`): imlecin altındaki taslak nesnesinin
+    tamamı (kesişimsiz kırpma: `sm.trim(..., [])`) ya da taslak noktası; sürükleyerek çoklu.
+    Şeritte Eskiz ve Değiştir sekmelerinde (`DELETE_SK` kopyası aynı aracı açar).
+  - **v0.30.0: düzlem.** "Önce düzlem" (`minicad_pick_plane`) varsayılan kapalı: araçlar
+    otomatik düzlemle açılır; eski dosyalarda şerit ilk açılışta bir kez kapatılır
+    (`blendcad._migrate_scene`). Eskiz başlat açıkça düzlem seçtirir (`start_plane="PICK"`).
+    Geçici zemin (G) araç değişse de kalır; yalnız G ya da açık düzlem seçimi bitirir.
   - **Olay paylaşımı:** çizim, kenar seçimi ve yüzey bölme kalıcı operatörleri fare şeridin
     (ya da açılır listesinin) üstündeyken olayı `PASS_THROUGH` ile şeride bırakır
     (`ribbon_state.over_ribbon`). Şerit açıkken çizimin kayan paleti (`palette.py`) çizilmez
@@ -564,7 +602,10 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `ribbon_actions.py` | 420 | Şerit düğmeleri → Mini CAD işlevleri: çizim araçları, operatörler, açılır panel pencereleri, aç / kapa, düğme durumu |
 | `ribbon_forms.py` | 846 | Araç pencereleri toolkit'i (bpy'siz): UI kurucusu, FormHost (olaylar, yazma, sürükleme, açılır liste, çizim) |
 | `ribbon_formspecs.py` | 604 | Araç pencerelerinin içerikleri (eski N paneli içeriği yeni tasarımla) |
-| `ribbon_state.py` | 91 | bpy'siz paylaşılan şerit durumu, `over_ribbon`, `insets` (başlık örtüşmesi) |
+| `ribbon_ctx.py` | 625 | Bağlam: boşta üzerine gelme (eğri / yüzey), vurgu çizimi, sağ tık menülerinin içeriği ve eylemleri, çizim / kenar seçimi kancaları |
+| `ribbon_menu.py` | 139 | Sağ tık mini menüsü (bpy'siz) |
+| `notify.py` | 163 | Bildirim merkezi (bpy'siz): önem grupları, 45 sn, çarpı, süren durum eşitleme |
+| `ribbon_state.py` | 98 | bpy'siz paylaşılan şerit durumu, `over_ribbon`, `insets` (başlık örtüşmesi) |
 | `recorder.py` | 632 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
 
@@ -1216,6 +1257,9 @@ Betiğin yaptıkları:
 | t72 | Şerit işlevleri (sahte bpy / çizim / kenar seçimi): bütün hazır düğmeler bağlı, çizim kapalıyken araç → çizim açılır + araç, düzlemler, eskiz komutları, aç / kapa sahne ayarları, açılır pencereler, poll hatası iletisi, etkin aracın / türün şeride yansıması, başlık örtüşmesine göre yerleşim, küçük düğmeler |
 | t73 | Araç pencereleri (sahte veri): devre dışı alan, onay kutusu, ok / sürükle / tıkla-yaz / sınır / geçersiz değer / Tab / Esc, açı derece, bölmeli seçim, enum ve obje açılır listesi, düğmeler, liste (seçim, satır içi onay kutusu, kaydırma), uzun yazı, kapatma, alçak görünümde kaydırma, şeritle birlikte olay yönlendirme |
 | tools/bpy_model_check.py | **GERÇEK Blender 5.x (bpy modülü) + GERÇEK OCC**: tel kafesten kutu → 6 yüzey → kapalı katı; Gövde, Yüzeyler, Fillet (ölçü yaz, Pah), Boolean (obje listesi, ekle → delik), İşlem sırası, Simetri, Ayarlar, Kısıtlar, Çekirdek, Mesh → tel kafes, Kenar seçimi, Süpürme pencereleri kendi denetimleriyle kullanılır, her biri PNG'ye çizilir, STEP yazılır. `python3 -m venv v && v/bin/pip install bpy "cadquery-ocp-novtk>=7.9.3,<8" pillow` sonra `v/bin/python devkit/tools/bpy_model_check.py <mini_cad'in üst klasörü> <çıktı>` |
+| t74 | Sil aracı: kesişen doğrunun tamamı, dikdörtgenin tam kenarı (kesişimde bölünmez), sürükleyerek çoklu, taslak noktası, Ctrl+Z |
+| t75 | Bildirim merkezi: önem derecesi, tekrar etmeyen ileti, 45 sn, süren durum (değişmezse zaman ilerlemez, düzelince kalkar, kapatılınca geri gelmez), çarpı, grup sınırı, şerit iletileri merkeze |
+| t76 | Sağ tık menüsü gerçek çizim aracında: vurgu, menü öğeleri, Sil, Yatay kısıtı, Taşı (seçili + temel nokta adımı), nokta menüsü, çizerken sağ tık eskisi gibi, şerit kapalıyken menü yok |
 | tools/pil_painter.py | PIL ressamı (ribbon_preview ve bpy_model_check ortak) |
 | tools/ribbon_preview.py | Şeridi PIL ile PNG'ye çizer (aynı çizim kodu): `python3 devkit/tools/ribbon_preview.py mini_cad <çıktı klasörü>` |
 | t70 | Profil Süpürme: gather → motor → boolean (sıra, parametreler, açı derece), imza (ayar / profil), profil yoksa Model kaynaklı, çekirdek hatası, Ayrıntılı Teşhis (`deep` yalnız istenen işlemde), `is_bevel`, `after_bevel` ipucu bayrağı, görünüm uyarısı kısa biçimi |
@@ -1477,3 +1521,10 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   tercihiyle; BlendCAD kapanınca araçlar da kapanır. Yeni modüller `ribbon_forms.py`,
   `ribbon_formspecs.py`; test t73; araçlar `bpy_model_check.py` (gerçek Blender + OCC
   model denemesi), `pil_painter.py`.
+- **0.30.0:** Sil aracı (Eskiz + Değiştir); gövde yüzlerine kaynak yüzey etiketi
+  (`cad_patch`) ve görünümde yüzey / eğri / taslak nesnesi üzerine gelince vurgu; sağ tık
+  mini menüsü (yüzey sil / birleşim / böl, eğri sil / düzenle, taslak nesnesine araçlar ve
+  kısıtlar, kenar seçiminde fillet / süpürme / yüzey); bildirim merkezi (sol alt, önem
+  gruplu, 45 sn, çarpı); araçlar otomatik düzlemle açılır, geçici zemin bitene kadar kalır.
+  Yeni modüller `ribbon_ctx.py`, `ribbon_menu.py`, `notify.py`; testler t74–t76;
+  `bpy_model_check.py` etiket ve menü denetimleriyle genişledi.

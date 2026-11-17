@@ -46,6 +46,7 @@ MODIFY_TOOLS = [
     ("OFFSET", "Ötele: çizgiye tıkla, mesafe ver (Shift+tık: tek nesne)", ""),
     ("FILLET2D", "Köşe yuvarla: yarıçap yaz, köşeye tıkla", ""),
     ("CHAMFER2D", "Pah: mesafe yaz (Tab: 2. mesafe), köşeye tıkla", ""),
+    ("DELETE", "Sil: nesnenin ya da noktanın tamamı (sürükle: çoklu)", ""),
 ]
 XFORM_TOOLS = [
     ("MOVE", "Taşı: seç → temel nokta → hedef (uzunluk / açı yazılabilir)", ""),

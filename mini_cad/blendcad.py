@@ -19,7 +19,7 @@ import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
 
-from . import ribbon, ribbon_actions, ribbon_state
+from . import notify, ribbon, ribbon_actions, ribbon_ctx, ribbon_state
 
 _STATE = ribbon_state.STATE
 _STATE.setdefault("capture", False)
@@ -189,6 +189,7 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
     bl_description = "BlendCAD çizim şeridini aç / kapat (CAD araçları üstte yatay panelde)"
 
     _handle = None
+    _hov = None
     _timer = None
 
     @classmethod
@@ -210,9 +211,12 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
         rb.hover = None
         rb.fly = None
         _STATE.update(running=True, close=False, area=context.area.as_pointer())
+        _migrate_scene(context.scene)
         _hide_text(context.area)
         BLENDCAD_OT_workspace._handle = bpy.types.SpaceView3D.draw_handler_add(
             _draw_ribbon, (), "WINDOW", "POST_PIXEL")
+        BLENDCAD_OT_workspace._hov = bpy.types.SpaceView3D.draw_handler_add(
+            _draw_hover, (), "WINDOW", "POST_VIEW")
         BLENDCAD_OT_workspace._timer = context.window_manager.event_timer_add(
             0.05, window=context.window)
         context.window_manager.modal_handler_add(self)
@@ -229,6 +233,12 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
         if BLENDCAD_OT_workspace._handle is not None:
             bpy.types.SpaceView3D.draw_handler_remove(BLENDCAD_OT_workspace._handle, "WINDOW")
             BLENDCAD_OT_workspace._handle = None
+        if BLENDCAD_OT_workspace._hov is not None:
+            bpy.types.SpaceView3D.draw_handler_remove(BLENDCAD_OT_workspace._hov, "WINDOW")
+            BLENDCAD_OT_workspace._hov = None
+        ribbon_ctx.clear()
+        if _STATE["ribbon"] is not None:
+            _STATE["ribbon"].menu.close()
         if BLENDCAD_OT_workspace._timer is not None:
             context.window_manager.event_timer_remove(BLENDCAD_OT_workspace._timer)
             BLENDCAD_OT_workspace._timer = None
@@ -299,10 +309,41 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
             if rb.leave(now):
                 area.tag_redraw()
             return {"PASS_THROUGH"}
+        nc = notify.CENTER
         if et in ("MOUSEMOVE", "INBETWEEN_MOUSEMOVE"):
-            if rb.move(mx, my, now, event.shift):
+            ch = nc.move(mx, my)
+            if rb.move(mx, my, now, event.shift) or ch:
+                area.tag_redraw()
+            if _idle(context) and not rb.contains(mx, my) and not nc.contains(mx, my):
+                region = _window_region(area)
+                if ribbon_ctx.hover_update(context, area, region, mx, my):
+                    area.tag_redraw()
+            elif ribbon_ctx.clear():
                 area.tag_redraw()
             return {"PASS_THROUGH"}
+        if et == "RIGHTMOUSE":
+            if not press:
+                if getattr(self, "_eat_rmb", False):
+                    self._eat_rmb = False
+                    return {"RUNNING_MODAL"}
+                return {"RUNNING_MODAL"} if rb.contains(mx, my) else {"PASS_THROUGH"}
+            if rb.menu.is_open():
+                rb.menu.press(mx, my)
+                area.tag_redraw()
+                self._eat_rmb = True
+                return {"RUNNING_MODAL"}
+            if rb.contains(mx, my):
+                return {"RUNNING_MODAL"}
+            t = ribbon_ctx.HOVER["target"]
+            if t is not None and _idle(context) and ribbon_ctx.open_menu(t, mx, my):
+                self._eat_rmb = True
+                return {"RUNNING_MODAL"}
+            return {"PASS_THROUGH"}
+        if nc.contains(mx, my) and et in ("LEFTMOUSE", "RIGHTMOUSE", "MIDDLEMOUSE"):
+            if et == "LEFTMOUSE" and press:
+                nc.press(mx, my)
+                area.tag_redraw()
+            return {"RUNNING_MODAL"}
         over = rb.contains(mx, my) or rb.fly is not None or rb.forms.drop is not None
         if et == "LEFTMOUSE":
             if press and over:
@@ -328,6 +369,102 @@ class BLENDCAD_OT_workspace(bpy.types.Operator):
             area.tag_redraw()
             return {"RUNNING_MODAL"}
         return {"PASS_THROUGH"}
+
+
+def _idle(context):
+    """CAD aracı açık değil ve obje modundayız: boşta üzerine gelme / sağ tık menüsü."""
+    return (ribbon_actions.draw_op() is None and ribbon_actions.pick_op() is None and
+            ribbon_actions.split_op() is None and getattr(context, "mode", "") == "OBJECT")
+
+
+def _draw_hover():
+    ctx = bpy.context
+    if ctx.area is None or _STATE["area"] != ctx.area.as_pointer():
+        return
+    try:
+        ribbon_ctx.draw_hover(ctx)
+    except Exception as e:  # pragma: no cover
+        print("[BlendCAD] vurgu çizilemedi:", e)
+
+
+def _migrate_scene(sc):
+    """v0.30.0: eski dosyalarda 'Önce düzlem' açık kaydedilmiş olabilir; araçlar artık otomatik
+    düzlemle açılır. Bir kez kapatılır (sonra kullanıcı isterse yeniden açar)."""
+    try:
+        if not sc.get("blendcad_v30_plane"):
+            sc.minicad_pick_plane = False
+            sc["blendcad_v30_plane"] = 1
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------- bildirim merkezi
+
+def body_entries(scene):
+    """Görünür CAD gövdelerinin süren hata / uyarıları: [(seviye, metin)]."""
+    from .bool_overlay import short_error
+    out = []
+    for ob in getattr(scene, "objects", ()):
+        try:
+            props = ob.cad
+            if not props.is_cad or not ob.visible_get():
+                continue
+        except Exception:
+            continue
+        for pt in props.patches:
+            if not pt.enabled:
+                continue
+            info = pt.info or ""
+            if not pt.ok:
+                out.append(("error", f"{ob.name} · {pt.name}: {info}"))
+            elif "UYARI" in info:
+                out.append(("warn", f"{ob.name} · {pt.name}: {info[info.index('UYARI'):]}"))
+        for f in props.features:
+            if f.enabled and not f.ok:
+                out.append(("error", f"{ob.name} · {f.name}: {short_error(f.info)}"))
+    return out
+
+
+def _draw_notify():
+    ctx = bpy.context
+    area, region = ctx.area, ctx.region
+    if area is None or region is None:
+        return
+    if _STATE["running"] and _STATE["area"] != area.as_pointer():
+        return                                   # şerit açıkken yalnız onun görünümünde
+    try:
+        now = _now()
+        c = notify.CENTER
+        c.sync("body", body_entries(ctx.scene), now)
+        c.expire(now)
+        s = ctx.preferences.system.ui_scale
+        left, _r, _t = ribbon_state.insets(area, ctx.preferences.system.use_region_overlap)
+        bottom = 0.0
+        for r in area.regions:      # altta pencereye binen bölgeler (varlık rafı vb.)
+            if r.type in ("ASSET_SHELF", "ASSET_SHELF_HEADER", "HEADER", "TOOL_HEADER") and \
+                    r.height > 1 and r.y < region.y + region.height * 0.5 and \
+                    r.y + r.height > region.y:
+                bottom = max(bottom, r.y + r.height - region.y)
+        p = GPUPainter(region.width, region.height)
+        gpu.state.blend_set("ALPHA")
+        w = min(440, max(260, (region.width - left) / s - 140))
+        c.draw(p, s, left + 10 * s, bottom + 10 * s, w, now)
+    except Exception as e:  # pragma: no cover
+        print("[BlendCAD] bildirimler çizilemedi:", e)
+    finally:
+        gpu.state.blend_set("NONE")
+
+
+def _notify_tick():
+    try:
+        if notify.CENTER.expire(_now()):
+            _redraw_all(bpy.context)
+    except Exception:
+        pass
+    return 1.0
+
+
+_NOTIFY = {"handle": None}
 
 
 def _close_tools():
@@ -395,7 +532,10 @@ def _setup_forms(rb):
 
     def message(text):
         rb.toast = (text, _now())
+        notify.CENTER.push(notify.level_of(text), text, _now())
+        _redraw_all(bpy.context)
     f.on_message = message
+    rb.notify = lambda text: notify.CENTER.push(notify.level_of(text), text, _now())
     ribbon_actions.HOOKS["message"] = message
     ribbon_actions.HOOKS["open_form"] = lambda fid, title, icon, spec, width: \
         rb.open_form(fid, title, icon, spec, width)
@@ -512,6 +652,10 @@ def register():
     for c in classes:
         bpy.utils.register_class(c)
     ribbon_actions.register()
+    _NOTIFY["handle"] = bpy.types.SpaceView3D.draw_handler_add(_draw_notify, (), "WINDOW",
+                                                               "POST_PIXEL")
+    if not bpy.app.timers.is_registered(_notify_tick):
+        bpy.app.timers.register(_notify_tick, first_interval=1.0, persistent=True)
     bpy.types.VIEW3D_HT_header.append(_header_button)
     bpy.app.handlers.load_pre.append(_on_load_pre)
 
@@ -520,12 +664,22 @@ def unregister():
     if _on_load_pre in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.remove(_on_load_pre)
     bpy.types.VIEW3D_HT_header.remove(_header_button)
-    if BLENDCAD_OT_workspace._handle is not None:
+    if _NOTIFY["handle"] is not None:
         try:
-            bpy.types.SpaceView3D.draw_handler_remove(BLENDCAD_OT_workspace._handle, "WINDOW")
+            bpy.types.SpaceView3D.draw_handler_remove(_NOTIFY["handle"], "WINDOW")
         except Exception:
             pass
-        BLENDCAD_OT_workspace._handle = None
+        _NOTIFY["handle"] = None
+    if bpy.app.timers.is_registered(_notify_tick):
+        bpy.app.timers.unregister(_notify_tick)
+    for attr in ("_handle", "_hov"):
+        h = getattr(BLENDCAD_OT_workspace, attr)
+        if h is not None:
+            try:
+                bpy.types.SpaceView3D.draw_handler_remove(h, "WINDOW")
+            except Exception:
+                pass
+            setattr(BLENDCAD_OT_workspace, attr, None)
     _STATE.update(running=False, close=False, area=None)
     ribbon_actions.unregister()
     for c in reversed(classes):

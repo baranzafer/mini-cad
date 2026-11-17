@@ -508,6 +508,11 @@ class MINICAD_OT_pick_edges(bpy.types.Operator):
         press = event.value == "PRESS"
         if ribbon_state.over_ribbon(event):
             return {"PASS_THROUGH"}          # v0.28.0: fare BlendCAD şeridinde
+        if ribbon_state.is_running():         # v0.30.0: kenarda sağ tık menüsü
+            from . import ribbon_ctx
+            r = ribbon_ctx.pick_event(self, context, event, mx, my, inside)
+            if r is not None:
+                return r
 
         if event.type == "ESC" and press and getattr(context, "mode", "OBJECT") == "OBJECT":
             self._finish(context)

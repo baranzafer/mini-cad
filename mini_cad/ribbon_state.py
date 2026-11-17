@@ -50,6 +50,9 @@ def over_ribbon(event):
     rb = STATE["ribbon"]
     if not STATE["running"] or rb is None:
         return False
+    if getattr(getattr(rb, "menu", None), "is_open", lambda: False)() and \
+            event.type in MOUSE_EVENTS:
+        return True                           # sağ tık menüsü açık: fare menünün
     if STATE.get("capture"):              # araç penceresinde yazılıyor / sürükleniyor
         return event.type not in ("TIMER", "TIMER_REPORT", "NONE")
     if event.type not in MOUSE_EVENTS:
@@ -60,7 +63,11 @@ def over_ribbon(event):
         region = window_region(area) if area is not None else None
         if region is None:
             return False
-        return rb.contains(event.mouse_x - region.x, event.mouse_y - region.y)
+        mx, my = event.mouse_x - region.x, event.mouse_y - region.y
+        if rb.contains(mx, my):
+            return True
+        from . import notify                      # sol alttaki bildirim merkezi
+        return notify.CENTER.contains(mx, my)
     except Exception:
         return False
 

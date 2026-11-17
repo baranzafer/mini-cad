@@ -126,12 +126,15 @@ class Ribbon:
         self.scroll_max = 0.0
         self.toast = None                   # (metin, t0)
         self.on_action = on_action
+        self.notify = None                  # (metin) -> bildirim merkezine
         self.state_fn = None                # (düğme) -> açık mı (None: şeridin kendi durumu)
         self.active_fn = None               # () -> etkin araç kimliği (Blender'dan)
         self.now = 0.0
         self._anchor_x = 0.0                # son tıklanan düğmenin sol kenarı (pencere yeri)
         from .ribbon_forms import FormHost
+        from .ribbon_menu import ContextMenu
         self.forms = FormHost(scale)        # araç pencereleri (şeridin altına açılır)
+        self.menu = ContextMenu(scale)      # sağ tık menüsü (v0.30.0)
 
     def open_form(self, fid, title, icon, spec, width=300):
         """Son tıklanan düğmenin altında araç penceresi aç (aynısı açıksa kapatır)."""
@@ -333,6 +336,8 @@ class Ribbon:
             return True
         if self.forms.contains(mx, my):
             return True
+        if self.menu.is_open():
+            return True                     # açık menü: bütün tıklar menünün
         if self.fly_box:
             fx0, fy0, fx1, fy1 = self.fly_box
             if fx0 <= mx <= fx1 and fy0 <= my <= fy1:
@@ -363,6 +368,8 @@ class Ribbon:
 
     def move(self, mx, my, now, shift=False):
         self.now = now
+        if self.menu.is_open():
+            return self.menu.move(mx, my)
         fch = self.forms.move(mx, my, shift)
         if self.forms.drag is not None or (self.forms.contains(mx, my) and
                                            not self._in_box(mx, my)):
@@ -405,6 +412,8 @@ class Ribbon:
     def press(self, mx, my, now):
         """Sol tık. Dönüş: True = olay şeritte tüketildi."""
         self.now = now
+        if self.menu.is_open():
+            return self.menu.press(mx, my)
         if self.fly is None and not self._in_box(mx, my) and (
                 self.forms.contains(mx, my) or self.forms.edit is not None or
                 self.forms.drop is not None):
@@ -485,6 +494,9 @@ class Ribbon:
         return True
 
     def escape(self):
+        if self.menu.is_open():
+            self.menu.close()
+            return True
         if self.forms.key("ESC"):
             return True
         if self.fly is not None:
@@ -519,6 +531,8 @@ class Ribbon:
                 msg = f"“{btn['title']}” seçildi"
         if msg:
             self.toast = (msg, self.now)
+            if self.notify is not None:       # v0.30.0: bildirim merkezi (sol alt)
+                self.notify(msg)
 
     # ------------------------------------------------------------ kart
 
@@ -602,9 +616,12 @@ class Ribbon:
             self.forms.draw(p, y0 - 6 * s, region_w, region_h)
         if self.fly is not None:
             self._draw_fly(p)
-        tip = self._draw_tip(p, now, region_w)
-        if not tip and self.fly is None:
+        tip = self._draw_tip(p, now, region_w) if not self.menu.is_open() else False
+        if not tip and self.fly is None and self.notify is None:
             self._draw_toast(p, now, region_w)
+        if self.menu.is_open():
+            self.menu.s = s
+            self.menu.draw(p, region_w, region_h)
 
     def _draw_btn(self, p, ident, x0, y0, x1, y1, hov):
         s = self.s

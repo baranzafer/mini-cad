@@ -37,6 +37,9 @@ class RenderMixin:
                 return
             self._draw_sketch3d(region)
             self._txt_draw3d(region)
+            if ribbon_state.is_running() and getattr(self, "ctx_hover", None):
+                from . import ribbon_ctx
+                ribbon_ctx.draw_sketch_hover(self, region)       # v0.30.0
             if self.tool in MODIFY_TOOLS:
                 self._draw_modify3d(region)
             if self.grid_on and self.cursor is not None and not self.tool.startswith("C_"):

@@ -520,7 +520,7 @@ TOOL_KEYS = {"W": "SELECT", "L": "LINE", "E": "ARC3", "M": "CARC", "O": "CIRCLE"
 XFORM_TOOLS = {"MOVE", "COPY", "ROTATE", "SCALE", "STRETCH", "RPAT", "CPAT", "MIRROR"}
 
 # Taslak üzerinde çalışan bütün araçlar (Değiştir + Düzenle / Desen)
-MODIFY_TOOLS = {"TRIM", "EXTEND", "SPLIT", "OFFSET", "FILLET2D", "CHAMFER2D"} | XFORM_TOOLS | \
+MODIFY_TOOLS = {"TRIM", "EXTEND", "SPLIT", "OFFSET", "FILLET2D", "CHAMFER2D", "DELETE"} | XFORM_TOOLS | \
     {"CIRCT", "PROJECT", "EDITSK"}
 
 FIELDS = {"CIRCLE": ("Yarıçap", None), "RECT": ("Genişlik", "Yükseklik"),
