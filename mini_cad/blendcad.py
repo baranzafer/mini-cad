@@ -447,12 +447,37 @@ def _draw_notify():
                 bottom = max(bottom, r.y + r.height - region.y)
         p = GPUPainter(region.width, region.height)
         gpu.state.blend_set("ALPHA")
+        _draw_repair_markers(p, ctx, region, s)
         w = min(440, max(260, (region.width - left) / s - 140))
         c.draw(p, s, left + 10 * s, bottom + 10 * s, w, now)
     except Exception as e:  # pragma: no cover
         print("[BlendCAD] bildirimler çizilemedi:", e)
     finally:
         gpu.state.blend_set("NONE")
+
+
+def _draw_repair_markers(p, ctx, region, s):
+    """Yüzey onarımı bekliyorsa sorun noktalarında halka."""
+    from . import repair
+    pts = repair.marker_points()
+    if not pts or ctx.region_data is None:
+        return
+    from bpy_extras.view3d_utils import location_3d_to_region_2d
+    from mathutils import Vector
+    col = notify.COL_ERR
+    for kind, w in pts:
+        q = location_3d_to_region_2d(region, ctx.region_data, Vector(tuple(w)))
+        if q is None:
+            continue
+        c = col if kind == "BRANCH" else (1.0, 0.66, 0.22, 1.0)
+        for r in (9 * s, 10.5 * s):
+            seg = []
+            import math
+            for k in range(24):
+                a0, a1 = k * math.pi / 12, (k + 1) * math.pi / 12
+                seg += [(q.x + r * math.cos(a0), q.y + r * math.sin(a0)),
+                        (q.x + r * math.cos(a1), q.y + r * math.sin(a1))]
+            p.lines(seg, c, 1.6)
 
 
 def _notify_tick():

@@ -1,4 +1,4 @@
-# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.30.0)
+# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.31.0)
 
 > **Ad değişikliği (v0.27.0):** eklentinin görünen adı **BlendCAD** oldu. Paket kimliği
 > (`id = "mini_cad"`), klasör adı, `minicad.*` operatörleri ve `MINICAD_*` sınıfları
@@ -12,7 +12,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.30.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.31.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
 - Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
 - Kurulum zip'leri `dist/` klasöründe.
 - Her sürüm ayrı bir commit.
@@ -537,6 +537,28 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
     otomatik düzlemle açılır; eski dosyalarda şerit ilk açılışta bir kez kapatılır
     (`blendcad._migrate_scene`). Eskiz başlat açıkça düzlem seçtirir (`start_plane="PICK"`).
     Geçici zemin (G) araç değişse de kalır; yalnız G ya da açık düzlem seçimi bitirir.
+  - **v0.31.0: yüzey onarımı** (`loopfix.py` bpy'siz teşhis, `repair.py` uygulama,
+    `ribbon_formspecs.repair_form`). Yüzey oluşturulamayınca (`ui.apply_surface`, iki yol da;
+    çizimde F, kenar seçiminde Enter) seçili kenarlar incelenir ve **kullanıcıya sorulur**:
+    - TINY çok kısa parça → seçimden çıkar · DUP üst üste binen kenar → fazlayı çıkar ·
+      TJUNC uç başka kenarın ortasına değiyor (kenarda nokta yok: snap ile bağlanmış) →
+      kenarı orada böl (`split.insert_point`, biçim aynı, referanslar `remap_insert`) + ucu
+      kaynat · GAP yakın ama değmeyen uçlar → ortak noktada birleştir (tutamaçlar uçla
+      taşınır) · EXTRA döngüye katılmayan (taşan / fazla) parça → seçimden çıkar · BRANCH
+      köşede 3+ kenar → yalnız bilgi.
+    - "Yakın" = seçim boyunun %1'i (en az 10×join_tol, en çok 5 cm): niyet edilmiş birleşme;
+      daha uzak açıklıklar onarılmaz (`loopfix.near_for`).
+    - Pencere bütün adımları önceden gösterir (`loopfix.plan`: düz veride benzetim); şimdi
+      uygulanabilen adımda "Düzelt", altta "Hepsini düzelt ve yüzeyi oluştur", "Yeniden
+      dene", "Vazgeç". Sorun noktaları görünümde turuncu (dal: kırmızı) halka. Onarımlar tek
+      geri alma adımı. Vazgeç / pencere kapanması hiçbir şeyi değiştirmez. Şerit kapalıysa
+      ileti bildirim merkezine ("BlendCAD şeridini aç"), Araçlar → Yüzey onarımı.
+    - Onarım sonrası kenar seçimi temizlenir (segment sıraları değişmiş olabilir), çizim
+      aracının eğri önbelleği yenilenir.
+    - Ölçüm (`devkit/tools/bpy_repair_check.py`, gerçek Blender + OCC): taşan çizgi,
+      kenar ortasına snap, 3 mm boşluk, çift kenar, mevcut gövdeye eklerken taşan kenar —
+      hepsi önce oluşmuyor, onaydan sonra oluşuyor; komşu yüzeyler bozulmuyor; Vazgeç
+      eğrileri değiştirmiyor.
   - **Olay paylaşımı:** çizim, kenar seçimi ve yüzey bölme kalıcı operatörleri fare şeridin
     (ya da açılır listesinin) üstündeyken olayı `PASS_THROUGH` ile şeride bırakır
     (`ribbon_state.over_ribbon`). Şerit açıkken çizimin kayan paleti (`palette.py`) çizilmez
@@ -605,6 +627,8 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `ribbon_ctx.py` | 625 | Bağlam: boşta üzerine gelme (eğri / yüzey), vurgu çizimi, sağ tık menülerinin içeriği ve eylemleri, çizim / kenar seçimi kancaları |
 | `ribbon_menu.py` | 139 | Sağ tık mini menüsü (bpy'siz) |
 | `notify.py` | 163 | Bildirim merkezi (bpy'siz): önem grupları, 45 sn, çarpı, süren durum eşitleme |
+| `loopfix.py` | 270 | Yüzey sınırı teşhisi ve onarım planı (bpy'siz) |
+| `repair.py` | 257 | Onarımı eğri verisinde uygula, seçimi güncelle, yüzeyi yeniden dene, pencere / işaret verisi |
 | `ribbon_state.py` | 98 | bpy'siz paylaşılan şerit durumu, `over_ribbon`, `insets` (başlık örtüşmesi) |
 | `recorder.py` | 632 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
@@ -1260,6 +1284,8 @@ Betiğin yaptıkları:
 | t74 | Sil aracı: kesişen doğrunun tamamı, dikdörtgenin tam kenarı (kesişimde bölünmez), sürükleyerek çoklu, taslak noktası, Ctrl+Z |
 | t75 | Bildirim merkezi: önem derecesi, tekrar etmeyen ileti, 45 sn, süren durum (değişmezse zaman ilerlemez, düzelince kalkar, kapatılınca geri gelmez), çarpı, grup sınırı, şerit iletileri merkeze |
 | t76 | Sağ tık menüsü gerçek çizim aracında: vurgu, menü öğeleri, Sil, Yatay kısıtı, Taşı (seçili + temel nokta adımı), nokta menüsü, çizerken sağ tık eskisi gibi, şerit kapalıyken menü yok |
+| t77 | Yüzey sınırı teşhisi: kusursuz kare, taşan çizgi (TJUNC → EXTRA), 3 mm boşluk (20 cm değil), çift kenar, çok kısa parça, köşesiz kenara snap (iki yüzey), dal, plan (bütün adımlar, veri değişmez) |
+| tools/bpy_repair_check.py | GERÇEK Blender + OCC: kusurlu sınırlarda teşhis + onaylı onarım + yüzey; komşu gövde; Vazgeç; isteğe bağlı pencere PNG'si (`... <mini_cad üstü> <çıktı.png>`) |
 | tools/pil_painter.py | PIL ressamı (ribbon_preview ve bpy_model_check ortak) |
 | tools/ribbon_preview.py | Şeridi PIL ile PNG'ye çizer (aynı çizim kodu): `python3 devkit/tools/ribbon_preview.py mini_cad <çıktı klasörü>` |
 | t70 | Profil Süpürme: gather → motor → boolean (sıra, parametreler, açı derece), imza (ayar / profil), profil yoksa Model kaynaklı, çekirdek hatası, Ayrıntılı Teşhis (`deep` yalnız istenen işlemde), `is_bevel`, `after_bevel` ipucu bayrağı, görünüm uyarısı kısa biçimi |
@@ -1528,3 +1554,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   gruplu, 45 sn, çarpı); araçlar otomatik düzlemle açılır, geçici zemin bitene kadar kalır.
   Yeni modüller `ribbon_ctx.py`, `ribbon_menu.py`, `notify.py`; testler t74–t76;
   `bpy_model_check.py` etiket ve menü denetimleriyle genişledi.
+
+- **0.31.0:** Yüzey onarımı: yüzey oluşturulamayınca sebep bulunur (kenar ortasına değen uç,
+  yakın ama değmeyen uçlar, üst üste binen kenar, çok kısa / taşan parça, dal) ve kullanıcıya
+  sorularak düzeltilir (bölme + kaynak, uç birleştirme, seçimden çıkarma), ardından yüzey
+  yeniden denenir. Bütün adımlar önceden listelenir, görünümde işaretlenir, tek adımda geri
+  alınır. Yeni modüller `loopfix.py`, `repair.py`; test t77; araç `bpy_repair_check.py`.

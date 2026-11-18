@@ -98,9 +98,17 @@ def _add_patch(cad_ob, kind, items):
     return p
 
 
-def apply_surface(context, kind, items, new_body=False):
+def apply_surface(context, kind, items, new_body=False, offer_repair=True):
     """Hedef varsa yüzey ekler, yoksa (veya new_body ise) yeni CAD objesi oluşturur.
-    (başarılı mı, mesaj)."""
+    (başarılı mı, mesaj). v0.31.0: olmazsa sebebi bulup onarım önerir (repair.offer)."""
+    def fail(msg, tol):
+        if offer_repair and kind == "segs":
+            try:
+                from . import repair
+                msg += repair.offer(context, list(items), new_body, msg, tol)
+            except Exception as e:
+                print("[BlendCAD] onarım önerisi hazırlanamadı:", e)
+        return False, msg
     target = None if new_body else get_target(context)
     if target is None:
         me = bpy.data.meshes.new("CAD_Govde")
@@ -111,9 +119,10 @@ def apply_surface(context, kind, items, new_body=False):
         _add_patch(ob, kind, items)
         if not core.rebuild(ob):
             msg = ob.cad.status
+            tol = ob.cad.join_tol
             bpy.data.objects.remove(ob)
             bpy.data.meshes.remove(me)
-            return False, f"Yüzey oluşturulamadı: {msg}"
+            return fail(f"Yüzey oluşturulamadı: {msg}", tol)
         context.scene.minicad_target = ob
         if context.view_layer.objects.active is not None and \
                 context.view_layer.objects.active.cad.is_cad and context.mode == "OBJECT":
@@ -126,7 +135,7 @@ def apply_surface(context, kind, items, new_body=False):
         try:
             items, added = core.complete_loop(items, pool, target.cad.join_tol)
         except core.CadError as e:
-            return False, str(e)
+            return fail(str(e), target.cad.join_tol)
     patch = _add_patch(target, kind, items)
     core.rebuild(target)
     if not patch.ok:
@@ -135,7 +144,7 @@ def apply_surface(context, kind, items, new_body=False):
         target.cad.active_patch = max(0, len(target.cad.patches) - 1)
         core.forget_cache(target.name)
         core.rebuild(target)
-        return False, f"Yüzey eklenemedi: {msg}"
+        return fail(f"Yüzey eklenemedi: {msg}", target.cad.join_tol)
     extra = f" ({added} kenar komşu yüzeyden tamamlandı)" if added else ""
     return True, f"{target.name}: {len(target.cad.patches)} yüzey{extra}"
 

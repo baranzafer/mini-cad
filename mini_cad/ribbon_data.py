@@ -486,6 +486,11 @@ _TOOLS = [
           ["Gövdeyi seç", "Dosya yolunu seç"]),
     ]),
     ("Tanı", [
+        B("REPAIR", "PATCH", "Yüzey onarımı",
+          "Son oluşturulamayan yüzeyin sebebini ve onarım önerilerini gösterir (kenar ortasına "
+          "değen uç, yakın ama değmeyen uçlar, üst üste binen kenar, taşan parça...).",
+          ["Yüzey oluşturulamayınca kendiliğinden açılır", "Öneriyi seç: Düzelt",
+           "Ya da: Hepsini düzelt ve yüzeyi oluştur"]),
         B("DIAG", "DIAG", "Tanı raporu",
           "Hesap motoru ve gövde durumunu, başarısızlık kaynağıyla raporlar.",
           ["Rapor panoya kopyalanır"]),

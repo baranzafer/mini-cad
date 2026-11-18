@@ -576,6 +576,45 @@ def split_face(ui, ctx):
     ui.button("Kapat", lambda: ra.call("minicad.split_surface", invoke=True), icon="CLOSE")
 
 
+# ---------------------------------------------------------------- Yüzey onarımı (v0.31.0)
+
+TONE = {"GAP": "warn", "TJUNC": "warn", "DUP": "warn", "TINY": "warn", "EXTRA": "warn",
+        "BRANCH": "err"}
+ICON = {"GAP": "CLOSE_LOOP", "TJUNC": "SPLIT", "DUP": "COLLINEAR", "TINY": "DELETE",
+        "EXTRA": "TRIM", "BRANCH": "COINCIDENT"}
+FIX_TEXT = {"GAP": "Uçları birleştir", "TJUNC": "Böl ve kaynat", "DUP": "Fazlayı çıkar",
+            "TINY": "Parçayı çıkar", "EXTRA": "Seçimden çıkar"}
+
+
+def repair_form(ui, ctx):
+    from . import repair
+    d = repair.PENDING["data"]
+    if d is None:
+        ui.label("Bekleyen yüzey sorunu yok.", "ok")
+        return
+    ui.label(d["msg"], "err")
+    steps = d.get("plan") or d["issues"]
+    fixable = [i for i in steps if i["fix"]]
+    now = {id(i) for i in d["issues"]}
+    ui.section(f"Öneriler ({len(steps)})")
+    first = {i["msg"] for i in d["issues"]}
+    for k, iss in enumerate(steps):
+        ui.label(f"{k + 1}. " + iss["msg"], TONE.get(iss["kind"], "warn"))
+        if iss["fix"] and iss["msg"] in first:      # şimdi uygulanabilen adım
+            j = next(n for n, x in enumerate(d["issues"]) if x["msg"] == iss["msg"])
+            ui.button(FIX_TEXT.get(iss["kind"], "Düzelt"), lambda j=j: repair.fix(j),
+                      icon=ICON.get(iss["kind"]))
+    del now
+    ui.sep()
+    ui.button("Hepsini düzelt ve yüzeyi oluştur", lambda: repair.fix(None), icon="PATCH",
+              primary=True, enabled=bool(fixable))
+    with ui.row():
+        ui.button("Yeniden dene", repair.create, icon="REBUILD")
+        ui.button("Vazgeç", repair.cancel, icon="CLOSE")
+    ui.label("Sorun noktaları görünümde turuncu halkayla işaretli. Onarımlar tek adımda "
+             "geri alınır (Ctrl+Z).", "dim")
+
+
 FORMS = {
     # şerit kimliği: (başlık, simge, spec, genişlik)
     "FILLET_R": ("Fillet / pah", "FILLET3D", fillet, 300),
@@ -597,6 +636,7 @@ FORMS = {
     "EDGE_PICK": ("Kenar seçimi", "EDGE_PICK", edge_pick, 300),
     "PATCH": ("Kenar seçimi", "EDGE_PICK", edge_pick, 300),
     "SPLIT_FACE": ("Yüzeyi böl", "SPLIT_FACE", split_face, 280),
+    "REPAIR": ("Yüzey onarımı", "PATCH", repair_form, 340),
 }
 
 
