@@ -77,6 +77,10 @@ class EditMixin:
                 if h is None:
                     return False
                 key, pos = h
+                if key[0] == "pt" and self._jn_start(context, pos, mx, my):
+                    self.sk_sel = key            # v0.34.0: birleşim → eğriler üzerinde kaydır
+                    self.area.tag_redraw()
+                    return True
             st = self.sketch[key[1]]
             base = self._cur_plane() or self.tmp_plane or self._make_plane(self.plane_mode, pos)
             self.sk_sel = key

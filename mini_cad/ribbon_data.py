@@ -204,6 +204,9 @@ _SKETCH = [
         B("OPT_NEW", "TARGET_NEW", "Yeni eğriye yaz",
           "Açık: her Bitir yeni eğri objesi oluşturur · Kapalı: aktif / son eğriye ekler.",
           toggle=True, small=True, short="Yeni eğri"),
+        B("OPT_GHOST", "OPACITY", "Çizerken saydam",
+          "Çizim açıkken gövdeler saydam görünür: arkadaki referans görsele bakarak çizmeye "
+          "devam edilir. Opaklık: Katı → Saydamlık.", toggle=True, small=True, short="Saydam"),
     ]),
 ]
 
@@ -388,12 +391,32 @@ _SOLID = [
            "Yeni gövde: Kenar seçiminde Ctrl+Enter"]),
         B("REBUILD", "REBUILD", "Yenile",
           "Gövdeyi yeniden hesaplar (canlı güncelleme zaten açıktır)."),
+        B("OPACITY", "OPACITY", "Saydamlık",
+          "Gövdenin opaklığını ayarlar: arkasındaki referans görsel ve tel kafes görünür, "
+          "yeni eğrileri görsele göre çizmeye devam edilir. Hesaba etkisi yoktur.",
+          ["Gövdeyi seç", "Opaklığı sürükle ya da hazır değere bas",
+           "İstersen: Çizerken saydam (yalnız çizim açıkken)"]),
     ]),
     ("Oluştur", [
         B("EXTRUDE", "EXTRUDE", "Ekstrüzyon",
-          "Kapalı eskiz profilini bir doğrultuda uzatarak katı / yüzey üretir.",
-          ["Profili seç", "Mesafe ya da 'sonraki yüze kadar'", "Birleştir / Kes / Kesişim"],
-          status=PLANNED),
+          "Gövde yüzünü uzatır: yüzeyin üzerine gelince ok belirir, tıkla, oku sürükle. "
+          "Başlarken sorar: Doğrusal (tek yön) ya da Kalınlaştır (yüzey normalleri boyunca, "
+          "geometrik şekli korur).",
+          ["Türü seç: Doğrusal / Kalınlaştır", "Yüzeye tıkla (Shift: yüz ekle)",
+           "Oku sürükle ya da ölçü yaz · F: yön", "Birleştir / Kes / Kesişim · Enter"],
+          variants=[
+              V("EXTRUDE", "EXTRUDE", "Ekstrüzyon (sor)",
+                "Başlarken türü sorar.", ["Türü seç", "Yüzeye tıkla", "Oku sürükle"]),
+              V("EXT_LINEAR", "EXTRUDE", "Doğrusal",
+                "Yüz, normali doğrultusunda tek yöne uzar (prizma).",
+                ["Yüzeye tıkla", "Oku sürükle"]),
+              V("EXT_THICK", "THICKEN", "Kalınlaştır",
+                "Yüz kendi normalleri boyunca kalınlık kazanır; eğri yüzeyde şekli korunur "
+                "(kabuk ekstrüzyonu). Açık yüzey gövdesi böylece katılaşır.",
+                ["Yüzeye tıkla", "Kalınlığı sürükle / yaz"]),
+              V("EXT_LIST", "ORDER", "Ekstrüzyonlar",
+                "Gövdedeki ekstrüzyonların listesi ve ayarları."),
+          ]),
         B("REVOLVE", "REVOLVE", "Döndürme",
           "Profili bir eksen etrafında döndürerek katı üretir.",
           ["Profili seç", "Ekseni seç", "Açı ver (varsayılan 360°)"], status=PLANNED),

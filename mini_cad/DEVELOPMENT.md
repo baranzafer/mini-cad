@@ -1,4 +1,4 @@
-# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.33.0)
+# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.34.0)
 
 > **Ad değişikliği (v0.27.0):** eklentinin görünen adı **BlendCAD** oldu. Paket kimliği
 > (`id = "mini_cad"`), klasör adı, `minicad.*` operatörleri ve `MINICAD_*` sınıfları
@@ -12,7 +12,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.33.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.34.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
 - Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
 - Kurulum zip'leri `dist/` klasöründe.
 - Her sürüm ayrı bir commit.
@@ -622,6 +622,48 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
     - Ölçüm (`bpy_hole_check.py`, gerçek OCC): düz tümüyle / kör 118° / düz dip, havşa
       başlı, havşalı, dişli M6, iki delik, yan yüzden yatay delik — çıkan hacim analitik
       formülle 7 basamak aynı; delik ağzına 1 cm pah formülle aynı.
+  - **v0.34.0: kesişim noktasını eğriler üzerinde kaydırma** (`slide.py` bpy'siz,
+    `draw_junction.py` JunctionMixin). Tel kafeste birden çok eğrinin buluştuğu nokta
+    (kaydedilmiş eğrilerde ≥ 2 spline'ın ortak noktası ya da başka eğrinin içine değen uç —
+    T birleşimi; taslakta başka çizgiyle / kaydedilmiş eğriyle ortak düğüm) üzerine gelince
+    pembe elmasla işaretlenir; basılı tutup sürükleyince nokta serbest değil o eğrilerin
+    ÜZERİNDE kayar. Dallar: düğümün zincirinde ileri (j. parça) / geri (j−1. parça), uçta
+    teğet boyunca dışa uzatma, düğümden geçen eğri (yalnız yol). Kayılan zincirde kısalan
+    parça aynı eğrinin alt parçasıdır (de Casteljau — şekil birebir), öbür yandaki parça iki
+    eski parçanın birleşimine uç teğetleri sabit Schneider en küçük kareleriyle uydurulur
+    (çeyrek daire yayında sapma 2e-3 R); iki doğru aynı doğrultudaysa doğru kalır. Noktada
+    ucu / düğümü olan öbür eğriler yeni konuma taşınır (tutamaçlar birlikte; doğrular düz).
+    Fare her dalın ekran izdüşümüne en yakın yere gider; yol üzerindeki uç / orta / merkez
+    noktalarına ve öbür eğrilerle 3B kesişimlere yapışır (Ctrl: kapalı); rakam yazınca dal
+    boyunca o yay uzunluğu; E: serbest (görünüş düzleminde) ↔ eğri üzerinde; bırak / Enter:
+    uygula, sağ tık / Esc: iptal. Kaydedilmiş eğriler bırakınca spline'a yazılır (değişen
+    tutamaçlar FREE, doğrular VECTOR; topoloji değişmez → yüzey referansları geçerli kalır),
+    undo adımı, ardından model denetimi. Sürüklemeden bırakmak normal tık sayılır.
+  - **v0.34.0: gövde saydamlığı** (`opacity.py`). `cad.opacity` (0.02–1): ilk malzeme yuvası
+    OBJE bağlantılı geçici malzemeyle ("BlendCAD Saydam · <gövde>", rengi kullanıcının
+    malzemesinden) örtülür — diffuse alfa (Katı görünüm), Principled alfa + BLENDED (Malzeme
+    önizlemesi), nesne rengi alfası; 1'e dönünce yuva veri bağlantısına döner, kullanıcının
+    malzemesine dokunulmaz. Mesh yeniden yazılınca yeniden uygulanır. Sahne
+    `minicad_draw_ghost` / `minicad_draw_opacity`: çizim aracı açıkken bütün gövdeler saydam
+    (Eskiz → Seçenekler → Saydam; Katı → Gövde → Saydamlık penceresi).
+  - **v0.34.0: ekstrüzyon** (`extrude.py` araç, `geometry.apply_extrude`, özellik op
+    EXTRUDE). Başlarken sorar: **Doğrusal** (BRepPrimAPI_MakePrism, yüz normali; birden çok
+    yüzde her yüz kendi normaline) ya da **Kalınlaştır** (BRepOffsetAPI_MakeThickSolid
+    .MakeThickSolidBySimple: yüz / kabuk kendi normalleri boyunca kalınlık kazanır, eğri
+    yüzeyde şekil korunur; yön yüz normali ile seçilen (bakılan) normal karşılaştırılarak
+    belirlenir). İki yönlü: prizmada −yarım öteleme, kalınlaştırmada −yarım offset yüzey.
+    İşlem Birleştir / Kes (içe) / Kesişim; katı gövdede boolean (`apply_boolean`), açık
+    yüzey gövdesinde Kapsam "Bütün yüzey" (ya da bütün yüzler seçili) → gövde katının
+    kendisi olur, tek yüz → kalan yüzeyler + katı. Yüz yeri gövdenin YEREL koordinatında
+    nokta + dışa normal (`ext_pts`); motorda `face_at` (BRepExtrema + normal uyumu) ile
+    bulunur, böylece yeniden hesapta yüz sırası değişse de doğru yüz. Araç: üzerine gelinen
+    yüz vurgulanır, imleçte ok belirir (ekstrüzyona hazır); tık seç (Shift ekle), ok
+    tutulup sürüklenir (ok ekseni ile fare ışınının en yakın noktası; ızgara adımına
+    yapışır, Ctrl serbest), rakam yaz + Enter, F yön, Tab tür, Backspace son yüz, Enter
+    bitir, Esc vazgeç. Sağ tık menüsünde "Bu yüzeyi ekstrüde et…" (menünün açıldığı yerdeki
+    yüzle başlar). Denetim: başarısız ekstrüzyon → yönü çevir / mesafeyi yarıya indir /
+    Doğrusala geç / tek yönlü / yüzü yeniden seç / sil. Yeni kenarlar boolean gibi
+    kaydedilir (kenar seçiminde fillet / pah).
   - **Olay paylaşımı:** çizim, kenar seçimi ve yüzey bölme kalıcı operatörleri fare şeridin
     (ya da açılır listesinin) üstündeyken olayı `PASS_THROUGH` ile şeride bırakır
     (`ribbon_state.over_ribbon`). Şerit açıkken çizimin kayan paleti (`palette.py`) çizilmez
@@ -695,6 +737,10 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `health.py` | 952 | Model denetimi: her tam hesaptan / Bitir'den sonra bulgular ve onaylı düzeltmeler |
 | `holemath.py` | 158 | Delik standartları (ISO), döndürme profili, Pappus hacmi, açıklama (bpy'siz) |
 | `hole.py` | 430 | Delik yerleştirme aracı: hayalet, yakalama, tık / geri al / bitir / vazgeç, ön ayarlar |
+| `slide.py` | 373 | Birleşim noktasını eğriler üzerinde kaydırma matematiği (bpy'siz): dallar, kırp / birleştir-uydur, Slider, yakalama |
+| `draw_junction.py` | 499 | JunctionMixin: birleşim bulma, üzerine gelme, kaydırma oturumu, taslağa / spline'a geri yazma, çizim |
+| `opacity.py` | 147 | Gövde saydamlığı ve çizerken saydam kipi |
+| `extrude.py` | 640 | Ekstrüzyon aracı: başlangıç sorusu, yüz vurgusu + ok, sürükle / yaz, bitir / vazgeç |
 | `ribbon_state.py` | 98 | bpy'siz paylaşılan şerit durumu, `over_ribbon`, `insets` (başlık örtüşmesi) |
 | `recorder.py` | 632 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
@@ -1356,6 +1402,10 @@ Betiğin yaptıkları:
 | tools/bpy_health_check.py | GERÇEK Blender + OCC: fillet çok büyük → en büyük ölçü önerisi → uygulanır; büyük fillet uyarısı; çakışık yüzlü boolean → aracı kaydır; etkisiz boolean; yakın uç, kenar ortası uç, sıfır boy nokta düzeltmeleri; açık kabuk işaretleri; isteğe bağlı Öneriler PNG'si |
 | t79 | Delik hesapları: Pappus hacmi (düz, kör uçlu, düz dip, havşa başlı, havşalı), profil yüzeyin üstünden başlar, geçersiz değerler, ISO tabloları, birim ölçeği, açıklama |
 | tools/bpy_hole_check.py | GERÇEK Blender + OCC: her delik türünde çıkan hacim = analitik; iki delik; yatay delik; ağza pah; hatalı havşa; ön ayarlar (M8); yakalama adayları; yanı delen delik → içeri kaydır; hatalı delik önerisi; isteğe bağlı Delik penceresi PNG'si |
+| t80 | Birleşim kaydırma (slide.py): doğru zincirde ileri, yay üzerinde ileri / geri (yarıçap korunur), uç uzatma / kısaltma, + birleşiminde dallar ve bağlı eğrinin izlemesi, T birleşimi, yol üzerindeki yakalama ve kesişim, yay uzunluğu, birleştir-uydur |
+| tools/bpy_junction_check.py | GERÇEK Blender + OCC: kutu köşesi (3 kenar) üst kenar boyunca 0.2 kaydırılır; spline'lar doğru yazılır, gövde kapalı katı kalır, hacim azalır |
+| tools/bpy_opacity_check.py | GERÇEK Blender: opaklık malzemesi, yeniden hesapta korunma, opakta eski bağlantı, çizerken saydam, kullanıcı malzemesi korunur |
+| tools/bpy_extrude_check.py | GERÇEK Blender + OCC: kutuda doğrusal / kes / kalınlaştır / iki yönlü / yan yüz / iki yüz hacimleri analitikle aynı, yön çevirme hatası + öneri, olmayan yüz, açık düz yüzey (yön ve çevir), çeyrek silindir kalınlaştırma (π/4·(R₂²−R₁²)·h, %0.01) — isteğe bağlı pencere PNG'leri |
 | tools/pil_painter.py | PIL ressamı (ribbon_preview ve bpy_model_check ortak) |
 | tools/ribbon_preview.py | Şeridi PIL ile PNG'ye çizer (aynı çizim kodu): `python3 devkit/tools/ribbon_preview.py mini_cad <çıktı klasörü>` |
 | t70 | Profil Süpürme: gather → motor → boolean (sıra, parametreler, açı derece), imza (ayar / profil), profil yoksa Model kaynaklı, çekirdek hatası, Ayrıntılı Teşhis (`deep` yalnız istenen işlemde), `is_bevel`, `after_bevel` ipucu bayrağı, görünüm uyarısı kısa biçimi |
@@ -1643,3 +1693,10 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   yakalayarak birden çok yer; hayalet önizleme; Delik penceresi; delik ağzına fillet / pah;
   denetim (kenara yakın / yanı delen delik → içeri kaydır, açılamayan delik önerileri).
   Yeni modüller `holemath.py`, `hole.py`; test t79; araç `bpy_hole_check.py`.
+
+- **0.34.0:** Gövde saydamlığı (gövde başına opaklık + çizerken saydam), kesişim noktasını
+  eğriler üzerinde ve doğrultusunda yakalamalı kaydırma (taslak ve kaydedilmiş tel kafes),
+  ekstrüzyon: başlarken Doğrusal / Kalınlaştır sorusu, yüz üzerinde ok, sürüklenebilir ok,
+  Birleştir / Kes / Kesişim, açık yüzeyi katılaştırma, denetim önerileri. Yeni modüller
+  `slide.py`, `draw_junction.py`, `opacity.py`, `extrude.py`; test t80; araçlar
+  `bpy_junction_check.py`, `bpy_opacity_check.py`, `bpy_extrude_check.py`.

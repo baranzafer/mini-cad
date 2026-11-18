@@ -49,6 +49,7 @@ SCENE_TOGGLES = {
     "OPT_LOOK": ("minicad_look_at", True),
     "OPT_FIRST": ("minicad_pick_plane", True),
     "OPT_NEW": ("minicad_draw_target", "NEW"),
+    "OPT_GHOST": ("minicad_draw_ghost", True),
 }
 
 
@@ -312,6 +313,12 @@ def state(btn):
         return bool(op is not None and getattr(op, "track", None) is not None)
     if bid == "AXLOCK":
         return bool(op is not None and getattr(op, "axis_lock", None) is not None)
+    if bid in EXT_KINDS:
+        op = extrude_op()
+        f = op.feature() if op is not None else None
+        if f is None:
+            return False
+        return bid == "EXTRUDE" or EXT_KINDS[bid] == f.ext_kind
     if bid in ("HOLE", "TAPPED"):
         op = hole_op()
         f = op.feature() if op is not None else None
@@ -363,6 +370,13 @@ def dispatch(context, kind, item):
 
 def _dispatch(context, kind, ident):
     sc = context.scene
+    eop = extrude_op()
+    if eop is not None and ident not in EXT_KINDS and ident != "EXT_LIST" and (
+            ident in DRAW_TOOLS or ident in CONS_TOOLS or ident in PLANES or ident in DRAW_KEYS
+            or ident in HOLE_KINDS
+            or ident in ("SK_START", "EDGE_PICK", "PATCH", "PATCH_HOLE", "SPLIT_FACE",
+                         "FILLET_R", "CHAMFER", "EDIT_ALL")):
+        eop.finish(context)                # ekstrüzyon açıkken başka araç: yapılan kalır
     op = hole_op()
     if op is not None and ident not in HOLE_KINDS and ident != "HOLE_LIST" and (
             ident in DRAW_TOOLS or ident in CONS_TOOLS or ident in PLANES or ident in DRAW_KEYS
@@ -474,6 +488,12 @@ def _dispatch(context, kind, ident):
         _open(ident, keep=True)
         return None
 
+    # ---- ekstrüzyon (v0.34.0)
+    if ident in EXT_KINDS:
+        return _extrude(context, EXT_KINDS[ident])
+    if ident == "EXT_LIST":
+        _open("EXTRUDE", keep=True)
+        return None
     # ---- delik (v0.33.0)
     if ident in HOLE_KINDS:
         return _hole(context, HOLE_KINDS[ident])
@@ -508,6 +528,44 @@ def _dispatch(context, kind, ident):
         _open(ident)
         return None
     return None
+
+
+EXT_KINDS = {"EXTRUDE": "", "EXT_LINEAR": "LINEAR", "EXT_THICK": "THICK"}
+
+
+def extrude_op():
+    try:
+        from . import extrude
+        return extrude._STATE["active"]
+    except Exception:
+        return None
+
+
+def _extrude(context, kind, pick=None):
+    """Ekstrüzyon aracını başlat. kind '': başlarken türü sor. Açıksa türü değiştirir.
+    pick: (dünya nokta, dışa normal) — sağ tık menüsünden gelen yüz."""
+    op = extrude_op()
+    if op is not None:
+        if kind:
+            op.set_kind(context, kind)
+        _open("EXTRUDE", keep=True)
+        return None
+    if _target(context) is None:
+        return "Önce bir gövde gerekli (Yüzey → Sınır yüzeyi, Ctrl+Enter: yeni gövde)"
+    if not _kernel_ready():
+        return "Hesap çekirdeği kurulu değil (Araçlar → Çekirdek)"
+    kw = {"kind": kind}
+    if pick is not None:
+        kw.update(pick_co=tuple(pick[0]), pick_nrm=tuple(pick[1]), has_pick=True)
+    err = _call(context, lambda: bpy.ops.minicad.extrude("INVOKE_DEFAULT", **kw))
+    if err:
+        return err
+    op = extrude_op()
+    form_state["ext_uid"] = op.fuid if op is not None else form_state.get("ext_uid")
+    _open("EXTRUDE", keep=True)
+    if not kind:
+        return "Ekstrüzyon türünü seç: Doğrusal ya da Kalınlaştır"
+    return "Yüzeyin üzerine gel (ok belirir) · tıkla · oku sürükle"
 
 
 HOLE_KINDS = {"HOLE": "SIMPLE", "HOLE_CBORE": "CBORE", "HOLE_CSK": "CSINK", "TAPPED": "TAPPED"}

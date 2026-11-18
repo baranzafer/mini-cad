@@ -22,6 +22,7 @@ from . import ribbon_actions as ra
 from . import ribbon_state
 
 HOVER = {"target": None, "geom": None, "key": None}
+LAST_HIT = []          # v0.34.0: son ışın isabeti [nokta, normal] (sağ tık → ekstrüzyon)
 
 
 # ---------------------------------------------------------------- yardımcılar
@@ -140,6 +141,8 @@ def _ray(context, region, rv3d, mx, my):
         return None
     if not ok or ob is None:
         return None
+    n = _n if _n.dot(d) <= 0 else -_n          # bakana dönük normal (açık yüzeyde de)
+    LAST_HIT[:] = [tuple(_loc), tuple(n.normalized())]
     try:
         if not ob.cad.is_cad:
             return None
@@ -265,6 +268,19 @@ def menu_for(target):
     return None
 
 
+def _ext_here(ob):
+    """v0.34.0: menünün açıldığı yerdeki yüzle ekstrüzyon (başlarken türü sorar)."""
+    hit = list(LAST_HIT) if len(LAST_HIT) == 2 else None
+
+    def f():
+        _target_set(ob)
+        msg = ra._extrude(bpy.context, "", pick=hit)
+        if msg:
+            ra._msg(msg)
+        clear()
+    return f
+
+
 def _patch_menu(t):
     ob = bpy.data.objects.get(t["obj"])
     if ob is None or not (0 <= t["patch"] < len(ob.cad.patches)):
@@ -307,6 +323,7 @@ def _patch_menu(t):
         _I("b1", "Keskin (G0)", blend("SHARP"), check=pt.blend == "SHARP"),
         _I("b2", "Teğet (G1)", blend("TANGENT"), check=pt.blend == "TANGENT"),
         SEP,
+        _I("ext", "Bu yüzeyi ekstrüde et…", _ext_here(ob), "EXTRUDE", "E"),
         _I("hole", "Bu yüzeye delik aç", lambda: (_target_set(ob),
                                                  ra._dispatch(bpy.context, "TOOL", "HOLE")),
            "HOLE", "H"),
@@ -332,6 +349,7 @@ def _bodyface_menu(t):
         _I("fil", "Fillet / pah…", go("FILLET_R"), "FILLET3D"),
         _I("bool", "Boolean…", go("BOOL_DIFF"), "BOOL_DIFF"),
         _I("sw", "Profil süpürme…", go("SWEEP"), "SWEEP"),
+        _I("ext", "Bu yüzü ekstrüde et…", _ext_here(ob), "EXTRUDE"),
         _I("hole", "Delikler…", go("HOLE_LIST"), "HOLE"),
         _I("ord", "İşlem sırası…", go("ORDER"), "ORDER"),
         SEP,

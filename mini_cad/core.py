@@ -109,12 +109,25 @@ def _poll_tool(self, obj):
 
 
 FEATURE_OPS = [("BEVEL", "Bevel", ""), ("BOOLEAN", "Boolean", ""),
-               ("SWEEP", "Profil Süpürme", ""), ("HOLE", "Delik", "")]
+               ("SWEEP", "Profil Süpürme", ""), ("HOLE", "Delik", ""),
+               ("EXTRUDE", "Ekstrüzyon", "")]
 
 
 def is_bevel(f):
     """Fillet / pah işlemi mi? (v0.26.0'dan önce 'BOOLEAN olmayan' her şey bevel'di)"""
-    return f.op not in ("BOOLEAN", "SWEEP", "HOLE")
+    return f.op not in ("BOOLEAN", "SWEEP", "HOLE", "EXTRUDE")
+
+
+EXTRUDE_KINDS = [
+    ("LINEAR", "Doğrusal", "Yüz tek bir doğrultuda (yüz normali) uzatılır: prizma"),
+    ("THICK", "Kalınlaştır", "Yüz kendi normalleri boyunca kalınlık kazanır, geometrik şekli "
+     "korunur (eğri yüzeyde her nokta kendi normaline gider — kabuk ekstrüzyonu)")]
+EXTRUDE_SCOPES = [
+    ("FACE", "Seçilen yüz", "Yalnız seçilen yüz(ler) ekstrüde edilir"),
+    ("BODY", "Bütün yüzey", "Açık yüzey gövdesinin tamamı katılaşır (kalınlaştırma / prizma)")]
+EXTRUDE_OPS = [("UNION", "Birleştir", "Ekstrüzyon gövdeye eklenir"),
+               ("CUT", "Kes", "Ekstrüzyon hacmi gövdeden çıkarılır (içe doğru)"),
+               ("INTERSECT", "Kesişim", "Yalnız ortak hacim kalır")]
 
 
 HOLE_KINDS = [("SIMPLE", "Düz", "Düz silindirik delik"),
@@ -265,6 +278,20 @@ class MINICAD_Feature(bpy.types.PropertyGroup):
     hole_thread: bpy.props.EnumProperty(name="Vida ölçüsü", items=THREAD_ITEMS,
                                         default="NONE", update=_on_setting_change)
     hole_pts: bpy.props.CollectionProperty(type=MINICAD_HolePoint)
+    # v0.34.0: ekstrüzyon — yüz yeri (yerel) + dışa normal ext_pts'de (HolePoint yapısı)
+    ext_kind: bpy.props.EnumProperty(name="Ekstrüzyon türü", items=EXTRUDE_KINDS,
+                                     default="LINEAR", update=_on_setting_change)
+    ext_dist: bpy.props.FloatProperty(name="Mesafe", default=0.01, min=1e-6, soft_max=0.5,
+                                      precision=4, unit="LENGTH", update=_on_setting_change)
+    ext_flip: bpy.props.BoolProperty(name="Yönü çevir", default=False,
+                                     update=_on_setting_change)
+    ext_sym: bpy.props.BoolProperty(name="İki yönlü (simetrik)", default=False,
+                                    update=_on_setting_change)
+    ext_scope: bpy.props.EnumProperty(name="Kapsam", items=EXTRUDE_SCOPES, default="FACE",
+                                      update=_on_setting_change)
+    ext_op: bpy.props.EnumProperty(name="İşlem", items=EXTRUDE_OPS, default="UNION",
+                                   update=_on_setting_change)
+    ext_pts: bpy.props.CollectionProperty(type=MINICAD_HolePoint)
     info: bpy.props.StringProperty(default="")
     ok: bpy.props.BoolProperty(default=True)
 
@@ -381,8 +408,17 @@ class MINICAD_Link(bpy.types.PropertyGroup):
     info: bpy.props.StringProperty(default="")
 
 
+def _on_opacity(self, context):
+    from . import opacity
+    opacity.on_change(self, context)
+
+
 class MINICAD_ObjectProps(bpy.types.PropertyGroup):
     is_cad: bpy.props.BoolProperty(default=False)
+    opacity: bpy.props.FloatProperty(                  # v0.34.0: gövde saydamlığı
+        name="Opaklık", description="Gövdenin görünür opaklığı: azaltınca arkasındaki referans "
+        "görsel / tel kafes görünür, çizmeye devam edilir (hesaba etkisi yok)",
+        default=1.0, min=0.02, max=1.0, subtype="FACTOR", update=_on_opacity)
     links: bpy.props.CollectionProperty(type=MINICAD_Link)   # tel kafes eğrilerinde
     constraints: bpy.props.CollectionProperty(type=MINICAD_Constraint)  # tel kafes eğrilerinde
     curves: bpy.props.CollectionProperty(type=MINICAD_CurveRef)  # v0.1 uyumluluğu
@@ -1332,6 +1368,14 @@ def gather(obj, preview, allow_ghost=True):
                 st["want_edges"] = (not preview) or (f.uid in geo_srcs and (run_bevels or ghost))
                 stages.append(st)
                 continue
+            if f.op == "EXTRUDE":
+                st = _extrude_stage(obj, f)
+                if st is None:            # yüz henüz seçilmedi (araç açık): hata değil
+                    f.ok, f.info = True, "Yüz seçilmedi: yüzeyin üzerine gel, tıkla"
+                    continue
+                st["want_edges"] = (not preview) or (f.uid in geo_srcs and (run_bevels or ghost))
+                stages.append(st)
+                continue
             if f.op == "SWEEP":
                 if not props.use_booleans:
                     continue
@@ -1464,6 +1508,10 @@ def _apply(obj, job, res, cmd="build"):
         verts, normals = _to_local(obj, res["verts"], res["normals"])
         write_mesh(obj.data, verts, res["tris"], normals)
         write_patch_labels(obj.data, res.get("tri_patch"))
+        if getattr(props, "opacity", 1.0) < 0.999 or getattr(getattr(
+                getattr(bpy, "context", None), "scene", None), "minicad_draw_ghost", False):
+            from . import opacity          # v0.34.0: yeni / yeniden yazılan gövde saydam kalsın
+            opacity.apply(obj)
     except Exception as e:
         traceback.print_exc()
         props.status = f"Mesh yazılamadı: {e}"
@@ -1822,6 +1870,36 @@ def _hole_stage(obj, f):
             "key": ("H",) + _hole_key(f) + tuple(round(x, 6) for row in mw for x in row)}
 
 
+def extrude_params(f):
+    return {"kind": f.ext_kind, "dist": f.ext_dist, "flip": f.ext_flip, "sym": f.ext_sym,
+            "op": f.ext_op, "scope": f.ext_scope, "mirror": f.mirror_tool}
+
+
+def _extrude_key(f):
+    return (f.ext_kind, round(f.ext_dist, 9), f.ext_flip, f.ext_sym, f.ext_op, f.ext_scope,
+            f.mirror_tool, tuple((_r(h.co), _r(h.nrm)) for h in f.ext_pts))
+
+
+def _extrude_stage(obj, f):
+    """v0.34.0: ekstrüzyon aşaması (yüz yerleri dünya koordinatında)."""
+    if not len(f.ext_pts) and f.ext_scope != "BODY":
+        return None
+    from mathutils import Vector
+    mw = obj.matrix_world
+    nm = mw.to_3x3().inverted_safe().transposed()
+    picks = []
+    for h in f.ext_pts:
+        n = nm @ Vector(tuple(h.nrm))
+        if n.length < 1e-12:
+            continue
+        n.normalize()
+        picks.append({"co": tuple(mw @ Vector(tuple(h.co))), "nrm": tuple(n)})
+    if not picks and f.ext_scope != "BODY":
+        return None
+    return {"op": "EXTRUDE", "uid": f.uid, "picks": picks, "p": extrude_params(f),
+            "key": ("E",) + _extrude_key(f) + tuple(round(x, 6) for row in mw for x in row)}
+
+
 def _signature_parts(props):
     """(eğri/obje verisi, yapı/ayarlar, fillet ölçüleri). Fillet ölçüsü dışında bir şey
     değişmediyse hayalet önizleme yeterlidir."""
@@ -1863,6 +1941,8 @@ def _signature_parts(props):
                            round(f.edge_size, 9), f.edge_mode, f.mirror_tool))
         elif f.op == "HOLE":
             struct.append(("H", f.uid, f.enabled) + _hole_key(f))
+        elif f.op == "EXTRUDE":
+            struct.append(("E", f.uid, f.enabled) + _extrude_key(f))
         elif f.op == "SWEEP":
             struct.append(("S", f.uid, f.enabled, f.bool_type, len(f.segs),
                            tuple(g.id for g in f.geo_edges),

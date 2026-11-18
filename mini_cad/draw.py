@@ -73,6 +73,7 @@ from .draw_plane import PlaneMixin
 from .draw_snap import SnapMixin
 from .draw_sketch import SketchMixin
 from .draw_edit import EditMixin
+from .draw_junction import JunctionMixin
 from .draw_glyphs import ConstraintUIMixin
 from .draw_render import RenderMixin
 from .draw_modify import MOD_HELP, ModifyMixin
@@ -84,7 +85,16 @@ from .draw_skcons import SketchConsMixin
 from .draw_common import CLICK_SHAPES, MODIFY_TOOLS, PICK_TOOLS, TOOL_CYCLES, XFORM_TOOLS
 
 
-class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintUIMixin, RenderMixin,
+def _opacity_refresh(drawing):
+    try:
+        from . import opacity
+        if getattr(bpy.context.scene, "minicad_draw_ghost", False):
+            opacity.apply_all(drawing)
+    except Exception:
+        traceback.print_exc()
+
+
+class MINICAD_OT_draw(JunctionMixin, SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintUIMixin, RenderMixin,
                       ModifyMixin, TransformMixin, ShapeMixin, DimMixin, TextMixin,
                       SketchConsMixin, bpy.types.Operator):
     bl_idname = "minicad.draw"
@@ -171,6 +181,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self.start_tan = None
         self.sk_hover = None
         self.sk_drag = None
+        self.jn_drag = None
+        self.jn_hover = None
         self.sk_sel = None               # seçili taslak noktası / tutamacı (pivot gösterilir)
         self.hist, self.redo = [], []    # taslak aşamasının geri al / yinele geçmişi
         self._hsnap = None
@@ -209,6 +221,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                                                           "POST_PIXEL")
         _HANDLES.extend([self._h3, self._h2])
         _STATE["active"] = self
+        _opacity_refresh(True)                   # v0.34.0: çizerken saydam kipi
         context.window_manager.modal_handler_add(self)
         self._status(context)
         name = getattr(self, "edit_curve", "") or ""
@@ -227,6 +240,7 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         self._h3 = self._h2 = None
         if _STATE["active"] is self:
             _STATE["active"] = None
+            _opacity_refresh(False)
         try:
             context.workspace.status_text_set(None)
         except Exception:
@@ -496,6 +510,8 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
         inside, mx, my = self._mouse_in_region(event)
         press = event.value == "PRESS"
         self.shift, self.ctrl = event.shift, event.ctrl
+        if getattr(self, "jn_drag", None) is not None:      # v0.34.0: kesişim kaydırma
+            return self._jn_drag_event(context, event, mx, my, press)
         if self.sk_drag is None and ribbon_state.over_ribbon(event):
             return {"PASS_THROUGH"}          # v0.28.0: fare BlendCAD şeridinde: olay şeridin
         if ribbon_state.is_running():         # v0.30.0: üzerine gelme + sağ tık menüsü
@@ -570,6 +586,12 @@ class MINICAD_OT_draw(SnapMixin, PlaneMixin, SketchMixin, EditMixin, ConstraintU
                 return {"RUNNING_MODAL"}
         if self.sk_drag is not None:
             return self._drag_event(context, event, mx, my, press)
+        if inside and self.phase == "DRAW" and self.track is None and \
+                self.tool not in MODIFY_TOOLS and not self.tool.startswith("C_"):
+            if self._jn_event(context, event, mx, my, press):      # v0.34.0
+                return {"RUNNING_MODAL"}
+        if getattr(self, "jn_drag", None) is not None:
+            return {"RUNNING_MODAL"}
 
         if inside and self.phase == "DRAW":
             if event.type in {"MOUSEMOVE", "INBETWEEN_MOUSEMOVE"}:

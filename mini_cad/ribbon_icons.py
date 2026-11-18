@@ -441,6 +441,19 @@ def _icon(name):
     if name == "DELETE":
         return P([(-0.85, -0.55), (-0.2, 0.15), (0.3, -0.35), (0.85, 0.3)]) + \
             P([(0.25, 0.45), (0.85, 0.95)]) + P([(0.25, 0.95), (0.85, 0.45)])
+    if name == "THICKEN":
+        # eğri yüzey + normaller boyunca ötelenmiş kopyası (şekli korunan kalınlık)
+        return P(_arc(0.0, -1.6, 1.6, math.radians(60), math.radians(120), 12)) + \
+            P(_arc(0.0, -1.6, 2.3, math.radians(62), math.radians(118), 12)) + \
+            _arrow(0.0, 0.0, 0.0, 0.62, 0.16) + \
+            _arrow(-0.55, -0.1, -0.78, 0.5, 0.14) + _arrow(0.55, -0.1, 0.78, 0.5, 0.14)
+    if name == "OPACITY":
+        # önde saydam (kesik çizgili) kare, arkasında görsel (dağ + güneş)
+        return P([(-0.9, -0.3), (0.3, -0.3), (0.3, 0.9), (-0.9, 0.9)], True) + \
+            P([(-0.9, -0.3), (-0.45, 0.35), (-0.15, 0.05), (0.3, 0.6)]) + \
+            P(_arc(-0.45, 0.6, 0.14, 0, 2 * math.pi, 10)) + \
+            _dash((-0.3, -0.9), (0.9, -0.9), 4) + _dash((0.9, -0.9), (0.9, 0.3), 4) + \
+            _dash((0.9, 0.3), (0.3, 0.3), 2) + _dash((-0.3, -0.9), (-0.3, -0.3), 2)
     if name == "ADVICE":
         return P(_arc(0.0, 0.25, 0.55, math.radians(-30), math.radians(210), 14)) + \
             P([(-0.25, -0.05), (-0.2, -0.45), (0.2, -0.45), (0.25, -0.05)]) + \

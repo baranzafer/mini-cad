@@ -358,6 +358,30 @@ def body(ui, ctx):
              f"{sum(1 for f in p.features if f.op == 'SWEEP')} süpürme", "dim")
 
 
+# ---------------------------------------------------------------- Saydamlık (v0.34.0)
+
+def opacity_form(ui, ctx):
+    sc = ctx.scene
+    with ui.row(4, 1):
+        ui.prop(sc, "minicad_target", "Gövde", style="object", choices=lambda: _cad_objects(ctx))
+        ui.button("Aktif", lambda: ra.call("minicad.set_target_active"))
+    t = _target(ctx)
+    if t is None:
+        ui.label("Gövde yok", "info")
+    else:
+        ui.prop(t.cad, "opacity", "Opaklık")
+        with ui.row():
+            for v in (1.0, 0.6, 0.35, 0.15):
+                ui.button(f"%{int(v * 100)}", lambda v=v: setattr(t.cad, "opacity", v),
+                          depress=abs(t.cad.opacity - v) < 1e-3)
+        ui.button("Bütün gövdelere uygula",
+                  lambda: [setattr(o.cad, "opacity", t.cad.opacity) for o, _n in _cad_objects(ctx)])
+    ui.section("Çizerken")
+    ui.prop(sc, "minicad_draw_ghost", "Çizim açıkken saydam", style="check")
+    ui.prop(sc, "minicad_draw_opacity", "Çizerken opaklık", enabled=sc.minicad_draw_ghost)
+    ui.label("Görünüm Katı (Solid) ya da Malzeme önizlemesindeyken etkilidir", "dim")
+
+
 # ---------------------------------------------------------------- İşlem sırası
 
 def order(ui, ctx):
@@ -371,7 +395,7 @@ def order(ui, ctx):
         u.prop(it, "enabled", "", style="check", weight=0.13)
         u.label(f"{i + 1}. {it.name}", "" if it.ok else "err", weight=1.2)
         u.label("Boolean" if it.op == "BOOLEAN" else "Süpürme" if it.op == "SWEEP" else
-                "Delik" if it.op == "HOLE" else
+                "Delik" if it.op == "HOLE" else "Ekstrüzyon" if it.op == "EXTRUDE" else
                 ("Fillet" if it.kind == "FILLET" else "Pah"), "dim", weight=0.6)
 
     def sel(j):
@@ -756,6 +780,97 @@ def hole_form(ui, ctx):
         ui.list("holes", holes, act, pick, hcells, rows=4)
 
 
+# ---------------------------------------------------------------- Ekstrüzyon (v0.34.0)
+
+def _ext_feature(ctx, t):
+    op = ra.extrude_op()
+    if op is not None and op.body_name == t.name:
+        f = op.feature()
+        if f is not None:
+            return f, op
+    uid = ra.form_state.get("ext_uid")
+    exts = [f for f in t.cad.features if f.op == "EXTRUDE"]
+    f = next((f for f in exts if f.uid == uid), None) or (exts[-1] if exts else None)
+    return f, None
+
+
+def extrude_form(ui, ctx):
+    t = _need_body(ui, ctx)
+    if t is None:
+        return
+    p = t.cad
+    f, op = _ext_feature(ctx, t)
+    exts = [x for x in p.features if x.op == "EXTRUDE"]
+    if op is not None and op.asking:
+        ui.label("Nasıl bir ekstrüzyon?", "info")
+        ui.button("Doğrusal — tek yönde (yüz normali) uzat", lambda: op.set_kind(ctx, "LINEAR"),
+                  icon="EXTRUDE", primary=True, key="1")
+        ui.label("Yüz tek bir doğrultuda prizma gibi uzar (Inventor Extrude)", "dim")
+        ui.button("Kalınlaştır — yüzey normalleri boyunca", lambda: op.set_kind(ctx, "THICK"),
+                  icon="THICKEN", primary=True, key="2")
+        ui.label("Yüz kendi normalleri boyunca kalınlık kazanır, geometrik şekli korunur; "
+                 "eğri yüzeyde her nokta kendi normaline gider", "dim")
+        ui.button("Vazgeç", lambda: op.finish(ctx, cancel=True), icon="CLOSE", key="Esc")
+        return
+    if f is None:
+        ui.label("Gövdede ekstrüzyon yok.", "dim")
+        ui.button("Ekstrüzyon", lambda: ra._extrude(ctx, ""), icon="EXTRUDE", primary=True)
+        return
+    if op is not None:
+        ui.label(f"Yüzeye tıkla ({len(f.ext_pts)} yüz) · Shift+tık: ekle · oku sürükle / ölçü "
+                 "yaz · F: yön · Tab: tür", "info")
+    ui.prop(f, "ext_kind", "", style="seg")
+    with ui.row(3, 1):
+        ui.prop(f, "ext_dist", "Mesafe" if f.ext_kind == "LINEAR" else "Kalınlık")
+        ui.prop(f, "ext_flip", "Çevir", style="toggle", icon="FLIP_DIR")
+    ui.prop(f, "ext_sym", "İki yönlü (simetrik)", style="check")
+    ui.section("İşlem")
+    ui.prop(f, "ext_op", "", style="seg")
+    ui.prop(f, "ext_scope", "", style="seg")
+    if p.use_mirror and (p.mirror_x or p.mirror_y or p.mirror_z):
+        ui.prop(f, "mirror_tool", "Aynalı uygula", style="check")
+    ui.label(f"{len(f.ext_pts)} yüz seçili" if f.ext_scope == "FACE" else
+             "Açık yüzey gövdesinin tamamı katılaşır", "dim")
+    if f.info:
+        ui.label(f.info, "ok" if f.ok else "err")
+    if op is not None:
+        with ui.row(2, 1):
+            ui.button("Tamam", lambda: op.finish(ctx), icon="FINISH", primary=True,
+                      key="Enter")
+            ui.button("Vazgeç", lambda: op.finish(ctx, cancel=True), icon="CLOSE", key="Esc")
+    else:
+        with ui.row():
+            ui.button("Yüz seç", lambda f=f: _ext_edit(ctx, f), icon="EXTRUDE", primary=True)
+            ui.button("Sil", lambda f=f: _ext_remove(t, f), icon="CLOSE")
+    if len(exts) > 1 or op is None:
+        ui.section(f"Ekstrüzyonlar ({len(exts)})")
+
+        def ecells(u, x, i):
+            u.prop(x, "enabled", "", style="check", weight=0.13)
+            u.label(x.name, "" if x.ok else "err", weight=0.9)
+            u.label(("Doğrusal" if x.ext_kind == "LINEAR" else "Kalınlaştır") + " · " +
+                    _fmt_len(x.ext_dist), "dim", weight=1.3)
+        act = next((i for i, x in enumerate(exts) if x == f), -1)
+
+        def pick(j):
+            ra.form_state["ext_uid"] = exts[j].uid
+        ui.list("exts", exts, act, pick, ecells, rows=4)
+
+
+def _ext_edit(ctx, f):
+    ra.form_state["ext_uid"] = f.uid
+    ra._call(ctx, lambda: __import__("bpy").ops.minicad.extrude("INVOKE_DEFAULT", uid=f.uid))
+
+
+def _ext_remove(t, f):
+    from . import core
+    for i, x in enumerate(t.cad.features):
+        if x == f:
+            t.cad.features.remove(i)
+            break
+    core.rebuild(t)
+
+
 def core_params(f):
     from . import core
     return core.hole_params(f)
@@ -802,6 +917,7 @@ FORMS = {
     "BLEND_G1": ("Yüzeyler", "SURF_LIST", surfaces, 310),
     "SYM_BODY": ("Ayna simetrisi", "MIRROR_BODY", mirror, 280),
     "BODY": ("Gövde", "BODY", body, 300),
+    "OPACITY": ("Saydamlık", "OPACITY", opacity_form, 290),
     "ORDER": ("İşlem sırası", "ORDER", order, 310),
     "SETTINGS": ("Ayarlar", "SETTINGS", settings, 300),
     "CONS_LIST": ("Kısıtlar ve ilişkiler", "CONS_LIST", constraints_form, 340),
@@ -812,6 +928,10 @@ FORMS = {
     "SPLIT_FACE": ("Yüzeyi böl", "SPLIT_FACE", split_face, 280),
     "REPAIR": ("Öneriler", "DIAG", repair_form, 360),
     "HOLE": ("Delik", "HOLE", hole_form, 330),
+    "EXTRUDE": ("Ekstrüzyon", "EXTRUDE", extrude_form, 330),
+    "EXT_LINEAR": ("Ekstrüzyon", "EXTRUDE", extrude_form, 330),
+    "EXT_THICK": ("Ekstrüzyon", "EXTRUDE", extrude_form, 330),
+    "EXT_LIST": ("Ekstrüzyon", "EXTRUDE", extrude_form, 330),
 }
 
 

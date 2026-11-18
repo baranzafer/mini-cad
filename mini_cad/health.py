@@ -380,7 +380,7 @@ def check_body(ob):
     p = ob.cad
     out = []
     for fn in (_check_patches, _check_open, _check_seams, _check_fillets, _check_booleans,
-               _check_holes, _check_body_wires):
+               _check_holes, _check_extrudes, _check_body_wires):
         try:
             out += fn(ob, p)
         except Exception:
@@ -832,6 +832,71 @@ def _check_holes(ob, p):
                               "sıkınca kenar kırılır, sonraki fillet / pah bu kenarda zorlanır",
                               [q], fixes))
     return out
+
+
+def _check_extrudes(ob, p):
+    """v0.34.0: başarısız ekstrüzyon → sebebe göre öneriler."""
+    from .bool_overlay import short_error
+    out = []
+    for i, f in enumerate(p.features):
+        if f.op != "EXTRUDE" or not f.enabled or f.ok:
+            continue
+        nm = f.name
+        info = f.info or ""
+        fixes = []
+        if f.ext_kind == "THICK":
+            fixes.append(("Kalınlığı yarıya indir", (lambda i=i: _ext_scale(ob.name, i, 0.5)),
+                          "EXTRUDE"))
+            fixes.append(("Doğrusal ekstrüzyona geç", (lambda i=i: _ext_set(
+                ob.name, i, ext_kind="LINEAR")), "EXTRUDE"))
+        else:
+            fixes.append(("Mesafeyi yarıya indir", (lambda i=i: _ext_scale(ob.name, i, 0.5)),
+                          "EXTRUDE"))
+        if "kesişmiyor" in info or "değmiyor" in info or "değişmedi" in info:
+            fixes.insert(0, ("Yönü çevir", (lambda i=i: _ext_set(ob.name, i,
+                                                                 ext_flip=not f.ext_flip)),
+                             "FLIP_DIR"))
+        if "bulunamadı" in info:
+            fixes.insert(0, ("Yüzü yeniden seç", (lambda i=i: _ext_repick(ob.name, i)),
+                             "EXTRUDE"))
+        if f.ext_sym:
+            fixes.append(("Tek yönlü yap", (lambda i=i: _ext_set(ob.name, i, ext_sym=False)),
+                          "EXTRUDE"))
+        fixes.append(("Ekstrüzyonu sil", (lambda i=i: _drop_feature(ob.name, i)), "DELETE"))
+        pts = []
+        try:
+            mw = ob.matrix_world
+            pts = [np.array(mw @ _vec(h.co)) for h in f.ext_pts]
+        except Exception:
+            pass
+        out.append(_F(f"ext:{nm}:fail", "error", f"{nm} uygulanamadı: {short_error(info)}",
+                      pts, fixes))
+    return out
+
+
+def _ext_scale(obname, i, k):
+    f = bpy.data.objects[obname].cad.features[i]
+    f.ext_dist = max(f.ext_dist * k, 1e-6)
+    return f"{f.name}: mesafe {core.fmt_len(f.ext_dist)}"
+
+
+def _ext_set(obname, i, **kw):
+    f = bpy.data.objects[obname].cad.features[i]
+    for k, v in kw.items():
+        setattr(f, k, v)
+    return f"{f.name} güncellendi"
+
+
+def _ext_repick(obname, i):
+    ob = bpy.data.objects[obname]
+    f = ob.cad.features[i]
+    try:
+        from . import ribbon_actions as ra
+        ra.form_state["ext_uid"] = f.uid
+        ra._call(bpy.context, lambda: bpy.ops.minicad.extrude("INVOKE_DEFAULT", uid=f.uid))
+    except Exception:
+        pass
+    return f"{f.name}: yüze tıkla"
 
 
 def _vec(t):

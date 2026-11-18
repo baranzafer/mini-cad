@@ -3838,3 +3838,206 @@ def apply_holes(shape, holes, tol, smooth=True, preview=False):
     except Exception:
         pass
     return shape2, ok, f"{n} delik · " + info, tools
+
+
+# ================================================================ ekstrüzyon (v0.34.0)
+
+EXTRUDE_KINDS = ("LINEAR", "THICK")
+
+
+def face_at(shape, co, nrm, tol):
+    """co noktasındaki (nrm yönüne bakan) yüz | None. Yer, gövde yeniden kurulsa da aynı
+    kalan bir nokta + normal olarak saklanır (yüz sırası değişebilir)."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
+    if _DistSS is None:
+        return None
+    v = BRepBuilderAPI_MakeVertex(_pnt(co)).Vertex()
+    lim = max(tol * 20.0, 1e-4 * max(_bbox_diag(shape), 1e-9))
+    nrm = np.asarray(nrm, float)
+    best = None
+    for f in _shape_faces(shape):
+        try:
+            ds = _DistSS(v, f)
+            if not ds.IsDone():
+                continue
+            d = float(ds.Value())
+        except Exception:
+            continue
+        if d > lim:
+            continue
+        try:
+            q = ds.PointOnShape2(1)
+            n = _face_normal(f, (q.X(), q.Y(), q.Z()))
+        except Exception:
+            n = None
+        agree = float(np.dot(n, nrm)) if n is not None else 0.0
+        key = (0 if agree > 0.3 else 1, d, -agree)
+        if best is None or key < best[0]:
+            best = (key, f)
+    return None if best is None else best[1]
+
+
+def _shell_of(faces):
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Sewing
+    if len(faces) == 1:
+        return faces[0]
+    sw = BRepBuilderAPI_Sewing(1e-6)
+    for f in faces:
+        sw.Add(f)
+    sw.Perform()
+    return sw.SewedShape()
+
+
+def _fuse_all(solids):
+    cur = solids[0]
+    for s in solids[1:]:
+        res = safe_boolean("UNION", cur, s)
+        if res is not None and not res.IsNull():
+            cur = res
+    return ensure_outward(_single_solid(unify(cur)))
+
+
+def _solids(shape):
+    out = []
+    exp = TopExp_Explorer(shape, TopAbs_SOLID)
+    while exp.More():
+        out.append(exp.Current())
+        exp.Next()
+    return out
+
+
+def extrude_tool(base, kind, dist, direction=None, sym=False):
+    """base (yüz ya da kabuk) → katı.
+
+    LINEAR: base, direction * dist boyunca prizma (sym: ortadan iki yana).
+    THICK : base kendi normalleri boyunca dist kalınlık kazanır (şekil korunur; eğri
+            yüzde her nokta kendi normaline gider — 'kabuk ekstrüzyonu'). dist < 0: içe.
+    """
+    from OCP.gp import gp_Vec
+    if abs(dist) < 1e-12:
+        raise CadError("Model kaynaklı: ekstrüzyon mesafesi sıfır")
+    if kind == "LINEAR":
+        from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+        d = np.asarray(direction, float)
+        d = d / max(float(np.linalg.norm(d)), 1e-15)
+        vec = d * dist
+        src = base
+        if sym:
+            tr = gp_Trsf()
+            tr.SetTranslation(gp_Vec(*map(float, -0.5 * vec)))
+            src = BRepBuilderAPI_Transform(base, tr, True).Shape()
+        mk = BRepPrimAPI_MakePrism(src, gp_Vec(*map(float, vec)), True)
+        mk.Build()
+        if not mk.IsDone():
+            raise CadError("Model kaynaklı: prizma kurulamadı")
+        out = mk.Shape()
+    elif kind == "THICK":
+        from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeThickSolid
+        src = base
+        t = float(dist)
+        if sym:
+            from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
+            mo = BRepOffsetAPI_MakeOffsetShape()
+            mo.PerformBySimple(base, -0.5 * t)
+            if not mo.IsDone():
+                raise CadError("Model kaynaklı: iki yönlü kalınlaştırma için yüzey "
+                               "ötelenemedi; tek yönlü dene")
+            src = mo.Shape()
+        mk = BRepOffsetAPI_MakeThickSolid()
+        mk.MakeThickSolidBySimple(src, t)
+        mk.Build()
+        if not mk.IsDone():
+            raise CadError("Model kaynaklı: yüzey kalınlaştırılamadı — kalınlık yüzeyin en "
+                           "küçük eğrilik yarıçapından büyük olabilir; kalınlığı küçült ya da "
+                           "Doğrusal ekstrüzyonu dene")
+        out = mk.Shape()
+    else:
+        raise CadError(f"Bilinmeyen ekstrüzyon türü: {kind}")
+    sols = _solids(out)
+    if not sols:
+        try:
+            out = shell_to_solid(out)
+        except Exception:
+            pass
+        sols = _solids(out)
+    if not sols:
+        raise CadError("Model kaynaklı: ekstrüzyon kapalı hacim vermedi")
+    res = sols[0] if len(sols) == 1 else _fuse_all(sols)
+    return ensure_outward(res)          # kalınlaştırma içi dışa dönük katı verebiliyor
+
+
+def apply_extrude(shape, picks, p, tol, mirrors=None, smooth=True, preview=False):
+    """Ekstrüzyon aşaması. picks: [{"co","nrm"}] (dünya), p: {"kind","dist","flip","sym",
+    "op","scope","mirror"}. (gövde, ok, bilgi, araçlar)"""
+    kind = p.get("kind", "LINEAR")
+    op = p.get("op", "UNION")
+    dist = float(p.get("dist", 0.0))
+    scope = p.get("scope", "FACE")
+    solid_body = _has_solid(shape)
+    faces = []
+    for pk in picks:
+        f = face_at(shape, pk["co"], pk["nrm"], tol)
+        if f is None:
+            raise CadError("Model kaynaklı: seçilen yüz gövdede bulunamadı (gövde değişmiş "
+                           "olabilir) — yüzü yeniden seç")
+        if not any(f.IsSame(g) for g in faces):
+            faces.append(f)
+    if scope == "BODY" or not faces:
+        base = shape if not solid_body else None
+        if base is None:
+            raise CadError("Model kaynaklı: kapalı katının tamamı ekstrüde edilemez; bir yüz "
+                           "seç (Kapsam: Seçilen yüz)")
+    else:
+        base = _shell_of(faces)
+    sign = -1.0 if op == "CUT" else 1.0
+    if p.get("flip"):
+        sign = -sign
+    sym = bool(p.get("sym"))
+    if kind == "LINEAR" and scope != "BODY" and len(faces) > 1:
+        # her yüz kendi normali boyunca (üst + yan yüz gibi farklı yönlü seçimler)
+        tools = []
+        for f, pk in zip(faces, picks):
+            tools.append(extrude_tool(f, kind, sign * dist, pk["nrm"], sym))
+        tool = tools[0]
+    else:
+        n0 = np.asarray(picks[0]["nrm"], float) if picks else None
+        t = sign * dist
+        if kind == "THICK":
+            # kalınlaştırma yüzün kendi normaline gider: seçilen (bakılan) yöne çevir
+            ref = faces[0] if faces else (_shape_faces(shape) or [None])[0]
+            if ref is not None and n0 is not None:
+                fn = _face_normal(ref, picks[0]["co"])
+                if fn is not None and float(np.dot(fn, n0)) < 0:
+                    t = -t
+        tool = extrude_tool(base, kind, t, n0 if n0 is not None else
+                            _face_normal(_shape_faces(base)[0],
+                                         _face_center(_shape_faces(base)[0])), sym)
+        tools = [tool]
+    if p.get("mirror") and mirrors:
+        tools = mirror_copies(tool, mirrors)
+    word = "doğrusal" if kind == "LINEAR" else "kalınlaştırma"
+    if not solid_body:
+        if scope == "BODY" or len(faces) == len(_shape_faces(shape)):
+            out = tools[0] if len(tools) == 1 else _fuse_all(tools)
+            v = volume(out)
+            return out, True, (f"açık yüzey gövdesi {word} ile katılaştırıldı · hacim "
+                               f"{v:.4g}" if v else f"açık yüzey {word} ile katılaştırıldı"), tools
+        rest = [g for g in _shape_faces(shape) if not any(g.IsSame(f) for f in faces)]
+        bb = BRep_Builder()
+        comp = TopoDS_Compound()
+        bb.MakeCompound(comp)
+        for g in rest:
+            bb.Add(comp, g)
+        for t in tools:
+            bb.Add(comp, t)
+        return comp, True, (f"açık kabuk: {len(faces)} yüz {word} ile katılaştırıldı (kalan "
+                            "yüzeyler açık)"), tools
+    shape2, ok, info = apply_boolean(shape, tools, op, 0.0, "ALL", tol, smooth, preview=preview)
+    try:
+        dv = volume(shape2) - volume(shape)
+        import re
+        info = re.sub(r"hacim [-+]?[0-9.]+%", f"hacim {dv:+.4g}", info)
+    except Exception:
+        pass
+    return shape2, ok, f"{len(faces)} yüz · {word} · " + info, tools

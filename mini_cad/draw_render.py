@@ -36,6 +36,7 @@ class RenderMixin:
                 gpu.state.blend_set("NONE")
                 return
             self._draw_sketch3d(region)
+            self._jn_draw3d(region)                  # v0.34.0: kesişim kaydırma
             self._txt_draw3d(region)
             if ribbon_state.is_running() and getattr(self, "ctx_hover", None):
                 from . import ribbon_ctx
@@ -195,6 +196,7 @@ class RenderMixin:
                 self._skc_draw2d(region)
                 self._txt_draw2d(region)
                 self._draw_sketch2d(region)
+                self._jn_draw2d(region)
                 self._draw_pivot(region)
                 self._draw_track2d(region)
                 if self.tool in MODIFY_TOOLS:

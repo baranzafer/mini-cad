@@ -375,6 +375,7 @@ def _idle(context):
     """CAD aracı açık değil ve obje modundayız: boşta üzerine gelme / sağ tık menüsü."""
     return (ribbon_actions.draw_op() is None and ribbon_actions.pick_op() is None and
             ribbon_actions.split_op() is None and ribbon_actions.hole_op() is None and
+            ribbon_actions.extrude_op() is None and
             getattr(context, "mode", "") == "OBJECT")
 
 
@@ -497,7 +498,7 @@ _NOTIFY = {"handle": None}
 def _close_tools():
     """BlendCAD kapanınca CAD araçları da kapanır: taslak kaydedilir (eski palete / panele
     düşülmez)."""
-    for mod in ("draw", "pick", "split", "hole"):
+    for mod in ("draw", "pick", "split", "hole", "extrude"):
         try:
             m = __import__(f"{__package__}.{mod}", fromlist=["cleanup_all"])
             m.cleanup_all()

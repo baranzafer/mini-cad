@@ -4,7 +4,7 @@ tabanlı, eğri güdümlü hard-surface modelleme.
 Tel kafes -> yüzeyler (ortak topoloji) -> katı gövde -> bevel.
 """
 
-from . import (blendcad, bool_overlay, constraints, core, draw, health, hole, kernel, links,
+from . import (blendcad, bool_overlay, constraints, core, draw, extrude, health, hole, kernel, links, opacity,
                panels, pick, recorder,
                split, ui, wire)
 
@@ -21,6 +21,8 @@ def register():
     blendcad.register()
     health.register()
     hole.register()
+    extrude.register()
+    opacity.register()
     pick.register()
     draw.register()
     split.register()
@@ -34,6 +36,8 @@ def unregister():
     split.unregister()
     draw.unregister()
     pick.unregister()
+    opacity.unregister()
+    extrude.unregister()
     hole.unregister()
     health.unregister()
     blendcad.unregister()

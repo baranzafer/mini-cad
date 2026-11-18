@@ -74,7 +74,7 @@ lx0, ly0, lx1, ly1 = ribbon.launcher_rect(1600, 900, 1.0, 0, 60, 52)
 check(ly1 <= 900 - 52, "başlatıcı başlıkların altında")
 rb = ribbon.Ribbon(1.0); rb.layout(p, 2400, 900, 46, 0, 52)
 small = [i for i in rb.items if i[4] == "btn" and data.find(i[5]) and data.find(i[5]).get("small")]
-check(len(small) == 11 and all(i[3] - i[1] < 20 for i in small), f"Yardımcı + Seçenekler: 11 küçük düğme ({len(small)})")
+check(len(small) == 12 and all(i[3] - i[1] < 20 for i in small), f"Yardımcı + Seçenekler: 12 küçük düğme (v0.34.0: Çizerken saydam) ({len(small)})")
 
 # ---- sahte çizim / kenar seçimi / gövde
 class FakeDM:
