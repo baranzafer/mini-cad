@@ -587,11 +587,39 @@ FIX_TEXT = {"GAP": "Uçları birleştir", "TJUNC": "Böl ve kaynat", "DUP": "Faz
 
 
 def repair_form(ui, ctx):
+    """v0.32.0: Öneriler — bekleyen yüzey onarımı + model denetimi bulguları."""
     from . import repair
     d = repair.PENDING["data"]
-    if d is None:
-        ui.label("Bekleyen yüzey sorunu yok.", "ok")
-        return
+    if d is not None:
+        ui.section("Yüzey oluşturulamadı")
+        _repair_pending(ui, ctx, d)
+    _health_section(ui, ctx, has_pending=d is not None)
+
+
+LEVEL_TONE = {"error": "err", "warn": "warn", "hint": "info"}
+
+
+def _health_section(ui, ctx, has_pending):
+    from . import health
+    items = health.all_findings()
+    n = sum(len(fs) for _k, _n, fs in items)
+    if not n and not has_pending:
+        ui.label("Model denetimi: sorun bulunmadı", "ok")
+    for key, name, fs in items:
+        ui.section(f"{name} ({len(fs)})")
+        for f in sorted(fs, key=lambda f: health.LEVEL_ORDER[f["level"]]):
+            ui.label(f["msg"], LEVEL_TONE[f["level"]])
+            for label, fn, icon in f["fixes"]:
+                ui.button(label, (lambda key=key, fn=fn, label=label:
+                                  health.apply_fix(key, fn, label)), icon=icon)
+    ui.sep()
+    ui.button("Yeniden denetle", health.check_all, icon="DIAG")
+    ui.label("Denetim her işlem bitince bir kez çalışır; düzeltmeler sorulmadan yapılmaz ve "
+             "tek adımda geri alınır (Ctrl+Z). İşaretli noktalar görünümde halkalı.", "dim")
+
+
+def _repair_pending(ui, ctx, d):
+    from . import repair
     ui.label(d["msg"], "err")
     steps = d.get("plan") or d["issues"]
     fixable = [i for i in steps if i["fix"]]
@@ -611,8 +639,7 @@ def repair_form(ui, ctx):
     with ui.row():
         ui.button("Yeniden dene", repair.create, icon="REBUILD")
         ui.button("Vazgeç", repair.cancel, icon="CLOSE")
-    ui.label("Sorun noktaları görünümde turuncu halkayla işaretli. Onarımlar tek adımda "
-             "geri alınır (Ctrl+Z).", "dim")
+
 
 
 FORMS = {
@@ -636,7 +663,7 @@ FORMS = {
     "EDGE_PICK": ("Kenar seçimi", "EDGE_PICK", edge_pick, 300),
     "PATCH": ("Kenar seçimi", "EDGE_PICK", edge_pick, 300),
     "SPLIT_FACE": ("Yüzeyi böl", "SPLIT_FACE", split_face, 280),
-    "REPAIR": ("Yüzey onarımı", "PATCH", repair_form, 340),
+    "REPAIR": ("Öneriler", "DIAG", repair_form, 360),
 }
 
 

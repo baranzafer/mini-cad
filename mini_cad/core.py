@@ -1054,6 +1054,17 @@ def _match_tol(props):
 # Operatörler senkron (rebuild), canlı güncelleme asenkron (_tick) çalışır.
 
 _display = {}       # obj_name -> {"edges", "bool_edges", "ghost"} (dünya koordinatı, numpy)
+AFTER_FINAL = []    # v0.32.0: tam (önizleme olmayan) hesap bitince çağrılır: fn(obj) — denetim
+
+
+def _after_final(obj, job):
+    if job.get("preview"):
+        return
+    for fn in list(AFTER_FINAL):
+        try:
+            fn(obj)
+        except Exception:
+            traceback.print_exc()
 _final_known = {}   # obj_name -> son tam kalite şeklin bulunduğu hesap oturumu
 _final_ver = {}     # obj_name -> tam kalite sayacı (araç imzaları için)
 _final_parts = {}   # obj_name -> (eğri imzası, yapı imzası) son tam kalitede
@@ -1383,6 +1394,7 @@ def _apply(obj, job, res, cmd="build"):
             _final_sig.pop(name, None)
         _display.setdefault(name, {})["ghost"] = None
         _notify()
+        _after_final(obj, job)
         return False
     if getattr(obj.data, "is_editmode", False) is True:
         # v0.25.9: gövdenin kendisi (mesh) düzenleme modundayken Blender mesh verisini
@@ -1419,6 +1431,7 @@ def _apply(obj, job, res, cmd="build"):
         disp = res.get("display") or {}
         d["edges"] = disp.get("edges", [])
         d["bool_edges"] = disp.get("bool_edges", [])
+        d["bool_draw"] = disp.get("bool_draw", [])     # v0.32.0: çizim (kimlik bool_edges'te)
         _final_known[name] = _client().session
         _final_ver[name] = _final_ver.get(name, 0) + 1
         _final_sig[name] = job["sig"]
@@ -1434,6 +1447,7 @@ def _apply(obj, job, res, cmd="build"):
     props.status = f"{mode} · {res.get('shape_info', '')} · {len(res['tris'])} üçgen · " \
                    f"{ms:.0f} ms{warn}"
     _notify()
+    _after_final(obj, job)
     return True
 
 
@@ -2011,6 +2025,67 @@ def remap_splines(curve_ob, fn, seg_count=None):
 
 # Bölünen segmentin ilk yarısında da anlamı korunan kısıtlar (yön / çember kısıtları)
 SPLIT_SAFE_KINDS = {"AXIS", "PARALLEL", "PERP", "COLLINEAR", "RADIUS", "CONCENTRIC"}
+
+
+def remap_remove(curve_ob, si, k):
+    """v0.32.0: si. spline'ın k. segmenti (sıfır boy: k ve k+1 noktaları üst üste) k+1.
+    noktası silinerek kaldırılacak. remap_insert'in tersi:
+      - yüzey / özellik / bevel segmentleri: j == k → referans silinir; j > k → j-1
+      - kısıt noktaları: k+1 → k (aynı yer), > k+1 → -1; kısıt segmentleri: j > k → j-1,
+        j == k → kısıt devre dışı (bilgi notuyla)
+    (güncellenen referans sayısı, devre dışı kalan kısıt sayısı)"""
+    n = 0
+    off = 0
+
+    def seg_coll(coll):
+        nonlocal n
+        for idx in reversed(range(len(coll))):
+            r = coll[idx]
+            if r.obj != curve_ob or r.spline != si:
+                continue
+            if r.seg == k:
+                coll.remove(idx)
+                n += 1
+            elif r.seg > k:
+                r.seg -= 1
+                n += 1
+
+    for ob in bpy.data.objects:
+        try:
+            props = ob.cad
+        except Exception:
+            continue
+        for p in getattr(props, "patches", ()):
+            seg_coll(p.segs)
+        for f in getattr(props, "features", ()):
+            seg_coll(f.segs)
+        if hasattr(props, "bevels"):
+            seg_coll(props.bevels)
+        for c in getattr(props, "constraints", ()):
+            kill = False
+            for r in c.refs:
+                if r.obj != curve_ob or r.spline != si:
+                    continue
+                if r.point:
+                    if r.index > k:
+                        r.index -= 1
+                        n += 1
+                elif r.index > k:
+                    r.index -= 1
+                    n += 1
+                elif r.index == k:
+                    kill = True
+            if kill and c.enabled:
+                c.enabled = False
+                c.info = "Sıfır boy kenar kaldırıldı: kısıt devre dışı (yeniden ekle)"
+                off += 1
+    try:
+        from . import constraints
+        for key in [key for key in constraints._last_pos if key[0] == curve_ob.name]:
+            del constraints._last_pos[key]
+    except Exception:
+        pass
+    return n, off
 
 
 def remap_insert(curve_ob, si, k):

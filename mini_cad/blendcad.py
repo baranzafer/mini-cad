@@ -458,8 +458,8 @@ def _draw_notify():
 
 def _draw_repair_markers(p, ctx, region, s):
     """Yüzey onarımı bekliyorsa sorun noktalarında halka."""
-    from . import repair
-    pts = repair.marker_points()
+    from . import health, repair
+    pts = repair.marker_points() + [("H" + lv, q) for lv, q in health.marker_points()]
     if not pts or ctx.region_data is None:
         return
     from bpy_extras.view3d_utils import location_3d_to_region_2d
@@ -469,7 +469,8 @@ def _draw_repair_markers(p, ctx, region, s):
         q = location_3d_to_region_2d(region, ctx.region_data, Vector(tuple(w)))
         if q is None:
             continue
-        c = col if kind == "BRANCH" else (1.0, 0.66, 0.22, 1.0)
+        c = col if kind in ("BRANCH", "Herror") else \
+            ((0.55, 0.72, 1.0, 1.0) if kind == "Hhint" else (1.0, 0.66, 0.22, 1.0))
         for r in (9 * s, 10.5 * s):
             seg = []
             import math

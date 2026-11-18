@@ -3517,16 +3517,66 @@ def shape_edge_polylines(shape, samples=24):
         try:
             if degen(e):
                 continue
-            c = _BRepAdaptor_Curve(e)
-            u0, u1 = c.FirstParameter(), c.LastParameter()
-            pts = []
-            for k in range(samples + 1):
-                p = c.Value(u0 + (u1 - u0) * k / samples)
-                pts.append((p.X(), p.Y(), p.Z()))
-            out.append(pts)
+            out.append([tuple(q) for q in draw_poly(e, max(samples, 24))])
         except Exception:
             continue
     return out
+
+
+def draw_poly(e, n0=257, max_turn=1.5, max_pts=600):
+    """v0.32.0: kenarın ÇİZİM için nokta dizisi — eğriliğe göre seyreltilmiş yoğun örnek.
+
+    Parametrede eşit aralıklı az nokta, düzensiz parametreli eğrilerde (boolean kesişim
+    eğrileri) 1–28 cm aralıklı kirişler veriyordu: çizilen çizgi gerçek kenardan 1.7 cm sapıp
+    kırık görünüyordu (gerçek eğri pürüzsüzdü: en küçük eğrilik yarıçapı 48 cm). Burada önce
+    yoğun örneklenir, sonra dönüş açısı max_turn dereceyi ya da kiriş boyu L/128'i aşmadıkça
+    nokta atlanır. Kimlik için kullanılan 65 noktalık kayıtlar (edge_records) DEĞİŞMEZ."""
+    c = _BRepAdaptor_Curve(e)
+    u0, u1 = c.FirstParameter(), c.LastParameter()
+
+    def val(u):
+        p = c.Value(u)
+        return np.array((p.X(), p.Y(), p.Z()), dtype=np.float64)
+    us = list(np.linspace(u0, u1, 65))
+    pts = [val(u) for u in us]
+    L = float(sum(np.linalg.norm(pts[i + 1] - pts[i]) for i in range(len(pts) - 1)))
+    if L <= 1e-12:
+        return np.array(pts)
+    eps = max(L * 2e-5, 1e-7)
+    out_u, out_p = [us[0]], [pts[0]]
+
+    def refine(ua, pa, ub, pb, depth):
+        # kiriş ortası eğriden eps'ten fazla sapıyorsa böl (düzensiz parametreye karşı)
+        um = 0.5 * (ua + ub)
+        pm = val(um)
+        if depth < 14 and float(np.linalg.norm(pm - 0.5 * (pa + pb))) > eps:
+            refine(ua, pa, um, pm, depth + 1)
+            refine(um, pm, ub, pb, depth + 1)
+        else:
+            out_u.append(ub)
+            out_p.append(pb)
+    for i in range(len(us) - 1):
+        refine(us[i], pts[i], us[i + 1], pts[i + 1], 0)
+    P = np.array(out_p)
+    if len(P) < 3:
+        return P
+    keep = [0]
+    acc_turn, acc_len = 0.0, 0.0
+    lim = math.radians(max_turn)
+    for i in range(1, len(P) - 1):
+        a, b = P[i] - P[i - 1], P[i + 1] - P[i]
+        na, nb = float(np.linalg.norm(a)), float(np.linalg.norm(b))
+        if na > 1e-15 and nb > 1e-15:
+            acc_turn += math.acos(max(-1.0, min(1.0, float(a @ b) / (na * nb))))
+        acc_len += na
+        if acc_turn >= lim or acc_len >= L / 128.0:
+            keep.append(i)
+            acc_turn, acc_len = 0.0, 0.0
+    keep.append(len(P) - 1)
+    Q = P[keep]
+    if len(Q) > max_pts:
+        Q = Q[np.linspace(0, len(Q) - 1, max_pts).astype(int)]
+    return Q
 
 
 # ================================================================ gövde kenarı kimliği

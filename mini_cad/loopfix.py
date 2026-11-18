@@ -268,3 +268,93 @@ def plan(segs, tol, near=None, names=None, new_ref=None, limit=24):
         out.append(fx[0])
         segs = apply_fix(segs, fx[0]["fix"], new_ref)
     return out
+
+
+def scan(segs, tol, near=None, names=None, same_curve=None):
+    """v0.32.0: bütün tel kafeste (döngü aramadan) gizli uyuşmazlıklar — görünümde fark
+    edilmez ama yüzey / fillet / boolean'da sorun çıkarır. diagnose'dan farkı: erken dönmez,
+    döngü / dal (EXTRA / BRANCH) aramaz. same_curve(a, b): aynı eğride ardışık mı (ortak uç)."""
+    segs = [(r, np.asarray(P, dtype=np.float64).reshape(4, 3)) for r, P in segs]
+    if not segs:
+        return []
+    near = near_for(segs, tol) if near is None else near
+    name = (lambda r: names(r)) if names else (lambda r: str(r))
+    out = []
+    lens = [length(P) for _r, P in segs]
+    for i, (r, P) in enumerate(segs):
+        if lens[i] < max(near * 0.25, tol * 2):
+            out.append({"kind": "TINY", "pts": [P[0]],
+                        "msg": f"{name(r)}: çok kısa parça ({_fmt(lens[i])}). Yüzey ve fillet "
+                               "bu noktada sorun çıkarır",
+                        "fix": {"op": "drop", "ref": r}})
+    lo = np.array([P.min(axis=0) for _r, P in segs]) - near
+    hi = np.array([P.max(axis=0) for _r, P in segs]) + near
+    S = [None] * len(segs)
+    for i in range(len(segs)):
+        a = segs[i][1]
+        if lens[i] <= tol:
+            continue                      # sıfır boy parça: TINY'nin işi (çiftlere girmez)
+        cand = np.nonzero(np.all(lo[i + 1:] <= hi[i], axis=1) & np.all(hi[i + 1:] >= lo[i], axis=1))[0]
+        for j in cand + i + 1:
+            b = segs[j][1]
+            if lens[j] <= tol:
+                continue
+            same = (np.linalg.norm(a[0] - b[0]) < near and np.linalg.norm(a[3] - b[3]) < near) \
+                or (np.linalg.norm(a[0] - b[3]) < near and np.linalg.norm(a[3] - b[0]) < near)
+            if not same:
+                continue
+            S[i] = S[i] if S[i] is not None else samples(a)
+            S[j] = S[j] if S[j] is not None else samples(b)
+            dmax = max(float(np.min(np.linalg.norm(S[j] - p, axis=1))) for p in S[i])
+            if dmax < near:
+                out.append({"kind": "DUP", "pts": [S[j][N_SAMP // 2]],
+                            "msg": f"{name(segs[i][0])} ile {name(segs[j][0])} üst üste "
+                                   "biniyor: yüzeyde fazla kenar / çift kenar hatası verir",
+                            "fix": {"op": "drop", "ref": segs[j][0]}})
+    nodes, of = _cluster(segs, tol)
+    deg = {}
+    for k in of.values():
+        deg[k] = deg.get(k, 0) + 1
+    open_ends = [(i, e) for (i, e), k in of.items() if deg[k] == 1]
+    seen_gap = set()
+    for i, e in open_ends:
+        p = segs[i][1][0 if e == 0 else 3]
+        # GAP: yakın ama kaynamamış uç
+        best = None
+        for (i2, e2), k in of.items():
+            if i2 == i:
+                continue
+            q = segs[i2][1][0 if e2 == 0 else 3]
+            d = float(np.linalg.norm(p - q))
+            if tol < d < near and (best is None or d < best[0]):
+                best = (d, (i2, e2), q)
+        if best is not None:
+            d, (j, f), q = best
+            key = tuple(sorted([(i, e), (j, f)]))
+            if key not in seen_gap:
+                seen_gap.add(key)
+                m = (p + q) * 0.5 if deg[of[(j, f)]] == 1 else q
+                out.append({"kind": "GAP", "pts": [m],
+                            "msg": f"{name(segs[i][0])} ucu {name(segs[j][0])} ucuna "
+                                   f"{_fmt(d)} yakın ama değmiyor: yüzey kurarken döngü "
+                                   "kapanmaz",
+                            "fix": {"op": "weld", "ends": [(segs[i][0], e)] +
+                                    ([(segs[j][0], f)] if deg[of[(j, f)]] == 1 else []),
+                                    "to": m}})
+            continue
+        # TJUNC: kenarın ortasına değen uç (kenarda nokta yok)
+        for j, (rj, Pj) in enumerate(segs):
+            if j == i or not (np.all(lo[j] <= p) and np.all(p <= hi[j])):
+                continue
+            if min(np.linalg.norm(p - Pj[0]), np.linalg.norm(p - Pj[3])) < near:
+                continue
+            t, d, q = closest(Pj, p)
+            if d < near and 0.01 < t < 0.99:
+                out.append({"kind": "TJUNC", "pts": [q],
+                            "msg": f"{name(segs[i][0])} ucu {name(rj)} kenarının ortasına "
+                                   "bağlı ama orada nokta yok: yüzeyler burada dikişsiz "
+                                   "birleşmez, yüzey kurulamayabilir",
+                            "fix": {"op": "split", "ref": rj, "t": t, "to": q,
+                                    "end": (segs[i][0], e)}})
+                break
+    return out

@@ -87,8 +87,14 @@ class _Scene:
         except Exception:
             target, vis = None, False
         if vis:
-            for uid, poly, used in core._display.get(target.name, {}).get("bool_edges", ()):
+            dd = core._display.get(target.name, {})
+            draws = dd.get("bool_draw") or []
+            for bi, (uid, poly, used) in enumerate(dd.get("bool_edges", ())):
                 P = np.asarray(poly, dtype=np.float64)
+                # v0.32.0: kimlik (refs / key) 65 noktalık kayıttan; çizim ve üzerine gelme
+                # pürüzsüz diziden (eşit parametreli örnek kırık görünüyordu)
+                D = np.asarray(draws[bi], dtype=np.float64) if bi < len(draws) and \
+                    len(draws[bi]) >= 2 else P
                 if len(P) < 2:
                     continue
                 key = ("@body", uid) + tuple(np.round(P.mean(axis=0), 4).tolist()) + \
@@ -98,12 +104,12 @@ class _Scene:
                 idx = len(self.refs)
                 self.refs.append(("BODY", uid, P))
                 self.keys.append(key)
-                self.polys.append(P)
+                self.polys.append(D)
                 self.kinds.append("body")
                 self._add_ends(idx, P)
-                a_list.append(P[:-1])
-                b_list.append(P[1:])
-                owner.append(np.full(len(P) - 1, idx))
+                a_list.append(D[:-1])
+                b_list.append(D[1:])
+                owner.append(np.full(len(D) - 1, idx))
                 if used:
                     self.body_used.add(key)
         if a_list:

@@ -536,6 +536,11 @@ class SketchMixin:
         self.sk_sel = None
         self._hist_reset()                       # kaydedildi: geri alma artık Blender'da
         self._thaw()
+        try:                                     # v0.32.0: model denetimi (gizli uyuşmazlık)
+            from . import health
+            health.schedule_curve(ob.name)
+        except Exception:
+            pass
         return out
 
     def _attach_all(self, context, strokes, out):

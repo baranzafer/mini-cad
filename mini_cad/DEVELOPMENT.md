@@ -1,4 +1,4 @@
-# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.31.0)
+# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.32.0)
 
 > **Ad değişikliği (v0.27.0):** eklentinin görünen adı **BlendCAD** oldu. Paket kimliği
 > (`id = "mini_cad"`), klasör adı, `minicad.*` operatörleri ve `MINICAD_*` sınıfları
@@ -12,7 +12,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.31.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.32.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
 - Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
 - Kurulum zip'leri `dist/` klasöründe.
 - Her sürüm ayrı bir commit.
@@ -559,6 +559,42 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
       kenar ortasına snap, 3 mm boşluk, çift kenar, mevcut gövdeye eklerken taşan kenar —
       hepsi önce oluşmuyor, onaydan sonra oluşuyor; komşu yüzeyler bozulmuyor; Vazgeç
       eğrileri değiştirmiyor.
+  - **v0.32.0: model denetimi** (`health.py`, `loopfix.scan`). Sürekli döngü yok: bir
+    gövdenin TAM hesabı bitince (`core.AFTER_FINAL`, başarılı ya da başarısız; 0.3 sn
+    gecikmeyle bir kez) ve çizim Bitir'lenince (`health.schedule_curve`) çalışır. 160 bin
+    üçgenli kullanıcı modelinde ~70–90 ms (mesh denetimleri numpy). Bulgu: seviye
+    (error / warn / hint), metin, işaret noktaları, düzeltmeler (etiket, fn). Düzeltmeler
+    "Öneriler" penceresinde (Araçlar → Öneriler; eski Yüzey onarımı da burada) düğmeyle;
+    `health.apply_fix`: uygula → tek geri alma adımı → gövdeyi yenile → yeniden denetle.
+    Yeni bulgu çıkınca bildirim merkezine tek ileti; hata seviyesinde pencere açılır.
+    - Tel kafes: yakın ama değmeyen uç (yalnız serbest uç taşınır), nokta olmayan kenar
+      ortasına bağlı uç (böl + kaynat), üst üste kenar (bağlı değilse fazla eğriyi sil), çok
+      kısa parça, **sıfır boy parça** (aynı yerde üst üste noktalar; kullanıcı dosyasında
+      bulundu) → "Fazla noktaları kaldır": Blender API tek bezier noktası silemez, edit modda
+      silme arka planda sessizce hiçbir şey yapmıyordu (ölçüldü; önce yapılan referans
+      eşlemesi yüzeyleri bozmuştu). Şimdi spline fazla noktalar olmadan yeniden yazılır
+      (`core.remap_remove` + `core.remap_splines`, spline sona taşınır), nokta sayısı
+      doğrulanır; kullanıcı modelinde biçim sapması 0.003 mm, gövde kapalı katı kaldı.
+    - Yüzey: kurulamayan yüzeyin döngü onarımı (yüzeyin kendi segmentlerine yazılır),
+      katlanma uyarısı → Dolgu, neredeyse teğet (1–12°) ama keskin komşu yüzeyler → Teğet
+      (G1) (iki düzlemde önerilmez), kapalı olmayan katı → serbest kenarlar işaretli.
+    - Fillet: başarısızsa teşhis metninden "en fazla ≈X" → "Ölçüyü 0.97·X yap", "X ile
+      yapılabiliyor" → o ölçü + "En büyük ölçüyü bul (ayrıntılı teşhis)", "tek tek … (ör.
+      nokta)" → o kenarı fillet'ten çıkar, "Kenar kenar" → köşe modu, işlem sırası →
+      fillet'i boolean'dan önceye al. Başarılıysa: ölçü > 0.45 × en kısa komşu kenar →
+      0.4 × öner; 4+ kenarlı köşe → Kenar kenar önerisi.
+    - Boolean: başarısızsa kenar ölçüsü 0, aracı kaydır, sırayı değiştir; hacim değişmedi →
+      etkisiz uyarısı; aracın yüzü gövdenin düzlemsel yüzeyiyle aynı düzlemde (çakışık yüz)
+      → aracı join_tol/2 (≥0.1 mm) kaydır (kesimde dışarı, dıştan değen birleşimde içeri);
+      çok kısa yeni kenar → uyarı + işaret.
+  - **v0.32.0: kenar çizimi.** Kenarlar parametrede eşit aralıklı az noktayla çiziliyordu;
+    boolean kesişim eğrilerinin parametresi çok düzensiz (kullanıcı modelinde 65 noktada
+    kirişler 1.3–28 cm), çizgi gerçek kenardan 1.7 cm sapıp kırık görünüyordu (gerçek eğri
+    pürüzsüz: en küçük eğrilik yarıçapı 48 cm, OCC kenar toleransı ≤ 1e-4). `geometry.draw_poly`:
+    kiriş ortası sapmasına göre özyinelemeli bölme + dönüşe göre seyreltme (nokta başına
+    ≤ 2°). Gövde kenarları (`shape_edge_polylines`) ve boolean kenarları (`disp["bool_draw"]`,
+    kenar seçiminde çizim / üzerine gelme) bunu kullanır; kimlik için 65 noktalık kayıtlar
+    (`bool_edges`, GeoEdge) DEĞİŞMEDİ — kayıtlı dosyalardaki fillet referansları korunur.
   - **Olay paylaşımı:** çizim, kenar seçimi ve yüzey bölme kalıcı operatörleri fare şeridin
     (ya da açılır listesinin) üstündeyken olayı `PASS_THROUGH` ile şeride bırakır
     (`ribbon_state.over_ribbon`). Şerit açıkken çizimin kayan paleti (`palette.py`) çizilmez
@@ -629,6 +665,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `notify.py` | 163 | Bildirim merkezi (bpy'siz): önem grupları, 45 sn, çarpı, süren durum eşitleme |
 | `loopfix.py` | 270 | Yüzey sınırı teşhisi ve onarım planı (bpy'siz) |
 | `repair.py` | 257 | Onarımı eğri verisinde uygula, seçimi güncelle, yüzeyi yeniden dene, pencere / işaret verisi |
+| `health.py` | 952 | Model denetimi: her tam hesaptan / Bitir'den sonra bulgular ve onaylı düzeltmeler |
 | `ribbon_state.py` | 98 | bpy'siz paylaşılan şerit durumu, `over_ribbon`, `insets` (başlık örtüşmesi) |
 | `recorder.py` | 632 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
@@ -1286,6 +1323,8 @@ Betiğin yaptıkları:
 | t76 | Sağ tık menüsü gerçek çizim aracında: vurgu, menü öğeleri, Sil, Yatay kısıtı, Taşı (seçili + temel nokta adımı), nokta menüsü, çizerken sağ tık eskisi gibi, şerit kapalıyken menü yok |
 | t77 | Yüzey sınırı teşhisi: kusursuz kare, taşan çizgi (TJUNC → EXTRA), 3 mm boşluk (20 cm değil), çift kenar, çok kısa parça, köşesiz kenara snap (iki yüzey), dal, plan (bütün adımlar, veri değişmez) |
 | tools/bpy_repair_check.py | GERÇEK Blender + OCC: kusurlu sınırlarda teşhis + onaylı onarım + yüzey; komşu gövde; Vazgeç; isteğe bağlı pencere PNG'si (`... <mini_cad üstü> <çıktı.png>`) |
+| t78 | Tel kafes taraması: temiz kare, uzak açık uçlar, kapalı köşeye yakın uç (yalnız serbest uç), T-birleşim, üst üste kenar, sıfır boy (çift sayılmaz), birlikte birden çok bulgu |
+| tools/bpy_health_check.py | GERÇEK Blender + OCC: fillet çok büyük → en büyük ölçü önerisi → uygulanır; büyük fillet uyarısı; çakışık yüzlü boolean → aracı kaydır; etkisiz boolean; yakın uç, kenar ortası uç, sıfır boy nokta düzeltmeleri; açık kabuk işaretleri; isteğe bağlı Öneriler PNG'si |
 | tools/pil_painter.py | PIL ressamı (ribbon_preview ve bpy_model_check ortak) |
 | tools/ribbon_preview.py | Şeridi PIL ile PNG'ye çizer (aynı çizim kodu): `python3 devkit/tools/ribbon_preview.py mini_cad <çıktı klasörü>` |
 | t70 | Profil Süpürme: gather → motor → boolean (sıra, parametreler, açı derece), imza (ayar / profil), profil yoksa Model kaynaklı, çekirdek hatası, Ayrıntılı Teşhis (`deep` yalnız istenen işlemde), `is_bevel`, `after_bevel` ipucu bayrağı, görünüm uyarısı kısa biçimi |
@@ -1560,3 +1599,10 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   sorularak düzeltilir (bölme + kaynak, uç birleştirme, seçimden çıkarma), ardından yüzey
   yeniden denenir. Bütün adımlar önceden listelenir, görünümde işaretlenir, tek adımda geri
   alınır. Yeni modüller `loopfix.py`, `repair.py`; test t77; araç `bpy_repair_check.py`.
+
+- **0.32.0:** Model denetimi ve Öneriler: her işlem bitince gizli uyuşmazlıklar (yakın / kenar
+  ortasına değen uç, çift kenar, sıfır boy parça, kurulamayan / katlanan yüzey, neredeyse
+  teğet keskin dikiş, açık kabuk, fillet sınır ölçüsü ve riskli ölçü, 4+ kenarlı köşe, çakışık
+  yüzlü / etkisiz / başarısız boolean, kısa kenar) bulunur ve onaylı düzeltme önerilir.
+  Boolean kesim çizgilerinin kırık görünmesi düzeltildi (çizim örneklemesi; geometri
+  pürüzsüzdü). Yeni modül `health.py`; test t78; araç `bpy_health_check.py`.

@@ -390,7 +390,7 @@ def _build(job, res, geometry):
     res["ghost"] = _merge_ghosts(ghosts) if want_ghost else None
     res["sweep_lines"] = _sweep_lines.get(name, {}) if stages else {}
     if not preview:
-        disp = {"edges": [], "bool_edges": []}
+        disp = {"edges": [], "bool_edges": [], "bool_draw": []}
         try:
             disp["edges"] = [np.asarray(p, dtype=np.float32)
                              for p in geometry.shape_edge_polylines(shape)]
@@ -400,6 +400,10 @@ def _build(job, res, geometry):
             u = used.get(uid, set())
             for k, r in enumerate(recs):
                 disp["bool_edges"].append((uid, r["poly"].astype(np.float32), k in u))
+                try:                      # v0.32.0: çizim için pürüzsüz nokta dizisi
+                    disp["bool_draw"].append(geometry.draw_poly(r["edge"]).astype(np.float32))
+                except Exception:
+                    disp["bool_draw"].append(r["poly"].astype(np.float32))
         res["display"] = disp
     res["solid"] = "Kapalı katı" in shape_info
     res["ok"] = True
