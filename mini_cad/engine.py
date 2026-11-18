@@ -322,6 +322,24 @@ def _build(job, res, geometry):
                         if ok and ge:
                             info += f" · {len(ge)} gövde kenarı çözülemedi: {ge[0]}"
                         results[it["uid"]] = (ok, info)
+                elif st["op"] == "HOLE":            # v0.33.0: delik
+                    try:
+                        before = shape
+                        shape, ok, info, htools = geometry.apply_holes(
+                            shape, st["holes"], tol, job["smooth"], preview=preview)
+                        results[st["uid"]] = (ok, info)
+                        if st.get("want_edges"):
+                            try:
+                                bool_new[st["uid"]] = geometry.edge_records(
+                                    geometry.boolean_new_edges(shape, before, htools, "ALL",
+                                                               tol))
+                            except Exception:
+                                traceback.print_exc()
+                    except CadError as e:
+                        results[st["uid"]] = (False, str(e))
+                    except Exception as e:
+                        traceback.print_exc()
+                        results[st["uid"]] = (False, f"Hata: {e}")
                 elif st["op"] == "SWEEP":
                     _sweep_stage(name, st, shape, bool_new, tol, mirrors, run_bevels, job,
                                  preview, deep, bevel_done, results, upd, used, sweep_lines)

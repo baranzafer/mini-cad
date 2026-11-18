@@ -1,4 +1,4 @@
-# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.32.0)
+# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.33.0)
 
 > **Ad değişikliği (v0.27.0):** eklentinin görünen adı **BlendCAD** oldu. Paket kimliği
 > (`id = "mini_cad"`), klasör adı, `minicad.*` operatörleri ve `MINICAD_*` sınıfları
@@ -12,7 +12,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.32.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.33.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
 - Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
 - Kurulum zip'leri `dist/` klasöründe.
 - Her sürüm ayrı bir commit.
@@ -595,6 +595,33 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
     ≤ 2°). Gövde kenarları (`shape_edge_polylines`) ve boolean kenarları (`disp["bool_draw"]`,
     kenar seçiminde çizim / üzerine gelme) bunu kullanır; kimlik için 65 noktalık kayıtlar
     (`bool_edges`, GeoEdge) DEĞİŞMEDİ — kayıtlı dosyalardaki fillet referansları korunur.
+  - **v0.33.0: Delik aracı** (Inventor Hole) — `holemath.py` (bpy / OCC'siz), `hole.py`
+    (yerleştirme aracı), `geometry.hole_tool / apply_holes`, özellik `op = "HOLE"`.
+    - Veri: `MINICAD_Feature.hole_*` (tür SIMPLE / CBORE / CSINK / TAPPED, çap, derinlik,
+      tümüyle geçen, uç açısı, yuva çapı / derinliği, havşa çapı / açısı, vida ölçüsü) ve
+      `hole_pts` (`MINICAD_HolePoint`: gövdenin YEREL koordinatında yer + malzemeye doğru
+      eksen; gövde taşınınca delik de gider). `is_bevel` HOLE'u dışlar. İmza `_hole_key`.
+    - Hesap: profil (r, s) eksen etrafında döndürülür (BRepPrimAPI_MakeRevol) ve tek
+      boolean kesimle çıkarılır. Profil yüzeyin biraz üstünden başlar (çakışık yüz olmasın).
+      Tümüyle geçen derinlik = 2.5 × gövde köşegeni. Deliğin yeni kenarları boolean gibi
+      kaydedilir (`bool_new`): kenar seçiminde sarı, ağza fillet / pah verilebilir.
+    - Standartlar (mm, `holemath`): ISO 261/262 kaba diş (adım, kılavuz matkabı), ISO 273
+      orta geçme deliği, ISO 4762 imbus yuvası, ISO 10642 havşa (90°). Sahne birimine
+      `scale_length` ile çevrilir. Başlangıç: küçük gövdede M6, büyükte gövdeye orantılı çap.
+    - Araç: üzerine gelince hayalet (ağız / dip çemberi, yuva / havşa, eksen); eskiz
+      noktasına (tek noktalı spline) ve eskiz dairesi merkezine 12 px yakalama (yeşil);
+      tık = yer ekle (gövde gerçekten yeniden hesaplanır), Backspace / sağ tık = son yeri geri
+      al, Enter = bitir, Esc = vazgeç (yeni delikse silinir, düzenlemede eski yerler döner).
+      Delik penceresi: tür, vida ölçüsü (+ ölçülerden doldur, tür değişince de), çap, yuva /
+      havşa, Mesafe / Tümüyle geçen, derinlik + uç açısı, yerler listesi, delikler listesi.
+      Delik aracı açıkken başka bir araç seçilirse delik aracı biter (yerler kalır).
+    - Denetim: açılamayan delik → vida ölçüsünden doldur / havşayı çaptan türet / sil;
+      kenara çok yakın ya da yan yüzü delen delik (et < yarıçapın yarısı; kendi ağız çemberleri
+      hariç) → "Deliği içeri kaydır": kaydır → yeniden hesapla → ölç (delmiş delikte ilk ölçüm
+      açılmış geometriden yapıldığı için tek adım yetmiyordu; 5 tura kadar).
+    - Ölçüm (`bpy_hole_check.py`, gerçek OCC): düz tümüyle / kör 118° / düz dip, havşa
+      başlı, havşalı, dişli M6, iki delik, yan yüzden yatay delik — çıkan hacim analitik
+      formülle 7 basamak aynı; delik ağzına 1 cm pah formülle aynı.
   - **Olay paylaşımı:** çizim, kenar seçimi ve yüzey bölme kalıcı operatörleri fare şeridin
     (ya da açılır listesinin) üstündeyken olayı `PASS_THROUGH` ile şeride bırakır
     (`ribbon_state.over_ribbon`). Şerit açıkken çizimin kayan paleti (`palette.py`) çizilmez
@@ -666,6 +693,8 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `loopfix.py` | 270 | Yüzey sınırı teşhisi ve onarım planı (bpy'siz) |
 | `repair.py` | 257 | Onarımı eğri verisinde uygula, seçimi güncelle, yüzeyi yeniden dene, pencere / işaret verisi |
 | `health.py` | 952 | Model denetimi: her tam hesaptan / Bitir'den sonra bulgular ve onaylı düzeltmeler |
+| `holemath.py` | 158 | Delik standartları (ISO), döndürme profili, Pappus hacmi, açıklama (bpy'siz) |
+| `hole.py` | 430 | Delik yerleştirme aracı: hayalet, yakalama, tık / geri al / bitir / vazgeç, ön ayarlar |
 | `ribbon_state.py` | 98 | bpy'siz paylaşılan şerit durumu, `over_ribbon`, `insets` (başlık örtüşmesi) |
 | `recorder.py` | 632 | Ctrl+Alt+R kayıt / rapor (§7) |
 | `diag.py` | 83 | Motor durumu / log metinleri |
@@ -1325,6 +1354,8 @@ Betiğin yaptıkları:
 | tools/bpy_repair_check.py | GERÇEK Blender + OCC: kusurlu sınırlarda teşhis + onaylı onarım + yüzey; komşu gövde; Vazgeç; isteğe bağlı pencere PNG'si (`... <mini_cad üstü> <çıktı.png>`) |
 | t78 | Tel kafes taraması: temiz kare, uzak açık uçlar, kapalı köşeye yakın uç (yalnız serbest uç), T-birleşim, üst üste kenar, sıfır boy (çift sayılmaz), birlikte birden çok bulgu |
 | tools/bpy_health_check.py | GERÇEK Blender + OCC: fillet çok büyük → en büyük ölçü önerisi → uygulanır; büyük fillet uyarısı; çakışık yüzlü boolean → aracı kaydır; etkisiz boolean; yakın uç, kenar ortası uç, sıfır boy nokta düzeltmeleri; açık kabuk işaretleri; isteğe bağlı Öneriler PNG'si |
+| t79 | Delik hesapları: Pappus hacmi (düz, kör uçlu, düz dip, havşa başlı, havşalı), profil yüzeyin üstünden başlar, geçersiz değerler, ISO tabloları, birim ölçeği, açıklama |
+| tools/bpy_hole_check.py | GERÇEK Blender + OCC: her delik türünde çıkan hacim = analitik; iki delik; yatay delik; ağza pah; hatalı havşa; ön ayarlar (M8); yakalama adayları; yanı delen delik → içeri kaydır; hatalı delik önerisi; isteğe bağlı Delik penceresi PNG'si |
 | tools/pil_painter.py | PIL ressamı (ribbon_preview ve bpy_model_check ortak) |
 | tools/ribbon_preview.py | Şeridi PIL ile PNG'ye çizer (aynı çizim kodu): `python3 devkit/tools/ribbon_preview.py mini_cad <çıktı klasörü>` |
 | t70 | Profil Süpürme: gather → motor → boolean (sıra, parametreler, açı derece), imza (ayar / profil), profil yoksa Model kaynaklı, çekirdek hatası, Ayrıntılı Teşhis (`deep` yalnız istenen işlemde), `is_bevel`, `after_bevel` ipucu bayrağı, görünüm uyarısı kısa biçimi |
@@ -1606,3 +1637,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   yüzlü / etkisiz / başarısız boolean, kısa kenar) bulunur ve onaylı düzeltme önerilir.
   Boolean kesim çizgilerinin kırık görünmesi düzeltildi (çizim örneklemesi; geometri
   pürüzsüzdü). Yeni modül `health.py`; test t78; araç `bpy_health_check.py`.
+
+- **0.33.0:** Delik aracı: düz / havşa başlı / havşalı / dişli (ISO M2–M24), mesafe (matkap
+  ucu açılı) ya da tümüyle geçen; yüzeye tıklayarak, eskiz noktasına ve daire merkezine
+  yakalayarak birden çok yer; hayalet önizleme; Delik penceresi; delik ağzına fillet / pah;
+  denetim (kenara yakın / yanı delen delik → içeri kaydır, açılamayan delik önerileri).
+  Yeni modüller `holemath.py`, `hole.py`; test t79; araç `bpy_hole_check.py`.

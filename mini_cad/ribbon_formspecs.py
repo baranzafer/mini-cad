@@ -371,6 +371,7 @@ def order(ui, ctx):
         u.prop(it, "enabled", "", style="check", weight=0.13)
         u.label(f"{i + 1}. {it.name}", "" if it.ok else "err", weight=1.2)
         u.label("Boolean" if it.op == "BOOLEAN" else "Süpürme" if it.op == "SWEEP" else
+                "Delik" if it.op == "HOLE" else
                 ("Fillet" if it.kind == "FILLET" else "Pah"), "dim", weight=0.6)
 
     def sel(j):
@@ -642,6 +643,152 @@ def _repair_pending(ui, ctx, d):
 
 
 
+# ---------------------------------------------------------------- Delik (v0.33.0)
+
+HOLE_END = Meta.enum([("DIST", "Mesafe", ""), ("THRU", "Tümüyle geçen", "")])
+
+
+class _HoleEnd:
+    """Bitiş seçimi (hole_through bool'unu bölmeli seçime çevirir)."""
+
+    def __init__(self, f):
+        self.f = f
+
+    @property
+    def end(self):
+        return "THRU" if self.f.hole_through else "DIST"
+
+    @end.setter
+    def end(self, v):
+        self.f.hole_through = v == "THRU"
+
+
+def _hole_feature(ctx, t):
+    op = ra.hole_op()
+    if op is not None and op.body_name == t.name:
+        f = op.feature()
+        if f is not None:
+            return f, True
+    uid = ra.form_state.get("hole_uid")
+    holes = [f for f in t.cad.features if f.op == "HOLE"]
+    f = next((f for f in holes if f.uid == uid), None) or (holes[-1] if holes else None)
+    return f, False
+
+
+def hole_form(ui, ctx):
+    from . import hole, holemath
+    t = _need_body(ui, ctx)
+    if t is None:
+        return
+    p = t.cad
+    f, live = _hole_feature(ctx, t)
+    holes = [x for x in p.features if x.op == "HOLE"]
+    if live:
+        ui.label(f"Yüzeye tıkla: delik yeri ({len(f.hole_pts)} delik) · eskiz noktası / daire "
+                 "merkezine yakalar · Backspace: son deliği geri al", "info")
+    if f is None:
+        ui.label("Gövdede delik yok.", "dim")
+        ui.button("Delik aç", lambda: ra._hole(ctx, "SIMPLE"), icon="HOLE", primary=True)
+        return
+    ui.section("Tür")
+    ui.prop(f, "hole_kind", "", style="seg",
+            on_change=lambda v, f=f: hole.apply_preset(f))
+    with ui.row(1, 1):
+        ui.prop(f, "hole_thread", "Vida",
+                on_change=lambda v, f=f: hole.apply_preset(f))
+        ui.button("Ölçülerden doldur", lambda f=f: hole.apply_preset(f),
+                  enabled=f.hole_thread != "NONE")
+    if f.hole_kind == "TAPPED" and f.hole_thread != "NONE":
+        dn, pitch, tap = holemath.ISO_COARSE[f.hole_thread]
+        ui.label(f"{f.hole_thread} × {pitch:g}: kılavuz matkabı Ø{tap:g} mm (diş bilgisi "
+                 "saklanır; modellenmiş diş: Vida → Diş)", "dim")
+    ui.section("Ölçüler")
+    ui.prop(f, "hole_d", "Çap")
+    if f.hole_kind == "CBORE":
+        with ui.row():
+            ui.prop(f, "hole_cb_d", "Yuva Ø")
+            ui.prop(f, "hole_cb_depth", "Derinlik")
+    elif f.hole_kind == "CSINK":
+        with ui.row():
+            ui.prop(f, "hole_cs_d", "Havşa Ø")
+            ui.prop(f, "hole_cs_angle", "Açı", meta=Meta("FLOAT", "Açı", min=10, max=170,
+                                                        step=100, precision=0))
+    ui.section("Bitiş")
+    ui.prop(_HoleEnd(f), "end", "", meta=HOLE_END, style="seg")
+    if not f.hole_through:
+        with ui.row():
+            ui.prop(f, "hole_depth", "Derinlik")
+            ui.prop(f, "hole_tip", "Uç açısı", meta=Meta("FLOAT", "Uç açısı", min=0, max=179,
+                                                        step=100, precision=0))
+    ui.label(holemath.describe(core_params(f), fmt=_fmt_len), "dim")
+    ui.section(f"Yerler ({len(f.hole_pts)})")
+
+    def cells(u, h, i):
+        u.label(f"{i + 1}.", "dim", weight=0.15)
+        u.label("  ".join(f"{c:.3f}" for c in h.co), "", weight=1.0)
+        u.button("", lambda i=i, f=f: _hole_drop(t, f, i), icon="CLOSE", weight=0.18)
+    sel = ra.form_state.setdefault("hole_pt", [0])
+    ui.list("holepts", list(f.hole_pts), sel[0], lambda j: sel.__setitem__(0, j), cells,
+            rows=4, empty="Yüzeye tıklayarak yer ekle")
+    if f.info:
+        ui.label(f.info, "ok" if f.ok else "err")
+    if live:
+        with ui.row(2, 1):
+            ui.button("Tamam", lambda: _hole_finish(ctx), icon="FINISH", primary=True,
+                      key="Enter")
+            ui.button("Vazgeç", lambda: _hole_finish(ctx, cancel=True), icon="CLOSE",
+                      key="Esc")
+    else:
+        with ui.row():
+            ui.button("Yer ekle", lambda f=f: _hole_edit(ctx, f), icon="HOLE", primary=True)
+            ui.button("Deliği sil", lambda f=f: _hole_remove(t, f), icon="CLOSE")
+    if len(holes) > 1 or not live:
+        ui.section(f"Delikler ({len(holes)})")
+
+        def hcells(u, x, i):
+            u.prop(x, "enabled", "", style="check", weight=0.13)
+            u.label(x.name, "" if x.ok else "err", weight=0.8)
+            u.label(holemath.describe(core_params(x), fmt=_fmt_len), "dim", weight=1.6)
+        act = next((i for i, x in enumerate(holes) if x == f), -1)
+
+        def pick(j):
+            ra.form_state["hole_uid"] = holes[j].uid
+        ui.list("holes", holes, act, pick, hcells, rows=4)
+
+
+def core_params(f):
+    from . import core
+    return core.hole_params(f)
+
+
+def _hole_drop(t, f, i):
+    from . import core
+    if 0 <= i < len(f.hole_pts):
+        f.hole_pts.remove(i)
+        core.rebuild(t)
+
+
+def _hole_finish(ctx, cancel=False):
+    op = ra.hole_op()
+    if op is not None:
+        op.finish(ctx, cancel=cancel)
+
+
+def _hole_edit(ctx, f):
+    ra.form_state["hole_uid"] = f.uid
+    ra._call(ctx, lambda: bpy.ops.minicad.hole("INVOKE_DEFAULT", uid=f.uid))
+
+
+def _hole_remove(t, f):
+    from . import core
+    for i, x in enumerate(t.cad.features):
+        if x == f:
+            t.cad.features.remove(i)
+            break
+    core.forget_cache(t.name)
+    core.rebuild(t)
+
+
 FORMS = {
     # şerit kimliği: (başlık, simge, spec, genişlik)
     "FILLET_R": ("Fillet / pah", "FILLET3D", fillet, 300),
@@ -664,6 +811,7 @@ FORMS = {
     "PATCH": ("Kenar seçimi", "EDGE_PICK", edge_pick, 300),
     "SPLIT_FACE": ("Yüzeyi böl", "SPLIT_FACE", split_face, 280),
     "REPAIR": ("Öneriler", "DIAG", repair_form, 360),
+    "HOLE": ("Delik", "HOLE", hole_form, 330),
 }
 
 

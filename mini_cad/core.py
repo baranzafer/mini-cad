@@ -109,12 +109,29 @@ def _poll_tool(self, obj):
 
 
 FEATURE_OPS = [("BEVEL", "Bevel", ""), ("BOOLEAN", "Boolean", ""),
-               ("SWEEP", "Profil Süpürme", "")]
+               ("SWEEP", "Profil Süpürme", ""), ("HOLE", "Delik", "")]
 
 
 def is_bevel(f):
     """Fillet / pah işlemi mi? (v0.26.0'dan önce 'BOOLEAN olmayan' her şey bevel'di)"""
-    return f.op not in ("BOOLEAN", "SWEEP")
+    return f.op not in ("BOOLEAN", "SWEEP", "HOLE")
+
+
+HOLE_KINDS = [("SIMPLE", "Düz", "Düz silindirik delik"),
+              ("CBORE", "Havşa başlı", "Kademeli: baş yuvası + delik (imbus vida)"),
+              ("CSINK", "Havşalı", "Konik havşa + delik (havşa başlı vida)"),
+              ("TAPPED", "Dişli", "Kılavuz matkabı çapında delik; diş ölçüsü saklanır")]
+THREAD_ITEMS = [("NONE", "—", "Standart ölçü yok (değerleri elle gir)")] + [
+    (k, k, f"ISO metrik kaba diş {k}") for k in ("M2", "M2.5", "M3", "M4", "M5", "M6", "M8",
+                                                 "M10", "M12", "M14", "M16", "M20", "M24")]
+
+
+class MINICAD_HolePoint(bpy.types.PropertyGroup):
+    """v0.33.0: deliğin yeri (gövde objesinin yerel koordinatında) ve ekseni (malzemeye
+    doğru: yüzey normalinin tersi)."""
+    co: bpy.props.FloatVectorProperty(size=3, update=_on_setting_change)
+    nrm: bpy.props.FloatVectorProperty(size=3, default=(0.0, 0.0, -1.0),
+                                       update=_on_setting_change)
 
 
 def _poll_profile(self, obj):
@@ -222,6 +239,32 @@ class MINICAD_Feature(bpy.types.PropertyGroup):
     sw_extend: bpy.props.FloatProperty(name="Ek Uzatma", default=0.0, min=0.0, unit="LENGTH",
                                        precision=4, update=_on_setting_change)
     segs: bpy.props.CollectionProperty(type=MINICAD_SegRef)
+    # v0.33.0: delik
+    hole_kind: bpy.props.EnumProperty(name="Delik türü", items=HOLE_KINDS, default="SIMPLE",
+                                      update=_on_setting_change)
+    hole_d: bpy.props.FloatProperty(name="Çap", default=0.0066, min=1e-6, soft_max=0.1,
+                                    unit="LENGTH", precision=4, update=_on_setting_change)
+    hole_depth: bpy.props.FloatProperty(name="Derinlik", default=0.02, min=1e-6, soft_max=0.2,
+                                        unit="LENGTH", precision=4, update=_on_setting_change)
+    hole_through: bpy.props.BoolProperty(name="Tümüyle geçen", default=True,
+                                         update=_on_setting_change)
+    hole_tip: bpy.props.FloatProperty(name="Uç açısı", description="Matkap ucu açısı "
+                                      "(derece); 0: düz dip. Yalnız mesafeli delikte",
+                                      default=118.0, min=0.0, max=179.0,
+                                      update=_on_setting_change)
+    hole_cb_d: bpy.props.FloatProperty(name="Yuva çapı", default=0.011, min=1e-6, soft_max=0.1,
+                                       unit="LENGTH", precision=4, update=_on_setting_change)
+    hole_cb_depth: bpy.props.FloatProperty(name="Yuva derinliği", default=0.0065, min=1e-6,
+                                           soft_max=0.1, unit="LENGTH", precision=4,
+                                           update=_on_setting_change)
+    hole_cs_d: bpy.props.FloatProperty(name="Havşa çapı", default=0.013, min=1e-6,
+                                       soft_max=0.1, unit="LENGTH", precision=4,
+                                       update=_on_setting_change)
+    hole_cs_angle: bpy.props.FloatProperty(name="Havşa açısı", default=90.0, min=10.0,
+                                           max=170.0, update=_on_setting_change)
+    hole_thread: bpy.props.EnumProperty(name="Vida ölçüsü", items=THREAD_ITEMS,
+                                        default="NONE", update=_on_setting_change)
+    hole_pts: bpy.props.CollectionProperty(type=MINICAD_HolePoint)
     info: bpy.props.StringProperty(default="")
     ok: bpy.props.BoolProperty(default=True)
 
@@ -1279,6 +1322,16 @@ def gather(obj, preview, allow_ghost=True):
                     "key": ("B", f.bool_type, tkey, round(f.edge_size, 9) if run_bevels else 0.0,
                             f.edge_mode, f.mirror_tool)})
                 continue
+            if f.op == "HOLE":
+                if not props.use_booleans:
+                    continue
+                st = _hole_stage(obj, f)
+                if st is None:            # yer henüz seçilmedi (delik aracı açık): hata değil
+                    f.ok, f.info = True, "Delik yeri seçilmedi: yüzeye tıkla"
+                    continue
+                st["want_edges"] = (not preview) or (f.uid in geo_srcs and (run_bevels or ghost))
+                stages.append(st)
+                continue
             if f.op == "SWEEP":
                 if not props.use_booleans:
                     continue
@@ -1733,6 +1786,42 @@ def _r(v):
     return (round(v[0], 6), round(v[1], 6), round(v[2], 6))
 
 
+def hole_params(f):
+    """Deliğin holemath parametreleri (sahne biriminde)."""
+    return {"kind": f.hole_kind, "d": f.hole_d, "depth": f.hole_depth,
+            "through": f.hole_through, "tip_angle": f.hole_tip, "cb_d": f.hole_cb_d,
+            "cb_depth": f.hole_cb_depth, "cs_d": f.hole_cs_d, "cs_angle": f.hole_cs_angle,
+            "thread": f.hole_thread if f.hole_thread != "NONE" else ""}
+
+
+def _hole_key(f):
+    return (f.hole_kind, round(f.hole_d, 9), round(f.hole_depth, 9), f.hole_through,
+            round(f.hole_tip, 4), round(f.hole_cb_d, 9), round(f.hole_cb_depth, 9),
+            round(f.hole_cs_d, 9), round(f.hole_cs_angle, 4),
+            tuple((_r(h.co), _r(h.nrm)) for h in f.hole_pts))
+
+
+def _hole_stage(obj, f):
+    """v0.33.0: delik aşaması (dünya koordinatında yer ve eksen)."""
+    if not len(f.hole_pts):
+        return None
+    from mathutils import Vector
+    mw = obj.matrix_world
+    m3 = mw.to_3x3()
+    holes = []
+    for h in f.hole_pts:
+        co = mw @ Vector(tuple(h.co))
+        d = m3 @ Vector(tuple(h.nrm))
+        if d.length < 1e-12:
+            continue
+        d.normalize()
+        holes.append({"co": tuple(co), "dir": tuple(d), "p": hole_params(f)})
+    if not holes:
+        return None
+    return {"op": "HOLE", "uid": f.uid, "holes": holes,
+            "key": ("H",) + _hole_key(f) + tuple(round(x, 6) for row in mw for x in row)}
+
+
 def _signature_parts(props):
     """(eğri/obje verisi, yapı/ayarlar, fillet ölçüleri). Fillet ölçüsü dışında bir şey
     değişmediyse hayalet önizleme yeterlidir."""
@@ -1772,6 +1861,8 @@ def _signature_parts(props):
             struct.append(("B", f.uid, f.enabled, f.bool_type,
                            f.tool.name if f.tool is not None else None,
                            round(f.edge_size, 9), f.edge_mode, f.mirror_tool))
+        elif f.op == "HOLE":
+            struct.append(("H", f.uid, f.enabled) + _hole_key(f))
         elif f.op == "SWEEP":
             struct.append(("S", f.uid, f.enabled, f.bool_type, len(f.segs),
                            tuple(g.id for g in f.geo_edges),
@@ -1936,7 +2027,8 @@ def on_load(_dummy):
         pass
 
 
-classes = (MINICAD_CurveRef, MINICAD_SegRef, MINICAD_Patch, MINICAD_GeoEdge, MINICAD_Feature,
+classes = (MINICAD_CurveRef, MINICAD_SegRef, MINICAD_Patch, MINICAD_GeoEdge, MINICAD_HolePoint,
+           MINICAD_Feature,
            MINICAD_BevelEdge, MINICAD_CRef, MINICAD_Constraint, MINICAD_Link,
            MINICAD_ObjectProps)
 

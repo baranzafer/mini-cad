@@ -380,7 +380,7 @@ def check_body(ob):
     p = ob.cad
     out = []
     for fn in (_check_patches, _check_open, _check_seams, _check_fillets, _check_booleans,
-               _check_body_wires):
+               _check_holes, _check_body_wires):
         try:
             out += fn(ob, p)
         except Exception:
@@ -774,6 +774,163 @@ def _check_booleans(ob, p):
                           "değen fillet / süpürme başarısız olur. Aracı biraz kaydırmak "
                           "genelde düzeltir", [q for _L, q in short[:6]]))
     return out
+
+
+# ---------------------------------------------------------------- delik (v0.33.0)
+
+def _check_holes(ob, p):
+    out = []
+    if not p.use_booleans:
+        return out
+    from .bool_overlay import short_error
+    edges = [np.asarray(e, dtype=np.float64) for e in core._display.get(ob.name, {})
+             .get("edges", []) if len(e) >= 2]
+    mw = ob.matrix_world
+    m3 = mw.to_3x3()
+    for i, f in enumerate(p.features):
+        if f.op != "HOLE" or not f.enabled:
+            continue
+        nm = f.name
+        if not f.ok:
+            fixes = []
+            if f.hole_thread != "NONE":
+                fixes.append(("Vida ölçüsünden doldur", (lambda i=i: _hole_preset(ob.name, i)),
+                              "HOLE"))
+            if "Havşa" in (f.info or ""):
+                fixes.append(("Havşa ölçülerini çaptan türet",
+                              (lambda i=i: _hole_derive(ob.name, i)), "HOLE_CBORE"))
+            fixes.append(("Deliği sil", (lambda i=i: _drop_feature(ob.name, i)), "DELETE"))
+            out.append(_F(f"hole:{nm}:fail", "error",
+                          f"{nm} açılamadı: {short_error(f.info)}", (), fixes))
+            continue
+        R = 0.5 * max(f.hole_d, f.hole_cb_d if f.hole_kind == "CBORE" else 0.0,
+                      f.hole_cs_d if f.hole_kind == "CSINK" else 0.0)
+        radii = {0.5 * f.hole_d, R}
+        for j, h in enumerate(f.hole_pts):
+            co = np.array(mw @ _vec(h.co))
+            d = np.array((m3 @ _vec(h.nrm)).normalized())
+            depth = f.hole_depth if not f.hole_through else 1e9
+            wall = _hole_wall(edges, co, d, R, radii, depth)
+            if wall is None:
+                continue
+            w, q = wall
+            need = max(0.5 * R, 1e-6)
+            if w < need:
+                txt = "yan yüzeyi deliyor" if w < 0 else f"kenara çok yakın: et kalınlığı {_fmt(w)}"
+                mv = need - w
+                away = co - q
+                away -= d * float(away @ d)
+                nn = float(np.linalg.norm(away))
+                fixes = []
+                if nn > 1e-12:
+                    fixes.append(("Deliği içeri kaydır (et ≥ yarıçapın yarısı)",
+                                  (lambda i=i, j=j: _hole_fix_wall(ob.name, i, j)), "MOVE"))
+                fixes.append(("Bu deliği sil", (lambda i=i, j=j: _hole_drop(ob.name, i, j)),
+                              "DELETE"))
+                out.append(_F(f"hole:{nm}:{j}:wall", "warn",
+                              f"{nm} ({j + 1}. yer) {txt} (en az {_fmt(need)} önerilir): vida "
+                              "sıkınca kenar kırılır, sonraki fillet / pah bu kenarda zorlanır",
+                              [q], fixes))
+    return out
+
+
+def _vec(t):
+    from mathutils import Vector
+    return Vector(tuple(t))
+
+
+def _hole_wall(edges, co, d, R, radii, depth):
+    """Deliğin eksenine en yakın (kendi ağzı / dibi olmayan) gövde kenarı: (et, nokta)."""
+    best = None
+    tol_r = max(R * 0.02, 1e-7)
+    for P in edges:
+        v = P - co
+        s = v @ d
+        radial = np.linalg.norm(v - np.outer(s, d), axis=1)
+        if all(any(abs(r - rr) <= tol_r for rr in radii) for r in radial):
+            continue                           # deliğin kendi ağız / kademe çemberi
+        m = (s > -R) & (s < depth + R)         # delik boyunca
+        if not m.any():
+            continue
+        k = int(np.argmin(np.where(m, radial, np.inf)))
+        w = float(radial[k]) - R
+        if best is None or w < best[0]:
+            best = (w, P[k])
+    return best
+
+
+def _hole_preset(obname, i):
+    from . import hole
+    f = bpy.data.objects[obname].cad.features[i]
+    hole.apply_preset(f)
+    return f"{f.name}: {f.hole_thread} ölçüleri"
+
+
+def _hole_derive(obname, i):
+    f = bpy.data.objects[obname].cad.features[i]
+    f.hole_cb_d = max(f.hole_cb_d, f.hole_d * 1.7)
+    f.hole_cb_depth = min(max(f.hole_cb_depth, f.hole_d * 0.5), f.hole_depth * 0.8
+                          if not f.hole_through else f.hole_cb_depth or f.hole_d)
+    f.hole_cs_d = max(f.hole_cs_d, f.hole_d * 2.0)
+    return f"{f.name}: havşa ölçüleri çaptan türetildi"
+
+
+def _drop_feature(obname, i):
+    ob = bpy.data.objects[obname]
+    nm = ob.cad.features[i].name
+    ob.cad.features.remove(i)
+    core.forget_cache(obname)
+    return f"{nm} silindi"
+
+
+def _hole_move(obname, i, j, v):
+    ob = bpy.data.objects[obname]
+    f = ob.cad.features[i]
+    h = f.hole_pts[j]
+    w = ob.matrix_world @ _vec(h.co)
+    from mathutils import Vector
+    w = w + Vector(tuple(float(x) for x in v))
+    h.co = tuple(ob.matrix_world.inverted() @ w)
+    return f"{f.name} {j + 1}. yer {_fmt(float(np.linalg.norm(v)))} kaydırıldı"
+
+
+def _hole_fix_wall(obname, i, j, rounds=5):
+    """Deliği en yakın kenardan uzağa kaydır; her adımda yeniden hesapla ve ölç (delik yanı
+    delmişse ilk ölçüm açılmış geometriden yapılır, tek adım yetmez)."""
+    ob = bpy.data.objects[obname]
+    total = 0.0
+    for _ in range(rounds):
+        f = ob.cad.features[i]
+        mw, m3 = ob.matrix_world, ob.matrix_world.to_3x3()
+        h = f.hole_pts[j]
+        co = np.array(mw @ _vec(h.co))
+        d = np.array((m3 @ _vec(h.nrm)).normalized())
+        R = 0.5 * max(f.hole_d, f.hole_cb_d if f.hole_kind == "CBORE" else 0.0,
+                      f.hole_cs_d if f.hole_kind == "CSINK" else 0.0)
+        edges = [np.asarray(e, dtype=np.float64)
+                 for e in core._display.get(ob.name, {}).get("edges", []) if len(e) >= 2]
+        wall = _hole_wall(edges, co, d, R, {0.5 * f.hole_d, R},
+                          f.hole_depth if not f.hole_through else 1e9)
+        need = max(0.5 * R, 1e-6)
+        if wall is None or wall[0] >= need * 0.999:
+            break
+        w, q = wall
+        away = co - q
+        away -= d * float(away @ d)
+        nn = float(np.linalg.norm(away))
+        if nn <= 1e-12:
+            break
+        step = (need - w) * 1.0001
+        _hole_move(obname, i, j, away / nn * step)
+        total += step
+        core.rebuild(ob)
+    return f"{ob.cad.features[i].name} {j + 1}. yer {_fmt(total)} içeri kaydırıldı"
+
+
+def _hole_drop(obname, i, j):
+    f = bpy.data.objects[obname].cad.features[i]
+    f.hole_pts.remove(j)
+    return f"{f.name}: {j + 1}. yer silindi"
 
 
 def _short_bool_edges(ob, p, f):

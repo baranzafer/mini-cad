@@ -312,6 +312,12 @@ def state(btn):
         return bool(op is not None and getattr(op, "track", None) is not None)
     if bid == "AXLOCK":
         return bool(op is not None and getattr(op, "axis_lock", None) is not None)
+    if bid in ("HOLE", "TAPPED"):
+        op = hole_op()
+        f = op.feature() if op is not None else None
+        if f is None:
+            return False
+        return (bid == "TAPPED") == (f.hole_kind == "TAPPED")
     if bid in ("PATCH", "FILLET", "BOOL", "SWEEP", "BODY", "ORDER", "SETTINGS", "CONS_LIST",
                "SURF_LIST", "BLEND", "KERNEL", "WIRE_MESH"):
         return _form_open(bid)
@@ -357,6 +363,12 @@ def dispatch(context, kind, item):
 
 def _dispatch(context, kind, ident):
     sc = context.scene
+    op = hole_op()
+    if op is not None and ident not in HOLE_KINDS and ident != "HOLE_LIST" and (
+            ident in DRAW_TOOLS or ident in CONS_TOOLS or ident in PLANES or ident in DRAW_KEYS
+            or ident in ("SK_START", "EDGE_PICK", "PATCH", "PATCH_HOLE", "SPLIT_FACE",
+                         "FILLET_R", "CHAMFER", "EDIT_ALL")):
+        op.finish(context)                 # delik aracı açıkken başka araç: delikler kalır
 
     # ---- aç / kapa
     if ident in SCENE_TOGGLES:
@@ -462,6 +474,13 @@ def _dispatch(context, kind, ident):
         _open(ident, keep=True)
         return None
 
+    # ---- delik (v0.33.0)
+    if ident in HOLE_KINDS:
+        return _hole(context, HOLE_KINDS[ident])
+    if ident == "HOLE_LIST":
+        _open("HOLE", keep=True)
+        return None
+
     # ---- katı
     if ident in BOOL_TYPES:
         sc.minicad_bool_type = BOOL_TYPES[ident]
@@ -489,6 +508,49 @@ def _dispatch(context, kind, ident):
         _open(ident)
         return None
     return None
+
+
+HOLE_KINDS = {"HOLE": "SIMPLE", "HOLE_CBORE": "CBORE", "HOLE_CSK": "CSINK", "TAPPED": "TAPPED"}
+
+
+def hole_op():
+    try:
+        from . import hole
+        return hole._STATE["active"]
+    except Exception:
+        return None
+
+
+def _hole(context, kind):
+    """Delik aracını başlat (açıksa açık deliğin türünü değiştir) ve pencereyi aç."""
+    from . import hole
+    op = hole_op()
+    if op is not None:
+        f = op.feature()
+        if f is not None and f.hole_kind != kind:
+            f.hole_kind = kind
+            if kind == "TAPPED" and f.hole_thread == "NONE":
+                f.hole_thread = "M6"
+            hole.apply_preset(f)
+        _open("HOLE", keep=True)
+        return None
+    if _target(context) is None:
+        return "Delik için önce bir gövde gerekli (Yüzey → Sınır yüzeyi)"
+    if not _kernel_ready():
+        return "Hesap çekirdeği kurulu değil (Araçlar → Çekirdek)"
+    err = _call(context, lambda: bpy.ops.minicad.hole("INVOKE_DEFAULT", kind=kind))
+    if err:
+        return err
+    op = hole_op()
+    if op is not None and kind == "TAPPED":
+        f = op.feature()
+        if f is not None:
+            if f.hole_thread == "NONE":
+                f.hole_thread = "M6"
+            hole.apply_preset(f)
+    form_state["hole_uid"] = op.fuid if op is not None else form_state.get("hole_uid")
+    _open("HOLE", keep=True)
+    return "Yüzeye tıkla: delik yeri · Enter: bitir"
 
 
 def _forms():

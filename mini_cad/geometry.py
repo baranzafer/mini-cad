@@ -3785,3 +3785,56 @@ def fillet_ghost(shape, edges, kind, size, samples=12, arc=8):
         return None
     return (np.vstack(V).astype(np.float32), np.array(T, dtype=np.int32),
             np.array(L, dtype=np.float32))
+
+
+# ================================================================ delik (v0.33.0)
+
+def hole_tool(co, direction, prof):
+    """Delik aracı: (r, s) profilini co'dan direction (malzemeye doğru) ekseni etrafında
+    döndürür. Kapalı katı."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeRevol
+    from OCP.gp import gp_Ax1
+    d = np.asarray(direction, dtype=np.float64)
+    d /= max(float(np.linalg.norm(d)), 1e-15)
+    a = np.array([1.0, 0.0, 0.0]) if abs(d[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    u = np.cross(d, a)
+    u /= np.linalg.norm(u)
+    c = np.asarray(co, dtype=np.float64)
+    pts = [c + d * s + u * r for r, s in prof]
+    poly = _MakePolygon()
+    for q in pts:
+        poly.Add(_pnt(q))
+    poly.Close()
+    face = BRepBuilderAPI_MakeFace(poly.Wire(), True).Face()
+    rev = BRepPrimAPI_MakeRevol(face, gp_Ax1(_pnt(c), gp_Dir(*map(float, d))), 2.0 * math.pi)
+    rev.Build()
+    if not rev.IsDone():
+        raise CadError("Delik aracı kurulamadı")
+    return rev.Shape()
+
+
+def apply_holes(shape, holes, tol, smooth=True, preview=False):
+    """Delikleri gövdeden çıkarır. holes: [{"co", "dir", "p"}] (p: holemath profil
+    parametreleri). Tümüyle geçen derinlik gövde boyutundan alınır. (gövde, ok, bilgi)"""
+    from . import holemath
+    if not holes:
+        return shape, False, "Delik noktası yok"
+    through = 2.5 * _bbox_diag(shape)
+    tools = []
+    for h in holes:
+        try:
+            prof = holemath.profile(h["p"], through)
+        except ValueError as e:
+            raise CadError(f"Model kaynaklı: {e}")
+        tools.append(hole_tool(h["co"], h["dir"], prof))
+    shape2, ok, info = apply_boolean(shape, tools, "CUT", 0.0, "ALL", tol, smooth,
+                                     preview=preview)
+    n = len(holes)
+    try:                                  # küçük delikte "hacim -0.0%" yanıltıcıydı
+        removed = volume(shape) - volume(shape2)
+        if ok and removed > 0:
+            import re
+            info = re.sub(r"hacim [-+]?[0-9.]+%", f"çıkan hacim {removed:.4g}", info)
+    except Exception:
+        pass
+    return shape2, ok, f"{n} delik · " + info, tools

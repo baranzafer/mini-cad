@@ -105,7 +105,9 @@ class MINICAD_UL_features(bpy.types.UIList):
         row.prop(item, "name", text="", emboss=False,
                  icon="MOD_BOOLEAN" if is_bool else
                  "CURVE_PATH" if item.op == "SWEEP" else "MOD_BEVEL")
-        if item.op == "SWEEP":
+        if item.op == "HOLE":
+            row.label(text=f"Delik · {len(item.hole_pts)} yer")
+        elif item.op == "SWEEP":
             prof = item.profile.name if item.profile else "—"
             row.label(text=f"{BOOL_NAMES.get(item.bool_type, '')} · {prof}")
         elif is_bool:

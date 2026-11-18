@@ -449,20 +449,26 @@ _SOLID = [
 _HOLE = [
     ("Delik", [
         B("HOLE", "HOLE", "Delik",
-          "Yüzeye düz, havşalı ya da havşa başlı (kademeli) delik açar.",
-          ["Yüzeye ya da eskiz noktasına tıkla", "Türü ve ölçüleri ver",
-           "Derinlik: mesafe / tümüyle geçen"], key="H", status=PLANNED,
+          "Gövde yüzüne tıklayarak düz, havşa başlı (kademeli) ya da havşalı delik açar; eskiz "
+          "noktasına ve daire merkezine yakalar.",
+          ["Türü seç (açılır liste)", "Yüzeye ya da eskiz noktasına tıkla (birden çok delik)",
+           "Ölçüleri Delik penceresinden ver: vida ölçüsü, çap, mesafe / tümüyle geçen",
+           "Enter: bitir · Backspace: son deliği geri al · Esc: vazgeç"], key="H",
           variants=[
-              V("HOLE", "HOLE", "Düz delik", "Çap ve derinlik.", status=PLANNED),
+              V("HOLE", "HOLE", "Düz delik", "Çap; mesafe (matkap ucu açılı) ya da tümüyle "
+                "geçen."),
               V("HOLE_CBORE", "HOLE_CBORE", "Havşa başlı (kademeli)",
-                "Baş çapı ve baş derinliği ile.", status=PLANNED),
-              V("HOLE_CSK", "HOLE_CSK", "Havşalı", "Havşa çapı ve açısı ile.",
-                status=PLANNED),
+                "İmbus vida için baş yuvası çapı ve derinliği ile."),
+              V("HOLE_CSK", "HOLE_CSK", "Havşalı", "Havşa başlı vida için havşa çapı ve açısı."),
           ]),
         B("TAPPED", "TAPPED", "Dişli delik",
-          "Standart vida ölçüsüne göre (M3, M4, ...) dişli delik açar.",
-          ["Konumu seç", "Standart ve ölçü seç (ISO metrik)", "Diş derinliği ver"],
-          status=PLANNED),
+          "ISO metrik ölçüye göre (M2–M24) kılavuz matkabı çapında delik; diş ölçüsü "
+          "saklanır.",
+          ["Vida ölçüsünü seç (M6 → 5 mm matkap)", "Yüzeye tıkla", "Mesafe ya da tümüyle geçen"]),
+        B("HOLE_LIST", "ORDER", "Delikler",
+          "Gövdedeki delikleri listeler: seç, ölçüleri değiştir, yer ekle, sil.",
+          ["Listeden deliği seç", "Ölçüleri değiştir (canlı güncellenir)",
+           "Yer ekle: yüzeye tıkla"]),
     ]),
     ("Vida", [
         B("THREAD", "THREAD", "Diş",

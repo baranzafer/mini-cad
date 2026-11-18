@@ -126,7 +126,8 @@ for b in data.all_buttons():
             continue
         i = it["id"]
         known = (i in ra.DRAW_TOOLS or i in ra.CONS_TOOLS or i in ra.PLANES or i in fs.FORMS or
-                 i in ra.SCENE_TOGGLES or i in ra.BOOL_TYPES or i in ra.DRAW_KEYS or i in (
+                 i in ra.SCENE_TOGGLES or i in ra.BOOL_TYPES or i in ra.DRAW_KEYS or
+                 i in getattr(ra, "HOLE_KINDS", ()) or i == "HOLE_LIST" or i in (
                      "OPT_SNAP", "SK_START", "SK_FINISH", "SK_UNDO", "SK_CLOSE", "EDIT_ALL",
                      "EDGE_PICK", "PATCH", "PATCH_HOLE", "SPLIT_FACE", "REBUILD", "CONS_SOLVE",
                      "STEP", "DIAG", "REC"))
