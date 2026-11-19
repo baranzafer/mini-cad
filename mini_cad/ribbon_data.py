@@ -527,6 +527,16 @@ _TOOLS = [
           "Birkaç saniyelik olay kaydı ve durum raporu hazırlar (hata bildirimi için).",
           ["Kaydı başlat", "Sorunu tekrar yap", "Raporu sohbete yapıştır"], key="Ctrl+Alt+R"),
     ]),
+    ("Hesap", [
+        B("CALC_STOP", "CALC_STOP", "Hesabı durdur",
+          "Süren uzun hesabı (arka plan sürecinde) durdurur; gövde son hesaplanan hâliyle "
+          "kalır, bir şey değiştirince ya da Tamamla ile yeniden hesaplanır.",
+          ["Hesap sürerken bas", "Bildirimdeki Durdur düğmesi de aynıdır"]),
+        B("CALC_CONT", "CALC_CONT", "Tamamla",
+          "Süre sınırında durdurulan (kısmi) ya da durdurulmuş hesabı sınırsız tamamlar.",
+          ["Gövdeyi seç", "Bas: kalan işlemler hesaplanır",
+           "Süre sınırı: Ayarlar → Uzun hesaplar"]),
+    ]),
     ("Ayarlar", [
         B("SETTINGS", "SETTINGS", "Ayarlar",
           "Önizleme kalitesi, toleranslar, ızgara ve yakalama ayarları."),

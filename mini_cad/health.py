@@ -1128,6 +1128,24 @@ def all_findings():
         pass
     items = [(k, k.split(":", 1)[1], v) for k, v in FINDINGS.items()
              if v and bpy.data.objects.get(k.split(":", 1)[1]) is not None]
+    for name in set(core.PARTIAL) | set(core.HELD):     # v0.35.0: yarım kalan hesaplar
+        if bpy.data.objects.get(name) is None:
+            continue
+        p = core.PARTIAL.get(name)
+        if p is not None:
+            msg = (f"Hesap {p['elapsed']:.0f} sn sürdü, {p['done']}/{p['total']} işlemde "
+                   f"süre sınırında durdu; kalan: {', '.join(p['next'][:4])}")
+        else:
+            msg = "Hesap durduruldu: gövde son hesaplanan hâliyle duruyor"
+        fixes = [("Tamamla (sınırsız)", (lambda n=name: core.continue_full(n)), "CALC_CONT"),
+                 ("Bu gövdede hep tamamı", (lambda n=name: core.continue_full(n, always=True)),
+                  "CALC_CONT")]
+        slow = (p or {}).get("slow")
+        if slow and slow.get("uids") and slow["uids"][0]:
+            fixes.append((f"Yavaş işlemi kapat ({slow['label']})",
+                          (lambda n=name, u=slow["uids"]: core.disable_features(n, u)),
+                          "CLOSE"))
+        items.append(("calc:" + name, name, [_F(f"calc:{name}", "warn", msg, (), fixes)]))
     items.sort(key=lambda x: (x[1] != target, x[0]))
     seen, out = set(), []                 # aynı bulgu (gövde + eğri taraması) tek yerde
     for k, n, fs in items:

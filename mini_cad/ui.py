@@ -689,6 +689,12 @@ class MINICAD_Preferences(bpy.types.AddonPreferences):
         description="Ağır OCC hesaplarını (fillet, boolean) ayrı bir süreçte yapar: Blender "
         "donmaz, OCC çökerse Blender kapanmaz. Kapalıysa her şey Blender içinde hesaplanır",
         default=True, update=_on_background_pref)
+    calc_budget: bpy.props.FloatProperty(
+        name="Hesap süre sınırı (sn)",
+        description="Bir gövdenin hesabı bu süreyi aşınca kalan işlemler (fillet, boolean, "
+        "delik...) hesaplanmaz, o ana kadarki gövde gösterilir ve devam edilsin mi diye "
+        "sorulur. 0 = sınırsız (Blender uzun süre bekleyebilir)",
+        default=8.0, min=0.0, soft_max=120.0, step=100, precision=0)
     show_launcher: bpy.props.BoolProperty(
         name="BlendCAD düğmesi (görünüm sağ üstü)",
         description="3D görünümün sağ üstünde, gezinme gizmosunun solunda BlendCAD başlatıcı "
@@ -718,6 +724,7 @@ class MINICAD_Preferences(bpy.types.AddonPreferences):
         box.prop(self, "hide_view_text")
         box.prop(self, "legacy_panels")
         layout.prop(self, "background")
+        layout.prop(self, "calc_budget")
         layout.label(text="Hesap motoru: " + core._client().describe())
         layout.label(text=f"Blender Python: {sys.version.split()[0]}")
         layout.label(text=f"Kütüphane klasörü: {kernel.site_dir()}")

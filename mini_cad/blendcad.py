@@ -483,10 +483,43 @@ def _draw_repair_markers(p, ctx, region, s):
             p.lines(seg, c, 1.6)
 
 
+def _calc_ask(key, level, text, actions):
+    """core.ASK_HOOKS: hesap soruları / uyarıları bildirim merkezine (v0.35.0)."""
+    notify.CENTER.ask(key, level, text, actions, _now())
+    _redraw_all(bpy.context)
+
+
+def _calc_result(text):
+    notify.CENTER.push(notify.level_of(text), text, _now())
+    _redraw_all(bpy.context)
+
+
+def _task_sync():
+    """Süren arka plan hesabı: bildirimin en üstünde ilerleme + Durdur (1 sn'den uzunsa)."""
+    from . import core
+    r = core.running()
+    old = notify.CENTER.task
+    if r is not None and r["sec"] >= 1.0:
+        txt = f"{r['name'] or 'Gövde'}"
+        if r["progress"]:
+            txt += f" · {r['progress']}"
+        txt += f" · {r['sec']:.0f} sn"
+        if r["sec"] >= 4.0:
+            txt += " · Blender kullanılabilir; istersen durdur"
+        notify.CENTER.set_task(txt, [("Durdur", core.cancel_running)])
+    else:
+        notify.CENTER.set_task(None)
+    return old != notify.CENTER.task
+
+
 def _notify_tick():
     try:
-        if notify.CENTER.expire(_now()):
+        ch = notify.CENTER.expire(_now())
+        ch = _task_sync() or ch
+        if ch:
             _redraw_all(bpy.context)
+        if notify.CENTER.task is not None:
+            return 0.5
     except Exception:
         pass
     return 1.0
@@ -680,6 +713,10 @@ def register():
     for c in classes:
         bpy.utils.register_class(c)
     ribbon_actions.register()
+    from . import core
+    if _calc_ask not in core.ASK_HOOKS:
+        core.ASK_HOOKS.append(_calc_ask)
+    notify.CENTER.on_result = _calc_result
     _NOTIFY["handle"] = bpy.types.SpaceView3D.draw_handler_add(_draw_notify, (), "WINDOW",
                                                                "POST_PIXEL")
     if not bpy.app.timers.is_registered(_notify_tick):
@@ -700,6 +737,9 @@ def unregister():
         _NOTIFY["handle"] = None
     if bpy.app.timers.is_registered(_notify_tick):
         bpy.app.timers.unregister(_notify_tick)
+    from . import core
+    if _calc_ask in core.ASK_HOOKS:
+        core.ASK_HOOKS.remove(_calc_ask)
     for attr in ("_handle", "_hov"):
         h = getattr(BLENDCAD_OT_workspace, attr)
         if h is not None:

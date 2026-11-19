@@ -54,6 +54,10 @@ class Client:
         self.on_reset = []       # süreç (ve önbellekleri) kaybolunca çağrılır
         self.python = ""
         self.log = None          # olay günlüğü (Blender tarafı ayarlar)
+        self.progress = ""       # v0.35.0: süren işin ilerlemesi (motordan)
+        self.job_t0 = 0.0        # süren işin başlama zamanı
+        self.job_tag = None      # süren işin etiketi (çağıran verir: gövde adı vb.)
+        self.cancelled = None    # son durdurulan işin etiketi
 
     def _log(self, msg):
         if self.log is not None:
@@ -236,6 +240,9 @@ class Client:
             if gen != self.session:
                 return
             mid, res = item[2], item[3]
+            if mid == -1:                      # v0.35.0: ilerleme iletisi (iş sürüyor)
+                self.progress = (res or {}).get("progress", "")
+                return
             if mid == self.inflight:
                 self.inflight = None
             cb = self.cbs.pop(mid, None)
@@ -277,7 +284,7 @@ class Client:
         from . import engine
         return engine.handle(cmd, data)
 
-    def submit(self, cmd, data, cb):
+    def submit(self, cmd, data, cb, tag=None):
         """İşi gönderir; sonuç poll() içinde cb(sonuç) ile gelir. Blender içinde hesaplanıyorsa
         cb hemen çağrılır. Süreç meşgulse False döner (önce busy() kontrol edilmeli)."""
         self.ensure()
@@ -290,6 +297,7 @@ class Client:
         self.next_id += 1
         self.cbs[mid] = cb
         self.inflight = mid
+        self.job_t0, self.progress, self.job_tag = time.time(), "", tag
         try:
             self.conn.send((mid, cmd, data))
         except Exception:
@@ -307,12 +315,21 @@ class Client:
                 self._died()
         # süreç yoksa: yeni süreç zaten temiz başlar
 
-    def call(self, cmd, data):
+    def call(self, cmd, data, wait_limit=None, on_late=None, tag=None):
         """Senkron çağrı (operatörler için): önceki iş bitene kadar bekler, sonra bu işi
-        hesaplatıp sonucunu döndürür."""
+        hesaplatıp sonucunu döndürür.
+
+        v0.35.0: wait_limit (sn) verilirse Blender en fazla bu kadar bekler (donmaz):
+        - önceki iş bitmediyse {"ok": False, "busy": True} döner (iş gönderilmez);
+        - bu iş süre içinde bitmediyse {"ok": False, "pending": True} döner, iş arka planda
+          sürer ve sonucu gelince on_late(sonuç) çağrılır (poll içinde, ana iş parçacığı)."""
+        t_wait = time.time()
         for _ in range(3):
             self.ensure()
             while self.busy():
+                if wait_limit is not None and self.mode == "process" and \
+                        time.time() - t_wait > wait_limit:
+                    return {"ok": False, "busy": True}
                 self._wait_step()
             if self.mode == "inproc":
                 return self._run_inproc(cmd, data)
@@ -321,13 +338,39 @@ class Client:
         else:
             return {"ok": False, "error": "Hesap süreci başlatılamadı"}
         box = {}
-        if not self.submit(cmd, data, lambda r: box.setdefault("r", r)):
+        if not self.submit(cmd, data, lambda r: box.setdefault("r", r), tag=tag):
             return {"ok": False, "error": "Hesap süreci kullanılamıyor"}
+        mid = self.inflight
+        t_job = time.time()
         while "r" not in box:
+            if wait_limit is not None and time.time() - t_job > wait_limit and \
+                    self.mode == "process" and mid in self.cbs:
+                if on_late is not None:
+                    self.cbs[mid] = on_late
+                return {"ok": False, "pending": True}
             self._wait_step()
             if self.mode != "process" and "r" not in box:
                 break
         return box.get("r") or {"ok": False, "error": CRASH_TEXT, "crashed": True}
+
+    def running(self):
+        """Süren iş: {"tag", "sec", "progress"} | None."""
+        if self.inflight is None or self.mode != "process":
+            return None
+        return {"tag": self.job_tag, "sec": time.time() - self.job_t0,
+                "progress": self.progress}
+
+    def cancel(self):
+        """v0.35.0: süren işi durdurur — süreç kapatılır (OCC hesabı başka türlü kesilemez),
+        bir sonraki işte yeni süreç açılır. Durdurulan işin etiketi döner | None."""
+        if self.mode != "process" or self.inflight is None:
+            return None
+        tag = self.job_tag
+        self._log(f"kullanıcı hesabı durdurdu ({tag})")
+        self.cancelled = tag
+        self.stop()
+        self.job_tag, self.progress = None, ""
+        return tag
 
 
 _CLIENT = Client()

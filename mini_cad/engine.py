@@ -197,12 +197,39 @@ def _sweep_stage(name, st, shape, bool_new, tol, mirrors, run_bevels, job, previ
         results[uid] = (False, f"Hata: {e}")
 
 
+PROGRESS = None        # v0.35.0: ilerleme bildirimi (süreçte engine_host bağlar): fn(metin)
+WAITING = "Bekliyor — hesap süre sınırında durdu (devam etmek için: Devam et)"
+
+
+def _progress(text):
+    fn = PROGRESS
+    if fn is not None:
+        try:
+            fn(text)
+        except Exception:
+            pass
+
+
+def _stage_label(st, names):
+    """Aşamanın kullanıcıya görünen adı (fillet aşamasında birden çok kenar özelliği)."""
+    if st["op"] == "BEVEL":
+        nm = [names.get(it["uid"], "Fillet") for it in st["items"]]
+        return nm[0] if len(nm) == 1 else f"{nm[0]} +{len(nm) - 1}"
+    return names.get(st.get("uid"), st["op"])
+
+
+def _stage_uids(st):
+    return [it["uid"] for it in st["items"]] if st["op"] == "BEVEL" else [st.get("uid")]
+
+
 def build(job):
     geometry = _geo()
     t0 = time.perf_counter()
     name, preview = job["name"], job["preview"]
     res = {"ok": False, "error": "", "patches": {}, "features": {}, "geo_updates": {},
            "errors": list(job.get("errors", ()))}
+    job["_t_engine"] = t0
+    _progress("yüzeyler kuruluyor")
     try:
         _build(job, res, geometry)
     except CadError as e:
@@ -285,11 +312,64 @@ def _build(job, res, geometry):
             sweep_lines = {}
             deep = set(job.get("deep", ()))
             bevel_done = False             # bu aşamadan önce fillet uygulandı mı (teşhis ipucu)
-            for st in stages:
+            # v0.35.0: süre sınırı — bir aşama bittiğinde süre aşıldıysa kalanlar hesaplanmaz,
+            # o ana kadarki gövde gösterilir ve kullanıcıya devam edilsin mi diye sorulur
+            budget = float(job.get("budget") or 0.0)
+            names = job.get("feature_names", {})
+            t_build = job.get("_t_engine") or time.perf_counter()
+            stage_ms, partial = [], None
+            n_st = len(stages)
+            for si, st in enumerate(stages):
+                el = time.perf_counter() - t_build
+                if budget > 0 and si > 0 and el > budget and (st["op"] != "BEVEL" or run_bevels):
+                    rest = [s2 for s2 in stages[si:] if s2["op"] != "BEVEL" or run_bevels]
+                    partial = {"done": si, "total": n_st, "elapsed": el, "budget": budget,
+                               "next": [_stage_label(s2, names) for s2 in rest],
+                               "uids": [u for s2 in rest for u in _stage_uids(s2)]}
+                    for u in partial["uids"]:
+                        results[u] = (True, WAITING)
+                    break
+                _progress(f"{si + 1}/{n_st} · {_stage_label(st, names)}")
+                ts = time.perf_counter()
+                stage_ms.append([_stage_label(st, names), _stage_uids(st), 0.0])
+                try:
+                    shape, bevel_done = _run_stage(
+                        st, shape, name, job, results, upd, bases, bool_new, used, ghosts,
+                        sweep_lines, deep, bevel_done, tol, mirrors, run_bevels, want_ghost,
+                        preview, geometry)
+                finally:
+                    stage_ms[-1][2] = (time.perf_counter() - ts) * 1000.0
+            res["stage_ms"] = stage_ms
+            res["partial"] = partial
+            res["geo_updates"] = upd
+            _sweep_lines[name] = sweep_lines
+            if partial is None:
+                _bevel_cache[name] = (key, shape, results, bool_new, ghosts, used, upd)
+                if not preview:
+                    _stage_base[name] = bases
+        for uid, r in results.items():
+            res["features"][uid] = r
+            if not r[0]:
+                errors.append(job["feature_names"].get(uid, uid))
+
+    if not preview and not res.get("partial"):
+        _final[name] = {"shape": shape, "solid": "Kapalı katı" in shape_info,
+                        "info": shape_info}
+        _bool_new[name] = bool_new
+    _progress("görüntü hazırlanıyor")
+    _rest_of_build(job, res, geometry, name, preview, shape, shape_info, faces, face_src,
+                   mirrors, tol, errors, ghosts, want_ghost, stages, bool_new, used)
+
+
+def _run_stage(st, shape, name, job, results, upd, bases, bool_new, used, ghosts, sweep_lines,
+               deep, bevel_done, tol, mirrors, run_bevels, want_ghost, preview, geometry):
+    """Tek aşama (v0.35.0: döngüden ayrıldı, süre ölçülsün diye). (gövde, fillet yapıldı mı)"""
+    if True:
+        if True:
                 if st["op"] == "BEVEL":
                     items = st["items"]
                     if not run_bevels and not want_ghost:
-                        continue
+                        return shape, bevel_done
                     feats = []
                     for it in items:
                         gp, gu, ge, gused = _resolve_geo(name, it, bool_new, tol)
@@ -306,10 +386,10 @@ def _build(job, res, geometry):
                         for it, gp, _ in live:
                             ghosts.append(_ghost_for(shape, it, list(it["polys"]) + gp,
                                                      mirrors, tol))
-                        continue
+                        return shape, bevel_done
                     bases[st["skey"]] = shape
                     if not live:
-                        continue
+                        return shape, bevel_done
                     shape, rr = geometry.apply_features(
                         shape, [{"kind": it["kind"], "size": it["size"], "polys": it["polys"],
                                  "geo_polys": gp, "deep": it["uid"] in deep}
@@ -387,20 +467,12 @@ def _build(job, res, geometry):
                     except Exception as e:   # hiçbir hata boolean'ı sessizce yok etmesin
                         traceback.print_exc()
                         results[st["uid"]] = (False, f"Hata: {e}")
-            res["geo_updates"] = upd
-            _sweep_lines[name] = sweep_lines
-            _bevel_cache[name] = (key, shape, results, bool_new, ghosts, used, upd)
-            if not preview:
-                _stage_base[name] = bases
-        for uid, r in results.items():
-            res["features"][uid] = r
-            if not r[0]:
-                errors.append(job["feature_names"].get(uid, uid))
+    return shape, bevel_done
 
-    if not preview:
-        _final[name] = {"shape": shape, "solid": "Kapalı katı" in shape_info,
-                        "info": shape_info}
-        _bool_new[name] = bool_new
+
+def _rest_of_build(job, res, geometry, name, preview, shape, shape_info, faces, face_src,
+                   mirrors, tol, errors, ghosts, want_ghost, stages, bool_new, used):
+    """Görüntü verisi (tessellate, etiketler, kenar çizgileri) — v0.35.0: ayrıldı."""
     lin, ang = job["lin"], job["ang"]
     if preview:
         lin, ang = lin * 4.0, max(ang * 3.0, math.radians(20))
@@ -503,8 +575,17 @@ def ping(data):
         return {"ok": False, "error": f"Çekirdek yüklenemedi: {e}"}
 
 
+def test_sleep(data):
+    """Test komutu (v0.35.0): uzun süren işi taklit eder (ilerleme bildirerek bekler)."""
+    n = max(1, int(data.get("steps", 5)))
+    for i in range(n):
+        _progress(f"bekleme {i + 1}/{n}")
+        time.sleep(float(data.get("dt", 0.2)))
+    return {"ok": True, "slept": n}
+
+
 COMMANDS = {"build": build, "ghost": ghost, "step": write_step, "forget": forget,
-            "forget_tool": forget_tool, "ping": ping}
+            "forget_tool": forget_tool, "ping": ping, "test_sleep": test_sleep}
 
 
 def handle(cmd, data):

@@ -439,6 +439,21 @@ def settings(ui, ctx):
     pr = ra.prefs()
     if pr is not None:
         ui.prop(pr, "background", style="check")
+    ui.section("Uzun hesaplar")
+    if pr is not None:
+        ui.prop(pr, "calc_budget", "Süre sınırı (sn, 0 = sınırsız)")
+    ui.label("Süre aşılınca o ana kadarki gövde gösterilir, kalanı için sorulur", "dim")
+    if t is not None:
+        ui.prop(t.cad, "full_calc", "Bu gövdede her zaman tamamını hesapla", style="check")
+        pa = core.PARTIAL.get(t.name)
+        if pa is not None or t.name in core.HELD:
+            ui.label(t.cad.status, "warn")
+            ui.button("Tamamla (sınırsız)", lambda: ra._msg(core.continue_full(t.name) or ""),
+                      icon="CALC_CONT", primary=True)
+    r = core.running()
+    if r is not None:
+        ui.label(f"Süren hesap: {r['name']} · {r['progress']} · {r['sec']:.0f} sn", "info")
+        ui.button("Hesabı durdur", lambda: core.cancel_running(), icon="CALC_STOP")
     try:
         c = core._client()
         ui.label(c.describe(), "ok" if c.mode == "process" else "info")

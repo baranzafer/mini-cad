@@ -514,6 +514,18 @@ def _dispatch(context, kind, ident):
     if ident == "REBUILD":
         return _call(context, lambda: bpy.ops.minicad.rebuild())
 
+    # ---- uzun hesap (v0.35.0)
+    if ident == "CALC_STOP":
+        from . import core
+        n = core.cancel_running()
+        return f"{n}: hesap durduruldu" if n else "Süren arka plan hesabı yok"
+    if ident == "CALC_CONT":
+        from . import core
+        t = _target(context)
+        if t is None:
+            return "Önce bir gövde seç"
+        return core.continue_full(t.name)
+
     # ---- araçlar
     if ident == "CONS_SOLVE":
         return _call(context, lambda: bpy.ops.minicad.constraint_solve()) or "Kısıtlar çözüldü"

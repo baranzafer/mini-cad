@@ -1,4 +1,4 @@
-# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.34.0)
+# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.35.0)
 
 > **Ad değişikliği (v0.27.0):** eklentinin görünen adı **BlendCAD** oldu. Paket kimliği
 > (`id = "mini_cad"`), klasör adı, `minicad.*` operatörleri ve `MINICAD_*` sınıfları
@@ -12,7 +12,7 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.34.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.35.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
 - Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
 - Kurulum zip'leri `dist/` klasöründe.
 - Her sürüm ayrı bir commit.
@@ -664,6 +664,32 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
     yüzle başlar). Denetim: başarısız ekstrüzyon → yönü çevir / mesafeyi yarıya indir /
     Doğrusala geç / tek yönlü / yüzü yeniden seç / sil. Yeni kenarlar boolean gibi
     kaydedilir (kenar seçiminde fillet / pah).
+  - **v0.35.0: uzun hesap koruması.** Ağır işlemlerde Blender donuyordu (araçların senkron
+    yeniden hesabı sonuna kadar bekliyordu; arka plan kapalıyken her şey Blender içinde).
+    1) **Süre sınırı** (tercih `calc_budget`, varsayılan 8 sn, 0 = sınırsız; sürüklerken en
+    fazla 3 sn; gövde ayarı `full_calc` = hep tamamı): motor her işlem aşaması bitince
+    `job["budget"]`a bakar (yüzey + birleştirme süresi dahil, en az bir aşama yapılır); aşıldıysa
+    kalanları hesaplamaz, sonuçları "Bekliyor — …", `res["partial"]` (yapılan / toplam,
+    süre, kalanların adları ve uid'leri), aşama süreleri `res["stage_ms"]`. Kısmi sonuç
+    önbelleğe ve `_final`'a yazılmaz; Blender'da gövde o ana kadarki hâliyle gösterilir,
+    `core.PARTIAL`'a girer, durum "Kısmi · …" olur ve soru sorulur: **Devam et** (bir sonraki
+    hesap sınırsız: `_unlimited_once`), **Her zaman tamamı** (`full_calc`), **Yavaş işlemi
+    kapat** (en uzun süren aşamanın özelliği devre dışı), **Böyle bırak**. Aynı soru
+    Öneriler penceresinde de bulgu olarak çıkar. Değişmeyen gövde önbellekten anında gelir.
+    2) **Senkron hesap bekleme sınırı** (`core.SYNC_WAIT` 2.5 sn, yalnız arka plan
+    sürecinde): `jobs.Client.call(wait_limit, on_late)` süreyi aşınca döner, iş arka planda
+    sürer, sonucu gelince `_apply` edilir; önceki iş sürüyorsa iş gönderilmez, gövde
+    "Sırada" olup zamanlayıcıyla hesaplanır.
+    3) **İlerleme ve Durdur:** motor `engine.PROGRESS` ile ("3/7 · Fillet 4") süreçten
+    `(-1, {"progress"})` iletisi yollar; 1 sn'den uzun süren iş bildirim merkezinin en
+    üstünde süre + ilerleme + **Durdur** düğmesiyle görünür (zamanlayıcı 0.5 sn'de bir
+    yeniler). Durdur (`core.cancel_running` → `Client.cancel`) süreci kapatır (OCC hesabı
+    başka türlü kesilemez; sonraki işte yeni süreç açılır), gövde `core.HELD`'e girer:
+    girdi değişene ya da Tamamla / Devam et denene kadar yeniden hesaplanmaz.
+    5 sn'den uzun süren tam hesap "en yavaş: …" bilgisiyle bildirilir; Blender içinde
+    hesaplanıyorsa bir kez "Arka planda hesapla'yı aç" önerilir. Şerit: Araçlar → Hesap →
+    Hesabı durdur / Tamamla; Ayarlar → Uzun hesaplar. Bildirim merkezi artık düğmeli soru
+    (`Center.ask`, süresiz; çarpı = böyle bırak) ve süren hesap satırı (`set_task`) taşır.
   - **Olay paylaşımı:** çizim, kenar seçimi ve yüzey bölme kalıcı operatörleri fare şeridin
     (ya da açılır listesinin) üstündeyken olayı `PASS_THROUGH` ile şeride bırakır
     (`ribbon_state.over_ribbon`). Şerit açıkken çizimin kayan paleti (`palette.py`) çizilmez
@@ -684,7 +710,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `kernel.py` | 150 | OCP kurulumu / yükleme |
 | `engine.py` | 399 | bpy'siz OCC motoru (komut işleyici, önbellekler) |
 | `engine_host.py` | 52 | Alt süreç girişi; paketi sahte `minicad_engine` paketi olarak yükler |
-| `jobs.py` | 337 | Süreç istemcisi (ensure / submit / call / control / poll / stop / describe) |
+| `jobs.py` | 380 | Süreç istemcisi (ensure / submit / call (bekleme sınırı, geç sonuç) / control / poll / stop / cancel / running / describe) |
 | `errors.py` | 2 | `CadError` |
 | `geometry.py` | 3180 | OCC işlemleri: yüzey kurucu, assemble, fillet / chamfer, boolean, mesh→katı, tessellate, STEP, kenar poligonları, hayalet fillet |
 | `core.py` | 2028 | PropertyGroup'lar (Feature, GeoEdge, CRef, Constraint, ObjectProps), eğri okuma, gather / _apply / rebuild, canlı güncelleme |
@@ -731,7 +757,7 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `ribbon_formspecs.py` | 604 | Araç pencerelerinin içerikleri (eski N paneli içeriği yeni tasarımla) |
 | `ribbon_ctx.py` | 625 | Bağlam: boşta üzerine gelme (eğri / yüzey), vurgu çizimi, sağ tık menülerinin içeriği ve eylemleri, çizim / kenar seçimi kancaları |
 | `ribbon_menu.py` | 139 | Sağ tık mini menüsü (bpy'siz) |
-| `notify.py` | 163 | Bildirim merkezi (bpy'siz): önem grupları, 45 sn, çarpı, süren durum eşitleme |
+| `notify.py` | 251 | Bildirim merkezi (bpy'siz): önem grupları, 45 sn, çarpı, süren durum eşitleme, düğmeli sorular, süren hesap satırı |
 | `loopfix.py` | 270 | Yüzey sınırı teşhisi ve onarım planı (bpy'siz) |
 | `repair.py` | 257 | Onarımı eğri verisinde uygula, seçimi güncelle, yüzeyi yeniden dene, pencere / işaret verisi |
 | `health.py` | 952 | Model denetimi: her tam hesaptan / Bitir'den sonra bulgular ve onaylı düzeltmeler |
@@ -1406,6 +1432,8 @@ Betiğin yaptıkları:
 | tools/bpy_junction_check.py | GERÇEK Blender + OCC: kutu köşesi (3 kenar) üst kenar boyunca 0.2 kaydırılır; spline'lar doğru yazılır, gövde kapalı katı kalır, hacim azalır |
 | tools/bpy_opacity_check.py | GERÇEK Blender: opaklık malzemesi, yeniden hesapta korunma, opakta eski bağlantı, çizerken saydam, kullanıcı malzemesi korunur |
 | tools/bpy_extrude_check.py | GERÇEK Blender + OCC: kutuda doğrusal / kes / kalınlaştır / iki yönlü / yan yüz / iki yüz hacimleri analitikle aynı, yön çevirme hatası + öneri, olmayan yüz, açık düz yüzey (yön ve çevir), çeyrek silindir kalınlaştırma (π/4·(R₂²−R₁²)·h, %0.01) — isteğe bağlı pencere PNG'leri |
+| t81 | Bildirim merkezi soruları: düğmeler, basınca işlev + soru kalkar + sonuç iletisi, süresiz, kodla kaldırma, düğmesiz soru, süren hesap satırı ve Durdur, düğme satır kaydırma, çarpı |
+| tools/bpy_longcalc_check.py | GERÇEK Blender + OCC: süre sınırında kısmi gövde (görünen hacim), Bekliyor bilgileri, soru düğmeleri, Öneriler bulgusu, Devam et / Her zaman tamamı / Yavaş işlemi kapat; GERÇEK arka plan süreci: bekleme sınırında dönen senkron çağrı, ilerleme, Durdur + yeni süreç, geç gelen sonuç, "Sırada" → zamanlayıcı, durdurulan gövdenin değişene kadar beklemesi; isteğe bağlı bildirim PNG'si |
 | tools/pil_painter.py | PIL ressamı (ribbon_preview ve bpy_model_check ortak) |
 | tools/ribbon_preview.py | Şeridi PIL ile PNG'ye çizer (aynı çizim kodu): `python3 devkit/tools/ribbon_preview.py mini_cad <çıktı klasörü>` |
 | t70 | Profil Süpürme: gather → motor → boolean (sıra, parametreler, açı derece), imza (ayar / profil), profil yoksa Model kaynaklı, çekirdek hatası, Ayrıntılı Teşhis (`deep` yalnız istenen işlemde), `is_bevel`, `after_bevel` ipucu bayrağı, görünüm uyarısı kısa biçimi |
@@ -1700,3 +1728,9 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   Birleştir / Kes / Kesişim, açık yüzeyi katılaştırma, denetim önerileri. Yeni modüller
   `slide.py`, `draw_junction.py`, `opacity.py`, `extrude.py`; test t80; araçlar
   `bpy_junction_check.py`, `bpy_opacity_check.py`, `bpy_extrude_check.py`.
+
+- **0.35.0:** Uzun hesap koruması: süre sınırında (varsayılan 8 sn) o ana kadarki gövde
+  gösterilir ve kalanı için sorulur (Devam et / Her zaman tamamı / Yavaş işlemi kapat /
+  Böyle bırak); araçların senkron hesabı arka planda en fazla 2.5 sn bekletir; süren hesap
+  ilerlemesiyle görünür ve durdurulabilir; uzun hesaplar en yavaş işlemle bildirilir.
+  Test t81; araç `bpy_longcalc_check.py`.

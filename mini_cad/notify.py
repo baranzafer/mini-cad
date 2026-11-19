@@ -45,6 +45,11 @@ class Center:
         self.box = None
         self.close_rect = None
         self.hover_close = False
+        self.asks = {}             # v0.35.0: anahtar -> {"level","text","t0","actions"} (süresiz)
+        self.task = None           # süren hesap: {"text", "actions"} (en üstte)
+        self.btns = []             # [(rect, fn, ask anahtarı | None)]
+        self.hover_btn = None
+        self.on_result = None      # düğme işlevinin döndürdüğü metin → fn(metin)
 
     # -------------------------------------------------- iletiler
     def push(self, level, text, now):
@@ -74,21 +79,40 @@ class Center:
             it = keep.get((lv, tx)) or {"level": lv, "text": tx, "t0": now, "src": src}
             self.items.append(it)
 
+    def ask(self, key, level, text, actions, now):
+        """Kullanıcıya soru: düğmeli, süresiz ileti (karar verilene ya da çarpıya kadar).
+        level None: kaldır. Düğmesiz soru sıradan ileti olur."""
+        if level is None:
+            self.asks.pop(key, None)
+            return
+        if not actions:
+            self.push(level, text, now)
+            return
+        old = self.asks.get(key)
+        self.asks[key] = {"level": level, "text": text, "actions": list(actions),
+                          "t0": old["t0"] if old and old["text"] == text else now}
+
+    def set_task(self, text, actions=()):
+        self.task = None if not text else {"text": text, "actions": list(actions)}
+
     def expire(self, now):
         n = len(self.items)
         self.items = [it for it in self.items if now - it["t0"] < LIFETIME]
         return len(self.items) != n
 
     def close(self):
-        """Çarpı: hepsini kapat. Süren durumlar değişene kadar yeniden çıkmaz."""
+        """Çarpı: hepsini kapat (sorular 'böyle bırak' sayılır). Süren durumlar değişene
+        kadar yeniden çıkmaz. Süren hesap satırı kalır."""
         for src, entries in self.state.items():
             self.dismissed[src] = entries
         self.items = []
+        self.asks = {}
         self.box = self.close_rect = None
 
     def visible(self):
-        return [it for it in self.items
-                if it["src"] is None or self.dismissed.get(it["src"]) != self.state.get(it["src"])]
+        out = [it for it in self.items
+               if it["src"] is None or self.dismissed.get(it["src"]) != self.state.get(it["src"])]
+        return out + [dict(a, src=("ask", k)) for k, a in self.asks.items()]
 
     # -------------------------------------------------- isabet
     def contains(self, mx, my):
@@ -99,42 +123,90 @@ class Center:
         r = self.close_rect
         return r is not None and r[0] <= mx <= r[2] and r[1] <= my <= r[3]
 
+    @staticmethod
+    def _btn_rows(p, actions, col, key, tsz, width, s):
+        """Düğmeleri sığdığı kadar satırlara böler."""
+        out, cur, w = [], [], 0.0
+        for a in actions:
+            bw = p.measure(a[0], tsz)[0] + 22 * s
+            if cur and w + bw > width:
+                out.append(("btns", "", col, cur, key))
+                cur, w = [], 0.0
+            cur.append(a)
+            w += bw
+        if cur:
+            out.append(("btns", "", col, cur, key))
+        return out
+
+    def _btn_at(self, mx, my):
+        for i, (r, _fn, _k) in enumerate(self.btns):
+            if r[0] <= mx <= r[2] and r[1] <= my <= r[3]:
+                return i
+        return None
+
     def move(self, mx, my):
         h = self.hit_close(mx, my)
-        ch = h != self.hover_close
-        self.hover_close = h
+        b = self._btn_at(mx, my)
+        ch = h != self.hover_close or b != self.hover_btn
+        self.hover_close, self.hover_btn = h, b
         return ch
 
     def press(self, mx, my):
         if self.hit_close(mx, my):
             self.close()
             return True
+        b = self._btn_at(mx, my)
+        if b is not None:
+            _r, fn, key = self.btns[b]
+            if key is not None:
+                self.asks.pop(key, None)      # karar verildi
+            self.btns, self.hover_btn = [], None
+            out = None
+            try:
+                out = fn()
+            except Exception as e:            # pragma: no cover
+                out = f"Hata: {e}"
+            if isinstance(out, str) and out and self.on_result is not None:
+                self.on_result(out)
+            return True
         return self.contains(mx, my)
 
     # -------------------------------------------------- çizim
     def draw(self, p, s, left, bottom, max_w=420, now=0.0):
         vis = self.visible()
-        if not vis:
+        if not vis and self.task is None:
             self.box = self.close_rect = None
+            self.btns = []
             return
         W = max_w * s
         PAD = 10 * s
         LH = 15 * s
         tsz = int(10 * s)
-        rows = []                              # (tür, metin, renk)
+        rows = []                              # (tür, metin, renk[, düğmeler, anahtar])
+        BH = 22 * s
+        if self.task is not None:
+            rows.append(("head", "Hesap sürüyor", COL_INFO))
+            for ln in (wrap(self.task["text"], tsz, W - 2 * PAD - 14 * s, p.measure) or [""])[:2]:
+                rows.append(("line", ln, COL_TEXT))
+            rows += self._btn_rows(p, self.task["actions"], COL_INFO, None, tsz, W - 2 * PAD - 14 * s, s)
         for lv, name, col in LEVELS:
             its = [it for it in vis if it["level"] == lv]
             if not its:
                 continue
             rows.append(("head", f"{name} ({len(its)})", col))
-            its.sort(key=lambda it: -it["t0"])
+            its.sort(key=lambda it: (0 if it.get("actions") else 1, -it["t0"]))
             for it in its[:MAX_PER_GROUP]:
+                n = 6 if it.get("actions") else 3
                 lines = wrap(it["text"], tsz, W - 2 * PAD - 14 * s, p.measure) or [""]
-                for k, ln in enumerate(lines[:3]):
+                for k, ln in enumerate(lines[:n]):
                     rows.append(("line" if k == 0 else "cont", ln, col))
+                if it.get("actions"):
+                    rows += self._btn_rows(p, it["actions"], col, it["src"][1], tsz,
+                                           W - 2 * PAD - 14 * s, s)
             if len(its) > MAX_PER_GROUP:
                 rows.append(("more", f"… {len(its) - MAX_PER_GROUP} ileti daha", COL_TEXT_DIM))
-        h = PAD * 2 + sum(18 * s if r[0] == "head" else LH for r in rows) + 4 * s
+        h = PAD * 2 + sum(18 * s if r[0] == "head" else (BH + 4 * s) if r[0] == "btns" else LH
+                          for r in rows) + 4 * s
         x0, y0 = left, bottom
         x1, y1 = x0 + W, y0 + h
         self.box = (x0, y0, x1, y1)
@@ -148,7 +220,23 @@ class Center:
         _icon(p, "CLOSE", (cr[0] + cr[2]) / 2, (cr[1] + cr[3]) / 2, 9 * s,
               COL_TEXT if self.hover_close else COL_TEXT_DIM, 1.4)
         y = y1 - PAD
-        for kind, txt, col in rows:
+        self.btns = []
+        for row in rows:
+            kind, txt, col = row[0], row[1], row[2]
+            if kind == "btns":
+                y -= BH + 4 * s
+                bx = x0 + PAD + 14 * s
+                for label, fn in row[3]:
+                    bw = p.measure(label, tsz)[0] + 16 * s
+                    r = (bx, y + 1 * s, bx + bw, y + BH - 1 * s)
+                    hot = self.hover_btn == len(self.btns)
+                    p.rect(*r, COL_HOVER if hot else (col[0] * 0.3, col[1] * 0.3,
+                                                      col[2] * 0.3, 0.95), 4 * s)
+                    p.outline(*r, (col[0], col[1], col[2], 0.75), 4 * s, 1.0)
+                    p.text(bx + 8 * s, y + 7 * s, label, COL_TEXT, tsz)
+                    self.btns.append((r, fn, row[4]))
+                    bx += bw + 6 * s
+                continue
             if kind == "head":
                 y -= 18 * s
                 p.circle(x0 + PAD + 4 * s, y + 4 * s, 4 * s, col)

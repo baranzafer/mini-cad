@@ -415,6 +415,10 @@ def _on_opacity(self, context):
 
 class MINICAD_ObjectProps(bpy.types.PropertyGroup):
     is_cad: bpy.props.BoolProperty(default=False)
+    full_calc: bpy.props.BoolProperty(                 # v0.35.0
+        name="Her zaman tamamını hesapla", description="Bu gövdede hesap süre sınırı "
+        "uygulanmaz: uzun sürse de bütün işlemler hesaplanır (Blender bu sürede bekleyebilir)",
+        default=False)
     opacity: bpy.props.FloatProperty(                  # v0.34.0: gövde saydamlığı
         name="Opaklık", description="Gövdenin görünür opaklığı: azaltınca arkasındaki referans "
         "görsel / tel kafes görünür, çizmeye devam edilir (hesaba etkisi yok)",
@@ -1424,6 +1428,7 @@ def gather(obj, preview, allow_ghost=True):
            "smooth": props.smooth_corners, "lin": props.lin_defl, "ang": props.ang_defl,
            "feature_names": names, "sig": sig, "parts": (hash(parts[0]), hash(parts[1])),
            "deep": [props.diag_uid] if getattr(props, "diag_uid", "") else [],
+           "budget": calc_budget(obj, preview),
            "t0": _t.perf_counter()}
     cmd = "build"
     if ghost and allow_ghost and _final_parts.get(obj.name) == job["parts"] and \
@@ -1547,9 +1552,217 @@ def _apply(obj, job, res, cmd="build"):
     warn = f" · Hatalı: {', '.join(errors)}" if errors else ""
     props.status = f"{mode} · {res.get('shape_info', '')} · {len(res['tris'])} üçgen · " \
                    f"{ms:.0f} ms{warn}"
+    part = res.get("partial")
+    if part and not job["preview"]:
+        _final_known.pop(name, None)        # yarım şekil hayalet önizlemenin tabanı olmasın
+        _final_parts.pop(name, None)
+        PARTIAL[name] = dict(part, ms=ms, slow=_slowest(res), sig=job["sig"])
+        props.status = (f"Kısmi · {part['done']}/{part['total']} işlem hesaplandı, "
+                        f"{part['elapsed']:.0f} sn süre sınırında durdu · sıradaki: "
+                        f"{part['next'][0]} · Devam et ile tamamla")
+        _ask_partial(obj)
+        _notify()
+        return True
+    if not job["preview"]:
+        PARTIAL.pop(name, None)
+        _clear_ask(name)
+        _slow_warning(obj, res, ms)
     _notify()
     _after_final(obj, job)
     return True
+
+
+# ---------------------------------------------------------------- v0.35.0: uzun hesaplar
+#
+# Ağır işlemler (çok kenarlı fillet, karmaşık boolean, süpürme) Blender'ı uzun süre
+# bekletebiliyordu. Üç önlem:
+#   1) Süre sınırı (tercih calc_budget, varsayılan 8 sn): motor her işlem bitince süreye
+#      bakar; aşıldıysa kalanları hesaplamaz, o ana kadarki gövdeyi gösterir ve kullanıcıya
+#      sorar (Devam et / Her zaman tamamı / Yavaş işlemi kapat / Böyle bırak).
+#   2) Senkron hesap (araçların yeniden hesabı) arka plan sürecindeyken en fazla SYNC_WAIT
+#      sn bekler; sonra iş arka planda sürer, Blender donmaz.
+#   3) Süren hesap bildirimde ilerlemesiyle görünür; Durdur süreci kapatır ve gövdeyi
+#      bekletir (değişiklik yapılana ya da Devam et denene kadar yeniden hesaplanmaz).
+
+SYNC_WAIT = 2.5         # senkron hesapta Blender'ın en fazla bekleyeceği süre (arka planda)
+SLOW_NOTE = 5.0         # bu kadar sn'den uzun süren tam hesap bilgi olarak bildirilir
+PARTIAL = {}            # gövde -> {"done","total","elapsed","next","uids","slow","sig","ms"}
+HELD = {}               # gövde -> durdurulduğundaki girdi imzası (değişince serbest)
+_unlimited_once = set() # bir sonraki hesabı sınırsız yapılacak gövdeler
+ASK_HOOKS = []          # fn(anahtar, seviye, metin, [(etiket, fn)]) | fn(anahtar, None, ...)
+_warned = {"inproc": False}
+
+
+def calc_budget(obj, preview=False):
+    """Bu hesap için süre sınırı (sn); 0 = sınırsız."""
+    if obj.name in _unlimited_once:
+        if not preview:
+            _unlimited_once.discard(obj.name)
+        return 0.0
+    if getattr(obj.cad, "full_calc", False):
+        return 0.0
+    try:
+        v = float(bpy.context.preferences.addons[__package__].preferences.calc_budget)
+    except Exception:
+        v = 8.0
+    if preview and v > 0:
+        v = min(v, 3.0)                 # sürüklerken daha kısa: önizleme akıcı kalsın
+    return max(v, 0.0)
+
+
+def _slowest(res):
+    rows = [r for r in res.get("stage_ms") or () if r[2] > 0]
+    if not rows:
+        return None
+    r = max(rows, key=lambda r: r[2])
+    return {"label": r[0], "uids": list(r[1]), "ms": r[2]}
+
+
+def _ask(key, level, text, actions):
+    for fn in list(ASK_HOOKS):
+        try:
+            fn(key, level, text, actions)
+        except Exception:
+            traceback.print_exc()
+
+
+def _clear_ask(name):
+    _ask("calc:" + name, None, "", [])
+
+
+def _feature_index(obj, uid):
+    for i, f in enumerate(obj.cad.features):
+        if f.uid == uid:
+            return i
+    return -1
+
+
+def _ask_partial(obj):
+    name = obj.name
+    p = PARTIAL.get(name)
+    if p is None:
+        return
+    slow = p.get("slow")
+    txt = (f"{name}: hesap {p['elapsed']:.0f} sn sürdü, {p['done']}/{p['total']} işlemde "
+           f"durduruldu (süre sınırı {p['budget']:.0f} sn). Kalan: {', '.join(p['next'][:3])}"
+           + (" …" if len(p["next"]) > 3 else "") + ".")
+    if slow:
+        txt += f" En yavaşı: {slow['label']} ({slow['ms'] / 1000:.1f} sn)."
+    txt += " Tamamı hesaplansın mı?"
+    acts = [("Devam et", lambda n=name: continue_full(n)),
+            ("Her zaman tamamı", lambda n=name: continue_full(n, always=True))]
+    if slow and slow["uids"] and slow["uids"][0]:
+        acts.append(("Yavaş işlemi kapat", lambda n=name, u=slow["uids"]: disable_features(n, u)))
+    acts.append(("Böyle bırak", lambda n=name: _clear_ask(n)))
+    _ask("calc:" + name, "warn", txt, acts)
+
+
+def _slow_warning(obj, res, ms):
+    sec = ms / 1000.0
+    if sec < SLOW_NOTE:
+        return
+    slow = _slowest(res)
+    txt = f"{obj.name}: hesap {sec:.0f} sn sürdü"
+    if slow and slow["ms"] > 1000:
+        txt += f" · en yavaş: {slow['label']} ({slow['ms'] / 1000:.1f} sn)"
+    try:
+        mode = _client().mode
+    except Exception:
+        mode = ""
+    if mode == "inproc" and not _warned["inproc"]:
+        _warned["inproc"] = True
+        txt += (" · Blender bu sürede bekledi: Ayarlar → Hesap motoru → 'Arka planda "
+                "hesapla' açıkken Blender donmaz ve uzun hesap durdurulabilir")
+    _ask("slow:" + obj.name, "info", txt, [])
+
+
+def _is_held(ob):
+    sig = HELD.get(ob.name)
+    if sig is None:
+        return False
+    try:
+        now = input_signature(ob.cad)
+    except Exception:
+        now = None
+    if now != sig:                       # kullanıcı bir şeyi değiştirdi: yeniden dene
+        HELD.pop(ob.name, None)
+        return False
+    return True
+
+
+def continue_full(name, always=False):
+    """Kısmi / durdurulmuş hesabı sınırsız tamamla (kullanıcı onayı)."""
+    ob = bpy.data.objects.get(name)
+    if ob is None:
+        return
+    if always:
+        ob.cad.full_calc = True
+    HELD.pop(name, None)
+    PARTIAL.pop(name, None)
+    _clear_ask(name)
+    _unlimited_once.add(name)
+    _final_sig.pop(name, None)
+    ob.cad.status = "Tamamı hesaplanıyor…"
+    schedule(ob)
+    _notify()
+    return "Tamamı hesaplanıyor" + (" (bu gövdede süre sınırı kapatıldı)" if always else "")
+
+
+def disable_features(name, uids):
+    ob = bpy.data.objects.get(name)
+    if ob is None:
+        return
+    off = []
+    for u in uids:
+        i = _feature_index(ob, u)
+        if i >= 0:
+            f = ob.cad.features[i]
+            f.enabled = False
+            off.append(f.name)
+    HELD.pop(name, None)
+    PARTIAL.pop(name, None)
+    _clear_ask(name)
+    _final_sig.pop(name, None)
+    schedule(ob)
+    return f"Kapatıldı: {', '.join(off)} (İşlem sırasından yeniden açılır)"
+
+
+def running():
+    """Süren arka plan hesabı: {"name", "sec", "progress"} | None."""
+    try:
+        r = _client().running()
+    except Exception:
+        return None
+    if r is None:
+        return None
+    return {"name": r["tag"], "sec": r["sec"], "progress": r["progress"]}
+
+
+def cancel_running():
+    """Süren hesabı durdurur; gövde değişiklik yapılana / Devam et denene kadar bekler."""
+    try:
+        name = _client().cancel()
+    except Exception:
+        traceback.print_exc()
+        return None
+    if not name:
+        return None
+    ob = bpy.data.objects.get(name)
+    if ob is not None:
+        try:
+            HELD[name] = input_signature(ob.cad)
+        except Exception:
+            HELD[name] = None
+        _dirty.pop(name, None)
+        _pending_final.discard(name)
+        _final_sig.pop(name, None)
+        ob.cad.status = ("Hesap durduruldu: gövde son hesaplanan hâliyle duruyor · bir şey "
+                         "değiştirince ya da Devam et ile yeniden hesaplanır")
+        _ask("calc:" + name, "warn", f"{name}: hesap durduruldu. Tamamı hesaplansın mı?",
+             [("Devam et", lambda n=name: continue_full(n)),
+              ("Böyle bırak", lambda n=name: _clear_ask(n))])
+    _notify()
+    return name
 
 
 def rebuild(obj, preview=False):
@@ -1572,7 +1785,27 @@ def rebuild(obj, preview=False):
         props.status = f"Hata: {e}"
         return False
     _log("hesap", f"{obj.name}: senkron {'önizleme' if preview else 'tam'} hesap")
-    res = _client().call("build", job)
+    name = obj.name
+
+    def late(res, name=name, job=job):     # v0.35.0: bekleme sınırını aşan iş sonra gelir
+        o = bpy.data.objects.get(name)
+        if o is not None and o.cad.is_cad:
+            try:
+                _apply(o, job, res)
+            except Exception:
+                traceback.print_exc()
+    res = _client().call("build", job, wait_limit=SYNC_WAIT, on_late=late, tag=name)
+    if res.get("busy"):                   # önceki hesap sürüyor: bu da sıraya girer
+        props.status = "Sırada: önceki hesap sürüyor (arka planda)…"
+        _dirty[name] = False
+        _ensure_timer()
+        _notify()
+        return False
+    if res.get("pending"):
+        props.status = (f"Hesap uzun sürüyor: arka planda devam ediyor (Blender "
+                        f"kullanılabilir) · durdurmak için bildirimdeki Durdur")
+        _notify()
+        return False
     try:
         return _apply(obj, job, res) is True
     except Exception as e:
@@ -1614,7 +1847,7 @@ def _start_build(ob, preview):
         finally:
             _flags["building"] = prev
 
-    _client().submit(cmd, job, done)
+    _client().submit(cmd, job, done, tag=name)
 
 
 def _rows(m):
@@ -1755,6 +1988,9 @@ def _next_job():
             _pending_final.discard(name)
             _frozen_skip.add(name)
             continue
+        if _is_held(ob):
+            _pending_final.discard(name)
+            continue
         if prev:
             # Girdi son tam kalite hesaptan farklı değilse önizleme yapma
             # (fillet'li gövdenin üstüne fillet'siz önizleme yazılmasın)
@@ -1776,6 +2012,8 @@ def _next_job():
             if ob is not None and ob.cad.is_cad:
                 if frozen(ob.cad):
                     _frozen_skip.add(name)
+                    continue
+                if _is_held(ob):
                     continue
                 return ob, False
     return None

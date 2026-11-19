@@ -27,6 +27,13 @@ def main():
     try:
         engine = importlib.import_module("minicad_engine.engine")
         hello = engine.handle("ping", {})
+
+        def progress(text):            # v0.35.0: hesap sürerken Blender'a ilerleme
+            try:
+                conn.send((-1, {"progress": str(text)}))
+            except Exception:
+                pass
+        engine.PROGRESS = progress
     except Exception as e:
         hello = {"ok": False, "error": f"Hesap modülü yüklenemedi: {e}"}
     conn.send(("hello", hello, os.getpid()))

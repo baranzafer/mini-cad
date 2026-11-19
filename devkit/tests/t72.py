@@ -130,7 +130,7 @@ for b in data.all_buttons():
                  i in getattr(ra, "HOLE_KINDS", ()) or i == "HOLE_LIST" or i in (
                      "OPT_SNAP", "SK_START", "SK_FINISH", "SK_UNDO", "SK_CLOSE", "EDIT_ALL",
                      "EDGE_PICK", "PATCH", "PATCH_HOLE", "SPLIT_FACE", "REBUILD", "CONS_SOLVE",
-                     "STEP", "DIAG", "REC"))
+                     "STEP", "DIAG", "REC", "CALC_STOP", "CALC_CONT"))
         if not known:
             unbound.append(i)
 check(not unbound, f"bütün hazır düğmeler bağlı {unbound}")
