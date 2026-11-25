@@ -3820,15 +3820,36 @@ def apply_holes(shape, holes, tol, smooth=True, preview=False):
     if not holes:
         return shape, False, "Delik noktası yok"
     through = 2.5 * _bbox_diag(shape)
-    tools = []
+    tools, probes = [], []
+    n_thr = 0
     for h in holes:
+        th = h["p"].get("thr")
         try:
+            if h["p"].get("kind") == "TAPPED" and th and th.get("modeled"):
+                # v0.36.0: modellenmiş diş — matkap ∪ helisel diş tek araç
+                from . import threadgeo
+                # geçen dişte gövdenin eksen boyunca kalınlığı (uzun helis kurulamıyordu)
+                lead = float(th["spec"]["P"]) * max(int(th["spec"].get("starts", 1)), 1)
+                thr_through = min(through, _axis_extent(shape, h["co"], h["dir"]) +
+                                  4.0 * lead)
+                loc, pr = threadgeo.tapped_hole(h["p"], thr_through)
+                tools.append(threadgeo.place(loc, h["co"], h["dir"]))
+                probes.append([_local_to_world(q, h["co"], h["dir"]) for q in pr])
+                n_thr += 1
+                continue
             prof = holemath.profile(h["p"], through)
         except ValueError as e:
             raise CadError(f"Model kaynaklı: {e}")
         tools.append(hole_tool(h["co"], h["dir"], prof))
+        probes.append([])
     shape2, ok, info = apply_boolean(shape, tools, "CUT", 0.0, "ALL", tol, smooth,
                                      preview=preview)
+    if n_thr:
+        bad = _thread_probe_fail(shape, shape2, probes)
+        if bad:
+            raise CadError(f"Diş açılamadı ({bad}. delik): çekirdek helisel yüzeyi kesemedi; "
+                           "deliği biraz kaydır ya da diş boyunu değiştir")
+        info += f" · {n_thr} modellenmiş diş"
     n = len(holes)
     try:                                  # küçük delikte "hacim -0.0%" yanıltıcıydı
         removed = volume(shape) - volume(shape2)
@@ -3838,6 +3859,67 @@ def apply_holes(shape, holes, tol, smooth=True, preview=False):
     except Exception:
         pass
     return shape2, ok, f"{n} delik · " + info, tools
+
+
+def make_part(prim):
+    """v0.36.0: ölçülerden parça (vida / somun) — dünya koordinatında katı."""
+    from . import threadgeo
+    spec = prim["spec"]
+    if prim["kind"] == "SCREW":
+        loc = threadgeo.screw_solid(prim["sp"], spec, float(prim["d"]))
+    else:
+        loc = threadgeo.nut_solid(spec, float(prim["d"]), float(prim.get("engage", 1.0)),
+                                  float(prim["s"]), float(prim["m"]),
+                                  modeled=bool(prim.get("modeled", True)))
+    return threadgeo.place_matrix(loc, prim["matrix"])
+
+
+def _axis_extent(shape, co, direction):
+    """Gövde sınır kutusunun co'dan direction boyunca en uzak köşesi (≥ 0)."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    b = Bnd_Box()
+    _static(BRepBndLib, "Add")(shape, b)
+    x0, y0, z0, x1, y1, z1 = b.Get()
+    d = np.asarray(direction, float)
+    d /= max(float(np.linalg.norm(d)), 1e-15)
+    c = np.asarray(co, float)
+    best = 0.0
+    for x in (x0, x1):
+        for y in (y0, y1):
+            for z in (z0, z1):
+                best = max(best, float(np.dot(np.array([x, y, z]) - c, d)))
+    return best
+
+
+def _local_to_world(q, co, direction):
+    """threadgeo.place ile aynı çerçeve: yerel (x, y, z) → dünya."""
+    d = np.asarray(direction, float)
+    d /= max(float(np.linalg.norm(d)), 1e-15)
+    a = np.array([1.0, 0, 0]) if abs(d[0]) < 0.9 else np.array([0, 1.0, 0])
+    x = np.cross(a, d)
+    x /= np.linalg.norm(x)
+    y = np.cross(d, x)
+    return tuple(np.asarray(co, float) + x * q[0] + y * q[1] + d * q[2])
+
+
+def _thread_probe_fail(before, after, probes):
+    """Dişin içindeki noktalar kesimden sonra hâlâ malzemedeyse (önce de malzemedeydiyse)
+    diş açılmamıştır (OCC sessiz başarısızlık). Başarısız deliğin sırası | 0."""
+    try:
+        from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+        from OCP.TopAbs import TopAbs_IN
+    except Exception:
+        return 0
+    tol = 1e-7 * max(_bbox_diag(before), 1e-9)
+    for i, pts in enumerate(probes):
+        for q in pts:
+            p = _pnt(q)
+            if BRepClass3d_SolidClassifier(before, p, tol).State() != TopAbs_IN:
+                continue
+            if BRepClass3d_SolidClassifier(after, p, tol).State() == TopAbs_IN:
+                return i + 1
+    return 0
 
 
 # ================================================================ ekstrüzyon (v0.34.0)

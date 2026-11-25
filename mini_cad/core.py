@@ -130,10 +130,13 @@ EXTRUDE_OPS = [("UNION", "Birleştir", "Ekstrüzyon gövdeye eklenir"),
                ("INTERSECT", "Kesişim", "Yalnız ortak hacim kalır")]
 
 
-HOLE_KINDS = [("SIMPLE", "Düz", "Düz silindirik delik"),
-              ("CBORE", "Havşa başlı", "Kademeli: baş yuvası + delik (imbus vida)"),
-              ("CSINK", "Havşalı", "Konik havşa + delik (havşa başlı vida)"),
-              ("TAPPED", "Dişli", "Kılavuz matkabı çapında delik; diş ölçüsü saklanır")]
+HOLE_KINDS = [("SIMPLE", "Düz", "Düz silindirik delik (geçme deliği)"),
+              ("CBORE", "Kademeli", "Silindirik yuva + delik: silindir başlı (imbus) vida başı "
+               "yüzeyin altına gömülür"),
+              ("CSINK", "Konik havşa", "Konik havşa + delik: havşa başlı vidanın başı yüzeyle "
+               "aynı hizaya gömülür"),
+              ("TAPPED", "Dişli", "İç dişli delik: modellenmiş helisel diş ya da kılavuz "
+               "matkabı (kozmetik)")]
 THREAD_ITEMS = [("NONE", "—", "Standart ölçü yok (değerleri elle gir)")] + [
     (k, k, f"ISO metrik kaba diş {k}") for k in ("M2", "M2.5", "M3", "M4", "M5", "M6", "M8",
                                                  "M10", "M12", "M14", "M16", "M20", "M24")]
@@ -195,6 +198,174 @@ class MINICAD_GeoEdge(bpy.types.PropertyGroup):
     id: bpy.props.StringProperty()
     src: bpy.props.StringProperty()     # kenarı oluşturan boolean'ın uid'i
     data: bpy.props.StringProperty()    # JSON {"s": [[x,y,z]*9], "len": L}
+
+
+# ---------------------------------------------------------------- v0.36.0: diş / vida
+
+def _thr_family_items(self, context):
+    from . import threadmath
+    return _keep_items("fam", threadmath.family_items())
+
+
+def _thr_profile_items(self, context):
+    from . import threadmath
+    return _keep_items("prof", threadmath.PROFILES)
+
+
+def _thr_fit_items(self, context):
+    from . import threadmath
+    return _keep_items("fit", [(k, n, d) for k, n, d, _c in threadmath.FITS])
+
+
+_ENUM_KEEP = {}
+
+
+def _keep_items(key, items):
+    """Dinamik enum öğeleri Python'da canlı tutulmalı (Blender dize göstergeleri)."""
+    _ENUM_KEEP[key] = list(items)
+    return _ENUM_KEEP[key]
+
+
+def _poll_curve_any(self, obj):
+    return obj.type == "CURVE"
+
+
+THREAD_HANDS = [("RIGHT", "Sağ", "Sağ el diş (saat yönünde sıkılır) — olağan"),
+                ("LEFT", "Sol", "Sol el (ters) diş: saat yönünün tersine sıkılır")]
+
+
+class MINICAD_Thread(bpy.types.PropertyGroup):
+    """v0.36.0: diş tanımı — dişli delikte (iç diş) ve vida / somunda (dış / iç) ortak.
+    Uzunluklar sahne biriminde. Standart seçilince değerler doldurulur, sonra her biri
+    elle değiştirilebilir (Özel)."""
+    inited: bpy.props.BoolProperty(default=False)
+    family: bpy.props.EnumProperty(name="Standart", items=_thr_family_items,
+                                   update=_on_setting_change)
+    size: bpy.props.StringProperty(name="Ölçü", default="M6", update=_on_setting_change)
+    modeled: bpy.props.BoolProperty(
+        name="Modellenmiş diş", default=True, update=_on_setting_change,
+        description="Açık: helisel diş gerçekten modellenir (3B baskı, STEP). Kapalı: "
+                    "kılavuz matkabı çapında düz delik (kozmetik, hızlı)")
+    profile: bpy.props.EnumProperty(name="Profil", items=_thr_profile_items,
+                                    update=_on_setting_change)
+    D: bpy.props.FloatProperty(name="Anma çapı", default=0.006, min=1e-6, unit="LENGTH",
+                               precision=4, update=_on_setting_change,
+                               description="Dişin dış (tepe) çapı")
+    P: bpy.props.FloatProperty(name="Adım", default=0.001, min=1e-7, unit="LENGTH",
+                               precision=4, update=_on_setting_change,
+                               description="Diş aralığı: iki diş tepesi arası eksenel uzaklık")
+    angle: bpy.props.FloatProperty(name="Profil açısı", default=60.0, min=0.0, max=150.0,
+                                   update=_on_setting_change,
+                                   description="İki yan arasındaki açı (°): ISO 60, Whitworth "
+                                               "55, trapez 30, kare 0")
+    angle2: bpy.props.FloatProperty(name="Yük yanı açısı", default=3.0, min=0.0, max=80.0,
+                                    update=_on_setting_change,
+                                    description="Testere dişinde yük taşıyan yanın açısı (°)")
+    depth: bpy.props.FloatProperty(name="Diş yüksekliği", default=0.000541, min=1e-7,
+                                   unit="LENGTH", precision=4, update=_on_setting_change,
+                                   description="Dipten tepeye radyal diş yüksekliği")
+    crest: bpy.props.FloatProperty(name="Tepe genişliği", default=0.000125, min=0.0,
+                                   unit="LENGTH", precision=4, update=_on_setting_change,
+                                   description="Diş tepesindeki düzlüğün eksenel genişliği "
+                                               "(diş kalınlığı); dip genişliği kalan paydır")
+    rc: bpy.props.FloatProperty(name="Tepe yuvarlatma", default=0.0, min=0.0, unit="LENGTH",
+                                precision=4, update=_on_setting_change,
+                                description="Tepe köşelerinin yarıçapı (oval / yuvarlak diş)")
+    rr: bpy.props.FloatProperty(name="Dip yuvarlatma", default=0.0, min=0.0, unit="LENGTH",
+                                precision=4, update=_on_setting_change,
+                                description="Dip köşelerinin yarıçapı")
+    hand: bpy.props.EnumProperty(name="Yön", items=THREAD_HANDS, default="RIGHT",
+                                 update=_on_setting_change)
+    starts: bpy.props.IntProperty(name="Ağız sayısı", default=1, min=1, max=8,
+                                  update=_on_setting_change,
+                                  description="Çok ağızlı diş: bir turda vida ağız × adım "
+                                              "kadar ilerler (hızlı kapak / şişe dişi)")
+    custom_obj: bpy.props.PointerProperty(
+        name="Profil eğrisi", type=bpy.types.Object, poll=_poll_curve_any,
+        update=_on_setting_change,
+        description="Özel profil: eğrinin X'i eksen boyunca (diş genişliği), Y'si radyal "
+                    "(diş yüksekliği); başı ve sonu dipte")
+    custom_w: bpy.props.FloatProperty(name="Profil genişliği", default=0.85, min=0.1,
+                                      max=0.96, subtype="FACTOR", update=_on_setting_change,
+                                      description="Özel profilin adıma oranı")
+    engage: bpy.props.FloatProperty(
+        name="Diş kavrama", default=1.0, min=0.5, max=1.0, subtype="FACTOR",
+        update=_on_setting_change,
+        description="İç dişin profil yüksekliğine oranı (1: tam diş; 0.75: kılavuz matkabı "
+                    "gibi). Matkap çapını belirler")
+    length: bpy.props.FloatProperty(
+        name="Diş boyu", default=0.0, min=0.0, unit="LENGTH", precision=4,
+        update=_on_setting_change,
+        description="Dişli kısmın boyu (0: deliğin / vidanın tamamı)")
+    fit: bpy.props.EnumProperty(name="Geçme", items=_thr_fit_items,
+                                update=_on_setting_change,
+                                description="Vida ile dişli delik arasındaki boşluk ön ayarı")
+    clearance: bpy.props.FloatProperty(
+        name="Boşluk", default=0.0, min=0.0, unit="LENGTH", precision=4,
+        update=_on_setting_change,
+        description="Vida ve delik dişlerinin yan yüzleri arasındaki dik açıklık (yüzeysel "
+                    "öpüşme aralığı)")
+    share: bpy.props.FloatProperty(
+        name="Deliğe düşen pay", default=0.5, min=0.0, max=1.0, subtype="FACTOR",
+        update=_on_setting_change,
+        description="Boşluğun ne kadarı delik dişinden açılır (kalanı vida dişinden). "
+                    "0: yalnız vida küçülür, 1: yalnız delik büyür")
+    swell: bpy.props.FloatProperty(
+        name="Baskı genleşmesi", default=0.0, min=0.0, unit="LENGTH", precision=4,
+        update=_on_setting_change,
+        description="Yazıcının yatay şişmesi (filament / reçine): delik bu kadar büyütülür, "
+                    "vida bu kadar küçültülür; baskıdan sonra boşluk korunur")
+    lead_in: bpy.props.BoolProperty(
+        name="Giriş pahı", default=True, update=_on_setting_change,
+        description="Vida ucuna ve dişli deliğin ağzına giriş pahı (kolay takılır)")
+
+
+class MINICAD_Part(bpy.types.PropertyGroup):
+    """v0.36.0: vida / somun gövdesi (yüzeyden değil, ölçülerden kurulan BlendCAD gövdesi).
+    Bağlıysa diş tanımı ve geçme ayarı dişli delikten alınır."""
+    link_obj: bpy.props.PointerProperty(name="Delikli gövde", type=bpy.types.Object,
+                                        update=_on_setting_change)
+    link_uid: bpy.props.StringProperty(default="", update=_on_setting_change)
+    link_pt: bpy.props.IntProperty(default=0, min=0, update=_on_setting_change)
+    linked: bpy.props.BoolProperty(
+        name="Delikle bağlı", default=True, update=_on_setting_change,
+        description="Açık: diş tanımı ve tolerans delikten gelir (delik değişince vida da "
+                    "değişir). Kapalı: vidanın kendi ayarları")
+    thr: bpy.props.PointerProperty(type=MINICAD_Thread)
+    head: bpy.props.EnumProperty(name="Baş", items=[
+        ("SOCKET", "İmbus (silindir)", "ISO 4762 silindir başlı imbus vida"),
+        ("HEX", "Altıgen", "ISO 4017 altıgen başlı cıvata"),
+        ("CSK", "Havşa başlı", "ISO 10642 havşa başlı imbus vida"),
+        ("BUTTON", "Mercimek", "ISO 7380 mercimek başlı imbus vida"),
+        ("CHEESE", "Silindir (yarıklı)", "Yarıklı silindir başlı vida"),
+        ("NONE", "Başsız (saplama)", "Başsız: saplama / setskur / dişli çubuk")],
+        default="SOCKET", update=_on_setting_change)
+    drive: bpy.props.EnumProperty(name="Anahtar yuvası", items=[
+        ("HEXSOCKET", "İmbus", "Altıgen anahtar yuvası"),
+        ("SLOT", "Düz", "Düz tornavida yarığı"),
+        ("CROSS", "Yıldız", "Çapraz yarık"),
+        ("NONE", "Yok", "Yuva yok")], default="HEXSOCKET", update=_on_setting_change)
+    length: bpy.props.FloatProperty(name="Boy", default=0.016, min=1e-5, unit="LENGTH",
+                                    precision=4, update=_on_setting_change,
+                                    description="Baş altından uca (havşa başta toplam boy)")
+    tip_chamfer: bpy.props.BoolProperty(name="Uç pahı", default=True,
+                                        update=_on_setting_change)
+    auto_head: bpy.props.BoolProperty(
+        name="Standart baş ölçüleri", default=True, update=_on_setting_change,
+        description="Baş ve somun ölçüleri standart tablodan (kapalı: elle)")
+    head_dk: bpy.props.FloatProperty(name="Baş çapı", default=0.010, min=1e-6, unit="LENGTH",
+                                     precision=4, update=_on_setting_change)
+    head_k: bpy.props.FloatProperty(name="Baş yüksekliği", default=0.006, min=1e-6,
+                                    unit="LENGTH", precision=4, update=_on_setting_change)
+    drive_s: bpy.props.FloatProperty(name="Anahtar", default=0.005, min=1e-6, unit="LENGTH",
+                                     precision=4, update=_on_setting_change,
+                                     description="İmbus anahtar ölçüsü / altıgen anahtar ağzı")
+    drive_t: bpy.props.FloatProperty(name="Yuva derinliği", default=0.003, min=1e-6,
+                                     unit="LENGTH", precision=4, update=_on_setting_change)
+    nut_s: bpy.props.FloatProperty(name="Anahtar ağzı", default=0.010, min=1e-6,
+                                   unit="LENGTH", precision=4, update=_on_setting_change)
+    nut_m: bpy.props.FloatProperty(name="Somun yüksekliği", default=0.0052, min=1e-6,
+                                   unit="LENGTH", precision=4, update=_on_setting_change)
 
 
 class MINICAD_Feature(bpy.types.PropertyGroup):
@@ -278,6 +449,37 @@ class MINICAD_Feature(bpy.types.PropertyGroup):
     hole_thread: bpy.props.EnumProperty(name="Vida ölçüsü", items=THREAD_ITEMS,
                                         default="NONE", update=_on_setting_change)
     hole_pts: bpy.props.CollectionProperty(type=MINICAD_HolePoint)
+    # v0.36.0: delik seçenekleri ve diş
+    thr: bpy.props.PointerProperty(type=MINICAD_Thread)
+    hole_fit: bpy.props.EnumProperty(name="Geçme deliği", items=[
+        ("FINE", "İnce", "ISO 273 ince (H12): sıkı geçme"),
+        ("MEDIUM", "Orta", "ISO 273 orta (H13): olağan"),
+        ("COARSE", "Kaba", "ISO 273 kaba (H14): bol, 3B baskıda rahat")],
+        default="MEDIUM", update=_on_setting_change)
+    hole_head: bpy.props.EnumProperty(name="Vida başı", items=[
+        ("SOCKET", "İmbus (ISO 4762)", "Silindir başlı imbus vida yuvası"),
+        ("LOWHEAD", "Alçak başlı (DIN 7984)", "Alçak silindir başlı imbus yuvası"),
+        ("HEX", "Altıgen (ISO 4017)", "Altıgen baş + lokma anahtarı payı"),
+        ("BUTTON", "Mercimek (ISO 7380)", "Mercimek başlı vida yuvası")],
+        default="SOCKET", update=_on_setting_change)
+    hole_csk: bpy.props.EnumProperty(name="Havşa türü", items=[
+        ("ISO10642", "ISO 10642 (90°)", "Havşa başlı imbus vida"),
+        ("ISO7046", "ISO 7046 / 2009 (90°)", "Havşa başlı yıldız / düz vida"),
+        ("INCH82", "İnç (82°)", "UNC / UNF havşa başlı vida, 82°"),
+        ("DIN74", "Ahşap / sac (90°)", "Geniş havşa")],
+        default="ISO10642", update=_on_setting_change)
+    hole_cs_head: bpy.props.FloatProperty(
+        name="Havşa üstü pay", default=0.0, min=0.0, unit="LENGTH", precision=4,
+        update=_on_setting_change,
+        description="Havşanın üstünde silindirik pay: vida başı yüzeyin bu kadar altına "
+                    "iner")
+    hole_mouth_d: bpy.props.FloatProperty(
+        name="Ağız pahı çapı", default=0.0, min=0.0, unit="LENGTH", precision=4,
+        update=_on_setting_change,
+        description="Delik ağzına konik pah / havşa (0: yok). Dişli delikte giriş pahı")
+    hole_mouth_angle: bpy.props.FloatProperty(name="Ağız pahı açısı", default=90.0,
+                                              min=10.0, max=170.0,
+                                              update=_on_setting_change)
     # v0.34.0: ekstrüzyon — yüz yeri (yerel) + dışa normal ext_pts'de (HolePoint yapısı)
     ext_kind: bpy.props.EnumProperty(name="Ekstrüzyon türü", items=EXTRUDE_KINDS,
                                      default="LINEAR", update=_on_setting_change)
@@ -423,6 +625,12 @@ class MINICAD_ObjectProps(bpy.types.PropertyGroup):
         name="Opaklık", description="Gövdenin görünür opaklığı: azaltınca arkasındaki referans "
         "görsel / tel kafes görünür, çizmeye devam edilir (hesaba etkisi yok)",
         default=1.0, min=0.02, max=1.0, subtype="FACTOR", update=_on_opacity)
+    part_kind: bpy.props.EnumProperty(               # v0.36.0: ölçüyle kurulan parça
+        name="Parça", items=[("PATCH", "Yüzeylerden", "Tel kafes yüzeylerinden gövde"),
+                             ("SCREW", "Vida", "Ölçülerden vida"),
+                             ("NUT", "Somun", "Ölçülerden somun")],
+        default="PATCH", update=_on_setting_change)
+    part: bpy.props.PointerProperty(type=MINICAD_Part)
     links: bpy.props.CollectionProperty(type=MINICAD_Link)   # tel kafes eğrilerinde
     constraints: bpy.props.CollectionProperty(type=MINICAD_Constraint)  # tel kafes eğrilerinde
     curves: bpy.props.CollectionProperty(type=MINICAD_CurveRef)  # v0.1 uyumluluğu
@@ -1104,6 +1312,12 @@ def _migrate(props):
     for f in props.features:
         if not f.uid:
             f.uid = new_uid()
+        # v0.36.0: eski dişli delikler (yalnız kılavuz matkabı) kozmetik dişe göçer: görünüş
+        # değişmez, diş ayarları açılır
+        if f.op == "HOLE" and f.hole_kind == "TAPPED" and not f.thr.inited:
+            from . import thread
+            thread.init_thread(f.thr, "ISO_M", f.hole_thread if f.hole_thread != "NONE"
+                               else "M6", modeled=False)
 
 
 def _mirror_planes(props):
@@ -1365,7 +1579,12 @@ def gather(obj, preview, allow_ghost=True):
             if f.op == "HOLE":
                 if not props.use_booleans:
                     continue
-                st = _hole_stage(obj, f)
+                try:
+                    st = _hole_stage(obj, f)
+                except CadError as e:     # v0.36.0: hatalı diş değeri
+                    f.ok, f.info = False, str(e)
+                    errors.append(f.name)
+                    continue
                 if st is None:            # yer henüz seçilmedi (delik aracı açık): hata değil
                     f.ok, f.info = True, "Delik yeri seçilmedi: yüzeye tıkla"
                     continue
@@ -1420,6 +1639,13 @@ def gather(obj, preview, allow_ghost=True):
     finally:
         _gathering.discard(obj.name)
 
+    prim = None
+    if getattr(props, "part_kind", "PATCH") in ("SCREW", "NUT"):    # v0.36.0: vida / somun
+        from . import thread
+        try:
+            prim = thread.primitive(obj)
+        except Exception as e:
+            raise CadError(f"Parça: {e}")
     job = {"name": obj.name, "preview": preview, "patches": patches, "errors": errors,
            "tol": _match_tol(props), "mirrors": mirrors,
            "sew_tol": max(1e-6, min(props.join_tol, 1e-4)), "make_solid": props.make_solid,
@@ -1430,6 +1656,8 @@ def gather(obj, preview, allow_ghost=True):
            "deep": [props.diag_uid] if getattr(props, "diag_uid", "") else [],
            "budget": calc_budget(obj, preview),
            "t0": _t.perf_counter()}
+    if prim is not None:
+        job["primitive"] = prim
     cmd = "build"
     if ghost and allow_ghost and _final_parts.get(obj.name) == job["parts"] and \
             _final_known.get(obj.name) == _client().session:
@@ -1768,6 +1996,8 @@ def cancel_running():
 def rebuild(obj, preview=False):
     """Senkron yeniden hesaplama (operatörler için). Başarılıysa True."""
     props = obj.cad
+    for dep in _dependents(obj):           # v0.36.0: bağlı vida / somun arkadan güncellenir
+        schedule(dep)
     if frozen(props):
         _frozen_skip.add(obj.name)
         props.status = "Çizim düzenleniyor: gövde Bitir'de güncellenecek"
@@ -1963,9 +2193,22 @@ def _ensure_timer():
         bpy.app.timers.register(_tick, first_interval=0.01)
 
 
+def _dependents(obj):
+    """v0.36.0: bu gövdenin deliğine bağlı vida / somunlar (diş tanımı delikten gelir)."""
+    try:
+        if obj.cad.part_kind != "PATCH":
+            return []
+        from . import thread
+        return [o for o in thread.parts_linked_to(obj) if o.cad.part.linked]
+    except Exception:
+        return []
+
+
 def schedule(obj, preview=False):
     if obj is None:
         return
+    for dep in _dependents(obj):
+        schedule(dep, preview)
     name = obj.name
     if preview:
         _flags["last_change"] = time.perf_counter()
@@ -2073,18 +2316,41 @@ def _r(v):
 
 
 def hole_params(f):
-    """Deliğin holemath parametreleri (sahne biriminde)."""
-    return {"kind": f.hole_kind, "d": f.hole_d, "depth": f.hole_depth,
-            "through": f.hole_through, "tip_angle": f.hole_tip, "cb_d": f.hole_cb_d,
-            "cb_depth": f.hole_cb_depth, "cs_d": f.hole_cs_d, "cs_angle": f.hole_cs_angle,
-            "thread": f.hole_thread if f.hole_thread != "NONE" else ""}
+    """Deliğin holemath parametreleri (sahne biriminde). v0.36.0: dişli delikte diş tanımı
+    ("thr") ve matkap çapı diş ayarlarından gelir; ağız pahı, havşa üstü pay."""
+    p = {"kind": f.hole_kind, "d": f.hole_d, "depth": f.hole_depth,
+         "through": f.hole_through, "tip_angle": f.hole_tip, "cb_d": f.hole_cb_d,
+         "cb_depth": f.hole_cb_depth, "cs_d": f.hole_cs_d, "cs_angle": f.hole_cs_angle,
+         "cs_head": f.hole_cs_head, "mouth_d": f.hole_mouth_d,
+         "mouth_angle": f.hole_mouth_angle,
+         "thread": f.hole_thread if f.hole_thread != "NONE" else ""}
+    if f.hole_kind == "TAPPED":
+        from . import thread
+        try:
+            p["d"], p["thr"] = thread.hole_thread_params(f)
+        except Exception as e:                 # hatalı diş değeri: hesap bildirir
+            p["thr_error"] = str(e)
+    return p
 
 
 def _hole_key(f):
-    return (f.hole_kind, round(f.hole_d, 9), round(f.hole_depth, 9), f.hole_through,
-            round(f.hole_tip, 4), round(f.hole_cb_d, 9), round(f.hole_cb_depth, 9),
-            round(f.hole_cs_d, 9), round(f.hole_cs_angle, 4),
-            tuple((_r(h.co), _r(h.nrm)) for h in f.hole_pts))
+    k = (f.hole_kind, round(f.hole_d, 9), round(f.hole_depth, 9), f.hole_through,
+         round(f.hole_tip, 4), round(f.hole_cb_d, 9), round(f.hole_cb_depth, 9),
+         round(f.hole_cs_d, 9), round(f.hole_cs_angle, 4),
+         tuple((_r(h.co), _r(h.nrm)) for h in f.hole_pts),
+         round(f.hole_cs_head, 9), round(f.hole_mouth_d, 9), round(f.hole_mouth_angle, 4))
+    if f.hole_kind == "TAPPED":
+        t = f.thr
+        k += (t.inited, t.family, t.size, t.modeled, t.profile, round(t.D, 9), round(t.P, 9),
+              round(t.angle, 4), round(t.angle2, 4), round(t.depth, 9), round(t.crest, 9),
+              round(t.rc, 9), round(t.rr, 9), t.hand, t.starts,
+              t.custom_obj.name if t.custom_obj else "", round(t.custom_w, 4),
+              round(t.engage, 4), round(t.length, 9), round(t.clearance, 9),
+              round(t.share, 4), round(t.swell, 9), t.lead_in)
+        if t.profile == "CUSTOM" and t.custom_obj is not None:
+            from . import thread
+            k += (tuple(thread.curve_points(t.custom_obj) or ()),)
+    return k
 
 
 def _hole_stage(obj, f):
@@ -2101,7 +2367,10 @@ def _hole_stage(obj, f):
         if d.length < 1e-12:
             continue
         d.normalize()
-        holes.append({"co": tuple(co), "dir": tuple(d), "p": hole_params(f)})
+        hp = hole_params(f)
+        if hp.get("thr_error"):
+            raise CadError(f"Diş: {hp['thr_error']}")
+        holes.append({"co": tuple(co), "dir": tuple(d), "p": hp})
     if not holes:
         return None
     return {"op": "HOLE", "uid": f.uid, "holes": holes,
@@ -2168,6 +2437,9 @@ def _signature_parts(props):
                 curve.append(tuple(_r(q.co) for q in sp.points))
             curve.append(sp.use_cyclic_u)
     struct, bev = [], []
+    if getattr(props, "part_kind", "PATCH") in ("SCREW", "NUT"):    # v0.36.0
+        from . import thread
+        struct.append(("PART", props.part_kind) + tuple(thread.part_key(props.id_data)))
     for p in props.patches:
         struct.append(("P", p.enabled, p.method, len(p.segs), len(p.curves),
                        getattr(p, "blend", "BODY"), getattr(p, "own_weight", False),
@@ -2219,6 +2491,14 @@ def _transform_running():
 
 
 def _watched_objects(props):
+    try:                                   # v0.36.0: özel diş profili eğrileri
+        if props.part_kind != "PATCH" and props.part.thr.custom_obj is not None:
+            yield props.part.thr.custom_obj
+        for f in props.features:
+            if f.op == "HOLE" and f.hole_kind == "TAPPED" and f.thr.custom_obj is not None:
+                yield f.thr.custom_obj
+    except Exception:
+        pass
     for patch in props.patches:
         for r in patch.curves:
             if r.obj is not None:
@@ -2346,7 +2626,7 @@ def on_load(_dummy):
 
 
 classes = (MINICAD_CurveRef, MINICAD_SegRef, MINICAD_Patch, MINICAD_GeoEdge, MINICAD_HolePoint,
-           MINICAD_Feature,
+           MINICAD_Thread, MINICAD_Part, MINICAD_Feature,
            MINICAD_BevelEdge, MINICAD_CRef, MINICAD_Constraint, MINICAD_Link,
            MINICAD_ObjectProps)
 

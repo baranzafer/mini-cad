@@ -472,37 +472,51 @@ _SOLID = [
 _HOLE = [
     ("Delik", [
         B("HOLE", "HOLE", "Delik",
-          "Gövde yüzüne tıklayarak düz, havşa başlı (kademeli) ya da havşalı delik açar; eskiz "
-          "noktasına ve daire merkezine yakalar.",
+          "Gövde yüzüne tıklayarak düz, kademeli (silindir başlı vida yuvası) ya da konik "
+          "havşalı (havşa başlı vida) delik açar; eskiz noktasına ve daire merkezine yakalar.",
           ["Türü seç (açılır liste)", "Yüzeye ya da eskiz noktasına tıkla (birden çok delik)",
            "Ölçüleri Delik penceresinden ver: vida ölçüsü, çap, mesafe / tümüyle geçen",
            "Enter: bitir · Backspace: son deliği geri al · Esc: vazgeç"], key="H",
           variants=[
               V("HOLE", "HOLE", "Düz delik", "Çap; mesafe (matkap ucu açılı) ya da tümüyle "
                 "geçen."),
-              V("HOLE_CBORE", "HOLE_CBORE", "Havşa başlı (kademeli)",
-                "İmbus vida için baş yuvası çapı ve derinliği ile."),
-              V("HOLE_CSK", "HOLE_CSK", "Havşalı", "Havşa başlı vida için havşa çapı ve açısı."),
+              V("HOLE_CBORE", "HOLE_CBORE", "Kademeli (silindirik yuva)",
+                "Silindir başlı vidanın başı yüzeyin altına gömülür: vida başına göre yuva "
+                "çapı ve derinliği (imbus, alçak başlı, altıgen, mercimek)."),
+              V("HOLE_CSK", "HOLE_CSK", "Konik havşa",
+                "Havşa başlı vidanın başı yüzeyle aynı hizaya gömülür: havşa çapı ve açısı "
+                "(90° / 82°), isteğe bağlı havşa üstü pay."),
           ]),
         B("TAPPED", "TAPPED", "Dişli delik",
-          "ISO metrik ölçüye göre (M2–M24) kılavuz matkabı çapında delik; diş ölçüsü "
-          "saklanır.",
-          ["Vida ölçüsünü seç (M6 → 5 mm matkap)", "Yüzeye tıkla", "Mesafe ya da tümüyle geçen"]),
+          "Gerçek helisel iç diş: metrik kaba / ince, UNC, UNF, Whitworth, boru (G), trapez, "
+          "ACME, kare, yuvarlak, testere ya da özel profil (eğriden). Sağ / sol, çok ağızlı; "
+          "3B baskı için boşluk ve genleşme payı. Uyumlu vida tek tıkla.",
+          ["Standart ve ölçüyü seç", "Yüzeye tıkla", "Geçme: boşluk / baskı genleşmesi",
+           "Uyumlu vida"]),
         B("HOLE_LIST", "ORDER", "Delikler",
           "Gövdedeki delikleri listeler: seç, ölçüleri değiştir, yer ekle, sil.",
           ["Listeden deliği seç", "Ölçüleri değiştir (canlı güncellenir)",
            "Yer ekle: yüzeye tıkla"]),
     ]),
     ("Vida", [
+        B("SCREW_FIT", "BOLT", "Uyumlu vida",
+          "Seçili deliğe uyan vida oluşturur: dişli delikte diş tanımı, tolerans ve boy "
+          "delikten gelir; vida deliğe yerleşir ve delikle birlikte değişir. Geçme deliğinde "
+          "vida başı delik türüne göre seçilir.",
+          ["Delik penceresinde deliği ve yeri seç", "Uyumlu vida", "Vida penceresinde baş, "
+           "boy, uç pahı"]),
+        B("BOLT", "BOLT", "Vida / somun",
+          "Vida ve somun penceresi: baş türü (imbus, altıgen, havşa, mercimek, silindir, "
+          "başsız), anahtar yuvası, boy, diş ve geçme ayarları. Seçili parça yoksa 3B "
+          "imlecine bağımsız vida ya da somun eklenir.",
+          ["Parçayı seç (listeden ya da görünümde)", "Ayarları değiştir: canlı güncellenir"]),
+        B("NUT", "NUT", "Somun",
+          "Geçen deliğin çıkış yüzüne uyumlu somun (ISO 4032) koyar; delik seçili değilse "
+          "bağımsız somun ekler.", ["Geçen deliği seç", "Somun"]),
         B("THREAD", "THREAD", "Diş",
           "Silindirik yüze dış ya da iç diş açar (görsel ya da gerçek geometri).",
           ["Silindirik yüzü seç", "Adım ve uzunluk ver", "Görsel / modellenmiş seç"],
           status=PLANNED),
-        B("BOLT", "BOLT", "Vida oluştur",
-          "Standart ölçülerden vida gövdesi üretir (altıgen başlı, imbus, havşa başlı).",
-          ["Standart ve ölçü seç", "Boy ver", "Baş tipini seç"], status=PLANNED),
-        B("NUT", "NUT", "Somun", "Standart ölçülerden somun üretir.",
-          ["Ölçü seç", "Konumu seç"], status=PLANNED),
     ]),
 ]
 

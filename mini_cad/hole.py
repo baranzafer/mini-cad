@@ -69,16 +69,39 @@ def default_params(f, body):
 
 
 def apply_preset(f):
-    """Vida ölçüsünden çap / havşa değerleri (tür değişince de çağrılır)."""
-    from . import holemath
+    """Vida ölçüsünden çap / havşa değerleri (tür değişince de çağrılır). v0.36.0: geçme
+    sınıfı (ISO 273), vida başı / havşa türü; dişli delikte diş ayarları."""
+    from . import holemath, thread, threadmath
+    if f.hole_kind == "TAPPED":
+        if not f.thr.inited:
+            size = f.hole_thread if f.hole_thread != "NONE" else None
+            if size is None:            # ölçü yok: delik çapına en yakın metrik diş
+                dmm = thread.mm(f.hole_d) / 1.1
+                size = min(threadmath.sizes("ISO_M"),
+                           key=lambda n: abs(threadmath.standard("ISO_M", n)["D"] - dmm))
+            thread.init_thread(f.thr, "ISO_M", size, modeled=True, fit="NOMINAL")
+        f.hole_d = thread.hole_thread_params(f)[0]
+        if not f.hole_through:
+            f.hole_depth = max(f.hole_depth, f.thr.D * 1.5)
+        return
     if f.hole_thread == "NONE":
         return
-    pr = holemath.preset(f.hole_kind, f.hole_thread, scene_scale())
+    sc = scene_scale()
+    pr = holemath.preset(f.hole_kind, f.hole_thread, sc)
+    table = {"FINE": holemath.CLEARANCE_FINE,
+             "COARSE": holemath.CLEARANCE_COARSE}.get(f.hole_fit)
+    if table and f.hole_thread in table:
+        pr["d"] = holemath.mm_to_units(table[f.hole_thread], sc)
     f.hole_d = pr["d"]
-    if "cb_d" in pr:
-        f.hole_cb_d, f.hole_cb_depth = pr["cb_d"], pr["cb_depth"]
-    if "cs_d" in pr:
-        f.hole_cs_d = pr["cs_d"]
+    dmm = holemath.ISO_COARSE[f.hole_thread][0]
+    if f.hole_kind == "CBORE":
+        cd, cdep = threadmath.cbore_dims(f.hole_head, dmm, holemath.CBORE)
+        f.hole_cb_d = max(holemath.mm_to_units(cd, sc), f.hole_d * 1.05)
+        f.hole_cb_depth = holemath.mm_to_units(cdep, sc)
+    if f.hole_kind == "CSINK":
+        cd, ang = threadmath.csink_dims(f.hole_csk, dmm, holemath.CSINK)
+        f.hole_cs_d = max(holemath.mm_to_units(cd, sc), f.hole_d * 1.2)
+        f.hole_cs_angle = ang
     if not f.hole_through:
         f.hole_depth = max(f.hole_depth, pr["d"] * 2.0)
 
@@ -379,29 +402,7 @@ def _draw3d():
     from gpu_extras.batch import batch_for_shader
     from .ribbon import COL_ACCENT
     loc, n, kind = op.hover
-    d = -n                                          # malzemeye doğru
-    sc = float(max(body.dimensions)) or 1.0
-    R = 0.5 * f.hole_d
-    depth = f.hole_depth if not f.hole_through else sc * 0.6
-    seg = []
-
-    def ring(c, r):
-        P = _circle(c, d, r)
-        for i in range(len(P) - 1):
-            seg.extend([P[i], P[i + 1]])
-    ring(loc, R)
-    ring(loc + d * depth, R)
-    if f.hole_kind == "CBORE":
-        ring(loc, 0.5 * f.hole_cb_d)
-        ring(loc + d * f.hole_cb_depth, 0.5 * f.hole_cb_d)
-    elif f.hole_kind == "CSINK":
-        ring(loc, 0.5 * f.hole_cs_d)
-    a = np.array([1.0, 0, 0]) if abs(d[0]) < 0.9 else np.array([0, 1.0, 0])
-    u = np.cross(d, a)
-    u /= np.linalg.norm(u)
-    for sgn in (1, -1):                             # iki yan çizgi + eksen
-        seg += [tuple(loc + u * R * sgn), tuple(loc + u * R * sgn + d * depth)]
-    seg += [tuple(loc - d * R), tuple(loc + d * (depth + R))]
+    seg = ghost_segments(f, body, loc, n)
     region = ctx.region
     sh = gpu.shader.from_builtin("POLYLINE_UNIFORM_COLOR")
     gpu.state.blend_set("ALPHA")
@@ -414,6 +415,73 @@ def _draw3d():
     sh.uniform_float("color", col)
     b.draw(sh)
     gpu.state.blend_set("NONE")
+
+
+def ghost_segments(f, body, loc, n):
+    """v0.36.0: hayalet — deliğin gerçek kesit profili (kademe, havşa konisi, ağız pahı, uç)
+    dört meridyen çizgisi ve profil köşelerinde halkalar; dişli delikte diş dış çapı da
+    halka. Böylece seçilen tür tıklamadan önce görünür."""
+    from . import core, holemath
+    d = -np.asarray(n, float)                       # malzemeye doğru
+    d /= max(np.linalg.norm(d), 1e-15)
+    loc = np.asarray(loc, float)
+    sc = float(max(body.dimensions)) or 1.0
+    p = core.hole_params(f)
+    try:
+        prof = holemath._clip_s(holemath.profile(p, sc * 0.6))
+    except Exception:
+        prof = [(0.0, 0.0), (0.5 * f.hole_d, 0.0), (0.5 * f.hole_d, f.hole_depth),
+                (0.0, f.hole_depth)]
+    a = np.array([1.0, 0, 0]) if abs(d[0]) < 0.9 else np.array([0, 1.0, 0])
+    u = np.cross(d, a)
+    u /= np.linalg.norm(u)
+    v = np.cross(d, u)
+    seg = []
+
+    def ring(depth, r):
+        if r <= 1e-12:
+            return
+        P = _circle(loc + d * depth, d, r)
+        for i in range(len(P) - 1):
+            seg.extend([P[i], P[i + 1]])
+    pts = [(float(r), float(s)) for r, s in prof]
+    for k in range(len(pts)):
+        r0, s0 = pts[k]
+        r1, s1 = pts[(k + 1) % len(pts)]
+        if r0 <= 1e-12 and r1 <= 1e-12:
+            continue
+        for w in (u, -u, v, -v):
+            seg += [tuple(loc + d * s0 + w * r0), tuple(loc + d * s1 + w * r1)]
+    seen = set()
+    for r, s in pts:
+        key = (round(r, 9), round(s, 9))
+        if r > 1e-12 and key not in seen:
+            seen.add(key)
+            ring(s, r)
+    th = p.get("thr")
+    if th:
+        R = 0.5 * float(th["spec"]["D"])
+        dep = float(p["depth"]) if not p.get("through") else sc * 0.6
+        if th.get("length"):
+            dep = min(dep, float(th["length"]))
+        ring(0.0, R)
+        ring(dep, R)
+        # diş adımını gösteren kısa helis
+        P = float(th["spec"]["P"]) * max(int(th.get("starts", 1)), 1)
+        sgn = -1.0 if th.get("hand") == "LEFT" else 1.0
+        m = 48
+        turns = max(1, min(int(dep / max(P, 1e-12)), 12))
+        prev = None
+        for i in range(turns * m + 1):
+            t = i / m
+            q = loc + d * min(t * P, dep) + R * (math.cos(sgn * 2 * math.pi * t) * u +
+                                                    math.sin(sgn * 2 * math.pi * t) * v)
+            if prev is not None:
+                seg += [tuple(prev), tuple(q)]
+            prev = q
+    seg += [tuple(loc - d * 0.5 * f.hole_d), tuple(loc + d * (max(s for _r, s in pts) +
+                                                              0.5 * f.hole_d))]
+    return seg
 
 
 classes = (MINICAD_OT_hole,)

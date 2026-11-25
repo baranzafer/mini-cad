@@ -727,31 +727,25 @@ def hole_form(ui, ctx):
                  "merkezine yakalar · Backspace: son deliği geri al", "info")
     if f is None:
         ui.label("Gövdede delik yok.", "dim")
-        ui.button("Delik aç", lambda: ra._hole(ctx, "SIMPLE"), icon="HOLE", primary=True)
+        with ui.row():
+            for k, nm, _d in holemath.KINDS:
+                ui.button(nm, lambda k=k: ra._hole(ctx, k), icon="HOLE", primary=k == "SIMPLE")
         return
     ui.section("Tür")
     ui.prop(f, "hole_kind", "", style="seg",
             on_change=lambda v, f=f: hole.apply_preset(f))
-    with ui.row(1, 1):
-        ui.prop(f, "hole_thread", "Vida",
-                on_change=lambda v, f=f: hole.apply_preset(f))
-        ui.button("Ölçülerden doldur", lambda f=f: hole.apply_preset(f),
-                  enabled=f.hole_thread != "NONE")
-    if f.hole_kind == "TAPPED" and f.hole_thread != "NONE":
-        dn, pitch, tap = holemath.ISO_COARSE[f.hole_thread]
-        ui.label(f"{f.hole_thread} × {pitch:g}: kılavuz matkabı Ø{tap:g} mm (diş bilgisi "
-                 "saklanır; modellenmiş diş: Vida → Diş)", "dim")
-    ui.section("Ölçüler")
-    ui.prop(f, "hole_d", "Çap")
-    if f.hole_kind == "CBORE":
+    kinfo = {k: d for k, _n, d in holemath.KINDS}.get(f.hole_kind, "")
+    ui.label(kinfo, "dim")
+    if f.hole_kind == "TAPPED":
+        if not f.thr.inited:
+            hole.apply_preset(f)
+        thread_ui(ui, f.thr, role="hole", on_change=lambda f=f: _hole_drill(f))
         with ui.row():
-            ui.prop(f, "hole_cb_d", "Yuva Ø")
-            ui.prop(f, "hole_cb_depth", "Derinlik")
-    elif f.hole_kind == "CSINK":
-        with ui.row():
-            ui.prop(f, "hole_cs_d", "Havşa Ø")
-            ui.prop(f, "hole_cs_angle", "Açı", meta=Meta("FLOAT", "Açı", min=10, max=170,
-                                                        step=100, precision=0))
+            ui.prop(f, "hole_mouth_d", "Ağız pahı Ø (0: yok)")
+            ui.prop(f, "hole_mouth_angle", "Açı", meta=Meta("FLOAT", "Açı", min=10, max=170,
+                                                           step=100, precision=0))
+    else:
+        _clearance_ui(ui, f, hole)
     ui.section("Bitiş")
     ui.prop(_HoleEnd(f), "end", "", meta=HOLE_END, style="seg")
     if not f.hole_through:
@@ -771,6 +765,24 @@ def hole_form(ui, ctx):
             rows=4, empty="Yüzeye tıklayarak yer ekle")
     if f.info:
         ui.label(f.info, "ok" if f.ok else "err")
+    # v0.36.0: uyumlu vida / somun
+    if len(f.hole_pts):
+        ui.section("Vida")
+        j = min(sel[0], len(f.hole_pts) - 1)
+        with ui.row():
+            ui.button("Uyumlu vida", lambda: _part_for(ctx, t, f, j, "SCREW"), icon="BOLT",
+                      primary=f.hole_kind == "TAPPED",
+                      tip="Bu deliğe uyan vida: diş ve tolerans delikten, boy delikten")
+            if f.hole_kind != "TAPPED" and f.hole_through:
+                ui.button("Somun", lambda: _part_for(ctx, t, f, j, "NUT"), icon="NUT",
+                          tip="Geçen deliğin çıkışına somun")
+            if len(f.hole_pts) > 1:
+                ui.button("Her yere", lambda: _part_all(ctx, t, f), icon="BOLT",
+                          tip="Bütün yerlere vida (geçen delikte somun da)")
+        linked = _parts_of(t, f)
+        if linked:
+            ui.label(f"Bağlı: {', '.join(o.name for o in linked[:4])}"
+                     + (" …" if len(linked) > 4 else ""), "dim")
     if live:
         with ui.row(2, 1):
             ui.button("Tamam", lambda: _hole_finish(ctx), icon="FINISH", primary=True,
@@ -793,6 +805,380 @@ def hole_form(ui, ctx):
         def pick(j):
             ra.form_state["hole_uid"] = holes[j].uid
         ui.list("holes", holes, act, pick, hcells, rows=4)
+
+
+def _clearance_ui(ui, f, hole):
+    """Düz / kademeli / konik havşa: vida ölçüsü, geçme sınıfı, baş türü, ölçüler."""
+    with ui.row(1, 1):
+        ui.prop(f, "hole_thread", "Vida", on_change=lambda v, f=f: hole.apply_preset(f))
+        ui.button("Ölçülerden doldur", lambda f=f: hole.apply_preset(f),
+                  enabled=f.hole_thread != "NONE")
+    ui.prop(f, "hole_fit", "", style="seg", on_change=lambda v, f=f: hole.apply_preset(f))
+    if f.hole_kind == "CBORE":
+        ui.prop(f, "hole_head", "Vida başı", on_change=lambda v, f=f: hole.apply_preset(f))
+    elif f.hole_kind == "CSINK":
+        ui.prop(f, "hole_csk", "Havşa türü", on_change=lambda v, f=f: hole.apply_preset(f))
+    ui.section("Ölçüler")
+    ui.prop(f, "hole_d", "Çap")
+    if f.hole_kind == "CBORE":
+        with ui.row():
+            ui.prop(f, "hole_cb_d", "Yuva Ø")
+            ui.prop(f, "hole_cb_depth", "Derinlik")
+    elif f.hole_kind == "CSINK":
+        with ui.row():
+            ui.prop(f, "hole_cs_d", "Havşa Ø")
+            ui.prop(f, "hole_cs_angle", "Açı", meta=Meta("FLOAT", "Açı", min=10, max=170,
+                                                        step=100, precision=0))
+        ui.prop(f, "hole_cs_head", "Havşa üstü pay")
+    else:
+        with ui.row():
+            ui.prop(f, "hole_mouth_d", "Ağız pahı Ø")
+            ui.prop(f, "hole_mouth_angle", "Açı", meta=Meta("FLOAT", "Açı", min=10, max=170,
+                                                           step=100, precision=0))
+
+
+def _hole_drill(f):
+    """Diş ayarı değişince matkap çapı (görüntü ve ön ayarlar için) güncellenir."""
+    from . import thread
+    try:
+        f.hole_d = thread.hole_thread_params(f)[0]
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------- Diş ayarları (v0.36.0)
+
+class _ThrAdapter:
+    """Dinamik seçimler (standart, ölçü, profil, geçme) için bölmeli / açılır seçim."""
+
+    def __init__(self, thr, on_change=None):
+        self.thr, self.cb = thr, on_change
+
+    def _done(self):
+        if self.cb:
+            self.cb()
+
+    @property
+    def family(self):
+        return self.thr.family
+
+    @family.setter
+    def family(self, v):
+        from . import thread
+        if v == "CUSTOM":
+            self.thr.family = "CUSTOM"
+        else:
+            thread.fill_standard(self.thr, v, None)
+        self._done()
+
+    @property
+    def size(self):
+        return self.thr.size
+
+    @size.setter
+    def size(self, v):
+        from . import thread
+        thread.fill_standard(self.thr, self.thr.family, v)
+        self._done()
+
+    @property
+    def profile(self):
+        return self.thr.profile
+
+    @profile.setter
+    def profile(self, v):
+        from . import thread
+        thread.set_profile(self.thr, v)
+        self._done()
+
+    @property
+    def fit(self):
+        return self.thr.fit
+
+    @fit.setter
+    def fit(self, v):
+        from . import thread
+        self.thr.fit = v
+        thread.apply_fit(self.thr)
+        self._done()
+
+
+def _thr_custom(thr, cb=None):
+    """Standart değer elle değişti: Özel."""
+    if thr.family != "CUSTOM":
+        from . import thread
+        thr.size = thread.thread_name(thr)
+        thr.family = "CUSTOM"
+    if cb:
+        cb()
+
+
+def thread_ui(ui, thr, role="hole", on_change=None):
+    """Diş bölümü: delik (iç diş) ve vida / somun (dış / iç diş) penceresinde ortak.
+    Bağlı vidada aynı ayarlar düzenlenir: değişiklik hem deliğe hem vidaya gider."""
+    from . import thread, threadmath as tm
+    ad = _ThrAdapter(thr, on_change)
+    cb = (lambda v=None: on_change()) if on_change else None
+    ui.section("Diş")
+    with ui.row(1, 1):
+        ui.prop(ad, "family", "Standart", meta=Meta.enum(tm.family_items(), "Standart"),
+                style="drop")
+        if thr.family != "CUSTOM":
+            ui.prop(ad, "size", "Ölçü", meta=Meta.enum([(n, n, "") for n in
+                                                        tm.sizes(thr.family)], "Ölçü"),
+                    style="drop")
+    ui.prop(thr, "modeled", "Modellenmiş diş (helisel geometri)", style="check", on_change=cb)
+    sp = None
+    try:
+        sp = thread.spec(thr)
+        r_root, R = tm.radii(sp)
+        dh, ds = thread.offsets(thr)
+        txt = (f"{sp['name']} · adım {_fmt_len(thr.P)} · diş yüksekliği "
+               f"{_fmt_len(R - r_root)}")
+        if role == "hole":
+            drill = tm.minor_drill(sp, dh, thr.engage) if thr.modeled else sp["tap"] + 2 * dh
+            txt += f" · matkap Ø{_fmt_len(drill)}"
+        ui.label(txt, "dim")
+    except Exception as e:
+        ui.label(f"Diş değeri hatalı: {e}", "err")
+    with ui.row(1, 1):
+        ui.prop(thr, "hand", "", style="seg", on_change=cb)
+        ui.prop(thr, "starts", "Ağız", on_change=cb)
+    if role != "screw":                     # vidada dişli kısım vida bölümünde
+        ui.prop(thr, "length", "Diş boyu (0: tamamı)", on_change=cb)
+    # ---- profil ayrıntıları (aç / kapa)
+    key = f"thr_adv_{role}"
+    adv = ra.form_state.setdefault(key, [False])
+    ui.button(("▾ " if adv[0] else "▸ ") + "Diş profili ve ölçüleri",
+              lambda: adv.__setitem__(0, not adv[0]), depress=adv[0])
+    if adv[0]:
+        ui.prop(ad, "profile", "", meta=Meta.enum(tm.PROFILES, "Profil"), style="drop")
+        cc = lambda v=None, thr=thr: _thr_custom(thr, on_change)  # noqa: E731
+        with ui.row():
+            ui.prop(thr, "D", "Anma Ø", on_change=cc)
+            ui.prop(thr, "P", "Adım", on_change=cc)
+        if thr.profile not in ("SQUARE",):
+            with ui.row():
+                ui.prop(thr, "angle", "Açı", meta=Meta("FLOAT", "Profil açısı", min=0,
+                                                       max=150, step=100, precision=1),
+                        on_change=cc)
+                if thr.profile == "BUTT":
+                    ui.prop(thr, "angle2", "Yük yanı", meta=Meta("FLOAT", "Yük yanı açısı",
+                                                                min=0, max=80, step=100,
+                                                                precision=1), on_change=cc)
+        with ui.row():
+            ui.prop(thr, "depth", "Yükseklik", on_change=cc)
+            ui.prop(thr, "crest", "Tepe genişliği", on_change=cc)
+        with ui.row():
+            ui.prop(thr, "rc", "Tepe R", on_change=cc)
+            ui.prop(thr, "rr", "Dip R", on_change=cc)
+        if thr.profile == "CUSTOM":
+            ui.prop(thr, "custom_obj", "Eğri", style="object",
+                    choices=lambda: [(o, o.name) for o in bpy.data.objects
+                                     if o.type == "CURVE"], on_change=cb)
+            ui.prop(thr, "custom_w", "Genişlik / adım", on_change=cb)
+            ui.label("Eğri XY düzleminde: X diş genişliği boyunca, Y diş yüksekliği; başı "
+                     "ve sonu dipte (Y en küçük).", "dim")
+        if thr.family != "CUSTOM" or thr.size:
+            ui.button("Standart değerlere dön", lambda: (thread.fill_standard(
+                thr, thr.family if thr.family != "CUSTOM" else "ISO_M", None),
+                on_change and on_change()), icon="REBUILD")
+    # ---- geçme / tolerans
+    ui.section("Geçme (vida ↔ delik boşluğu)")
+    fits = [(k, n, d) for k, n, d, _c in tm.FITS]
+    ui.prop(ad, "fit", "Ön ayar", meta=Meta.enum(fits, "Geçme"), style="drop")
+
+    def fit_custom(v=None, thr=thr):
+        if thr.fit != "CUSTOM":
+            thr.fit = "CUSTOM"
+        if on_change:
+            on_change()
+    with ui.row():
+        ui.prop(thr, "clearance", "Boşluk", on_change=fit_custom)
+        ui.prop(thr, "share", "Deliğe pay", on_change=cb)
+    ui.prop(thr, "swell", "Baskı genleşmesi (XY)", on_change=cb)
+    if role in ("hole", "nut"):
+        ui.prop(thr, "engage", "Diş kavrama", on_change=cb)
+    if role == "screw":
+        ui.prop(thr, "lead_in", "Uçta giriş pahı", style="check", on_change=cb)
+    try:
+        dh, ds = thread.offsets(thr)
+        ui.label(f"Delik dişi +{_fmt_len(dh)} · vida dişi −{_fmt_len(-ds)} (yüzeye dik)", "dim")
+    except Exception:
+        pass
+    err = thread.check(thr)
+    if err:
+        ui.label(err, "err")
+
+
+def _parts_of(t, f):
+    from . import thread
+    return [o for o in thread.parts_linked_to(t) if o.cad.part.link_uid == f.uid]
+
+
+def _part_for(ctx, t, f, j, kind):
+    from . import thread
+    ob, msg = thread.create_for_hole(bpy.context, t, f, j, kind)
+    if ob is not None:
+        ra.form_state["part"] = ob.name
+        try:
+            bpy.ops.ed.undo_push(message=f"BlendCAD: {ob.name}")
+        except Exception:
+            pass
+    ra._msg(msg)
+
+
+def _part_all(ctx, t, f):
+    from . import thread
+    n = 0
+    for j in range(len(f.hole_pts)):
+        ob, _m = thread.create_for_hole(bpy.context, t, f, j, "SCREW")
+        n += ob is not None
+        if f.hole_kind != "TAPPED" and f.hole_through:
+            ob2, _m = thread.create_for_hole(bpy.context, t, f, j, "NUT")
+            n += ob2 is not None
+    try:
+        bpy.ops.ed.undo_push(message="BlendCAD: vidalar")
+    except Exception:
+        pass
+    ra._msg(f"{n} parça oluşturuldu")
+
+
+# ---------------------------------------------------------------- Vida / somun (v0.36.0)
+
+def _part_obj(ctx):
+    from . import thread
+    for ob in (bpy.context.view_layer.objects.active, _target(ctx),
+               bpy.data.objects.get(ra.form_state.get("part", ""))):
+        if thread.is_part(ob):
+            return ob
+    return None
+
+
+def part_form(ui, ctx):
+    from . import thread
+    ob = _part_obj(ctx)
+    if not ra._kernel_ready():
+        _need_body(ui, ctx)
+        return
+    if ob is None:
+        ui.label("Seçili vida / somun yok. Dişli deliğin penceresinde 'Uyumlu vida' ile "
+                 "delikten oluştur ya da bağımsız parça ekle (3B imleçte):", "dim")
+        with ui.row():
+            ui.button("Yeni vida", lambda: _part_new(ctx, "SCREW"), icon="BOLT", primary=True)
+            ui.button("Yeni somun", lambda: _part_new(ctx, "NUT"), icon="NUT")
+        _part_list(ui, None)
+        return
+    pt = ob.cad.part
+    kind = ob.cad.part_kind
+    ui.label(ob.name, "info")
+    f = thread.linked_feature(ob)
+    if f is not None:
+        with ui.row(2, 1):
+            ui.label(f"Delik: {pt.link_obj.name} · {f.name} · {pt.link_pt + 1}. yer", "dim",
+                     weight=2)
+            ui.button("Deliğe yerleştir", lambda: (thread.place(ob), _rb(ob)), icon="MOVE")
+        if f.hole_kind == "TAPPED":
+            ui.prop(pt, "linked", "Diş ve tolerans delikten (birlikte değişir)",
+                    style="check")
+    thr = thread.source_thread(ob)
+    role = "screw" if kind == "SCREW" else "nut"
+    if kind == "SCREW":
+        ui.section("Vida")
+        ui.prop(pt, "head", "Baş")
+        if pt.head != "HEX":
+            ui.prop(pt, "drive", "", style="seg")
+        with ui.row(1, 1):
+            ui.prop(pt, "length", "Boy")
+            ui.prop(_LenAdapter(pt), "std", "Standart boy",
+                    meta=Meta.enum(_std_lengths(), "Standart boy"), style="drop")
+        ui.prop(pt.thr, "length", "Dişli kısım (0: tam)")
+        ui.prop(pt, "auto_head", "Standart baş ölçüleri", style="check")
+        if not pt.auto_head:
+            with ui.row():
+                ui.prop(pt, "head_dk", "Baş Ø" if pt.head != "HEX" else "Anahtar ağzı")
+                ui.prop(pt, "head_k", "Yükseklik")
+            with ui.row():
+                ui.prop(pt, "drive_s", "Anahtar")
+                ui.prop(pt, "drive_t", "Yuva derinliği")
+    else:
+        ui.section("Somun")
+        ui.prop(pt, "auto_head", "Standart somun ölçüleri (ISO 4032)", style="check")
+        if not pt.auto_head:
+            with ui.row():
+                ui.prop(pt, "nut_s", "Anahtar ağzı")
+                ui.prop(pt, "nut_m", "Yükseklik")
+    if thr == pt.thr or not pt.linked:
+        thread_ui(ui, pt.thr, role=role)
+    else:
+        ui.label("Diş ayarları bağlı delikten geliyor; buradan değiştirince delik de değişir.",
+                 "dim")
+        thread_ui(ui, thr, role=role)
+    if ob.cad.status:
+        ok = "Kapalı katı" in ob.cad.status
+        ui.label(ob.cad.status, "ok" if ok else "err")
+    _part_list(ui, ob)
+
+
+class _LenAdapter:
+    def __init__(self, pt):
+        self.pt = pt
+
+    @property
+    def std(self):
+        from . import thread
+        v = round(thread.mm(self.pt.length), 3)
+        return f"{v:g}"
+
+    @std.setter
+    def std(self, v):
+        from . import thread
+        self.pt.length = thread.u(float(v))
+
+
+def _std_lengths():
+    from . import threadmath as tm
+    return [(f"{L:g}", f"{L:g} mm", "") for L in tm.STD_LENGTHS]
+
+
+def _rb(ob):
+    from . import core
+    core.rebuild(ob)
+
+
+def _part_new(ctx, kind):
+    from . import thread
+    ob = thread.create_free(bpy.context, kind)
+    ra.form_state["part"] = ob.name
+    try:
+        bpy.ops.ed.undo_push(message=f"BlendCAD: {ob.name}")
+    except Exception:
+        pass
+    ra._msg(f"{ob.name}: {ob.cad.status}")
+
+
+def _part_list(ui, cur):
+    from . import thread
+    parts = [o for o in bpy.data.objects if thread.is_part(o)]
+    if not parts:
+        return
+    ui.section(f"Vidalar ve somunlar ({len(parts)})")
+
+    def cells(u, o, i):
+        u.label(o.name, "" if "Kapalı katı" in o.cad.status else "err", weight=1.2)
+        u.label(o.cad.part.link_obj.name if o.cad.part.link_obj else "bağımsız", "dim")
+    act = next((i for i, o in enumerate(parts) if o == cur), -1)
+
+    def pick(j):
+        ra.form_state["part"] = parts[j].name
+        try:
+            for o in bpy.context.selected_objects:
+                o.select_set(False)
+            parts[j].select_set(True)
+            bpy.context.view_layer.objects.active = parts[j]
+        except Exception:
+            pass
+    ui.list("parts", parts, act, pick, cells, rows=4)
 
 
 # ---------------------------------------------------------------- Ekstrüzyon (v0.34.0)
@@ -942,7 +1328,10 @@ FORMS = {
     "PATCH": ("Kenar seçimi", "EDGE_PICK", edge_pick, 300),
     "SPLIT_FACE": ("Yüzeyi böl", "SPLIT_FACE", split_face, 280),
     "REPAIR": ("Öneriler", "DIAG", repair_form, 360),
-    "HOLE": ("Delik", "HOLE", hole_form, 330),
+    "HOLE": ("Delik", "HOLE", hole_form, 340),
+    "BOLT": ("Vida / somun", "BOLT", part_form, 340),
+    "NUT": ("Vida / somun", "BOLT", part_form, 340),
+    "SCREW_FIT": ("Vida / somun", "BOLT", part_form, 340),
     "EXTRUDE": ("Ekstrüzyon", "EXTRUDE", extrude_form, 330),
     "EXT_LINEAR": ("Ekstrüzyon", "EXTRUDE", extrude_form, 330),
     "EXT_THICK": ("Ekstrüzyon", "EXTRUDE", extrude_form, 330),

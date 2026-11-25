@@ -33,6 +33,6 @@ check(abs(p["d"] - 6.6) < 1e-9 and abs(p["cb_d"] - 11.0) < 1e-9, "birim ölçeğ
 check(set(hm.SIZES) == set(hm.CLEARANCE) == set(hm.CBORE) == set(hm.CSINK), "bütün tablolarda aynı ölçüler")
 check(all(hm.ISO_COARSE[k][2] < hm.ISO_COARSE[k][0] < hm.CLEARANCE[k] < hm.CBORE[k][0] for k in hm.SIZES), "matkap < anma < geçme < yuva çapı")
 t = hm.describe({"kind": "CBORE", "d": 9, "cb_d": 15, "cb_depth": 8.6, "through": True, "thread": "M8"})
-check(t == "M8 Havşa başlı Ø9 · yuva Ø15×8.6 · tümüyle geçen", f"açıklama: {t}")
+check(t == "M8 Kademeli Ø9 · yuva Ø15×8.6 · tümüyle geçen", f"açıklama: {t}")
 print("SONUÇ:", "tamam" if not fails else f"{fails} hata")
 sys.exit(1 if fails else 0)

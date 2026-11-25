@@ -45,7 +45,7 @@ for b in data.all_buttons():
             check(False, f"simge geçersiz: {it['icon']}")
 check(True, f"{len(ids)} düğme / tür simgesi geçerli")
 check(all(b["status"] in (data.READY, data.PLANNED) for b in data.all_buttons()), "durum alanı")
-check(data.find("HOLE_CSK")["title"] == "Havşalı", "find: tür bulunur")
+check(data.find("HOLE_CSK")["title"] == "Konik havşa", "find: tür bulunur")
 
 # --- yerleşim
 p = P(); r = ribbon.Ribbon(1.0)
@@ -75,7 +75,7 @@ p2 = P(); r.draw(p2, W, H, now=10.6); check("Diş" in p2.texts and "NASIL KULLAN
 p2 = P(); r.draw(p2, W, H, now=12.0); check("NASIL KULLANILIR" in p2.texts, "2 sn: kullanım adımları")
 mx2, my2 = center(r, "btn", "BOLT")
 r.move(mx2, my2, 12.1)
-p2 = P(); r.draw(p2, W, H, now=12.15); check("Vida oluştur" in p2.texts, "sıcak geçiş: yeni kart hemen")
+p2 = P(); r.draw(p2, W, H, now=12.15); check("Vida / somun" in p2.texts, "sıcak geçiş: yeni kart hemen")
 check(r.tick(12.15), "kart açılırken zamanlayıcı yeniden çizer")
 
 # --- açılır liste (tür seçimi)

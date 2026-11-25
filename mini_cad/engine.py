@@ -21,6 +21,7 @@ _final = {}         # gövde adı -> {"shape", "solid", "info"} son tam kalite
 _stage_base = {}    # gövde adı -> {aşama anahtarı: fillet öncesi şekil} (hayalet önizleme)
 _bool_new = {}      # gövde adı -> {boolean uid: [kenar kaydı]} son tam kalite
 _tool_cache = {}    # araç adı -> (anahtar, katı)
+_prim_cache = {}    # v0.36.0: parça (vida / somun) adı -> (anahtar, katı)
 _tool_good = {}     # araç adı -> son başarıyla okunan katı
 _sweep_lines = {}   # gövde adı -> {süpürme uid: [araç kenar çizgileri]} (önizleme çizimi)
 
@@ -247,6 +248,24 @@ def _build(job, res, geometry):
     tol = job["tol"]
     mirrors = [tuple(map(tuple, m)) for m in job["mirrors"]]
 
+    if job.get("primitive"):                 # v0.36.0: vida / somun (ölçülerden)
+        _progress("parça kuruluyor")
+        prim = job["primitive"]
+        hit = _prim_cache.get(name)
+        if hit is not None and hit[0] == prim["key"]:
+            shape = hit[1]
+        else:
+            shape = geometry.make_part(prim)
+            _prim_cache[name] = (prim["key"], shape)
+        shape_info = "Kapalı katı · " + prim.get("label", "parça")
+        res["shape_info"] = shape_info
+        builder = geometry.Builder(prev=None)
+        builder.face_keys = [("PART",) + tuple(prim["key"])]
+        _builders[name] = builder
+        _after_faces(job, res, geometry, name, preview, errors, tol, mirrors, builder,
+                     shape, shape_info, [], [])
+        return
+
     # 1) Ortak köşe/kenar kayıtlarıyla yüzleri üret
     builder = geometry.Builder(prev=_builders.get(name))
     patches = list(job["patches"])
@@ -288,6 +307,12 @@ def _build(job, res, geometry):
     # 2) Birleştir, aynala, katı yap
     shape, shape_info = geometry.assemble(faces, mirrors, job["sew_tol"], job["make_solid"])
     res["shape_info"] = shape_info
+    _after_faces(job, res, geometry, name, preview, errors, tol, mirrors, builder, shape,
+                 shape_info, faces, face_src)
+
+
+def _after_faces(job, res, geometry, name, preview, errors, tol, mirrors, builder, shape,
+                 shape_info, faces, face_src):
 
     # 3) Sıralı işlemler. Liste sırası = geçmiş sırası.
     run_bevels = job["run_bevels"]
@@ -551,7 +576,8 @@ def write_step(data):
 
 def forget(data):
     name = data.get("name")
-    tables = (_builders, _bevel_cache, _final, _stage_base, _bool_new, _sweep_lines)
+    tables = (_builders, _bevel_cache, _final, _stage_base, _bool_new, _sweep_lines,
+              _prim_cache)
     if name is None:
         for t in tables + (_tool_cache,):
             t.clear()

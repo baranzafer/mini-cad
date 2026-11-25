@@ -166,7 +166,9 @@ hm.apply_preset(f)
 check(abs(f.hole_cs_d - 0.0172) < 1e-7, "M8 havşalı: havşa Ø17.2 mm")
 f.hole_kind = "TAPPED"
 hm.apply_preset(f)
-check(abs(f.hole_d - 0.0068) < 1e-7, "M8 dişli: kılavuz matkabı Ø6.8 mm")
+# v0.36.0: dişli delik artık modellenmiş diş: matkap = iç çap (kılavuz matkabına yakın)
+check(f.thr.inited and f.thr.size == "M8" and f.thr.modeled and
+      0.0067 < f.hole_d < 0.0069, f"M8 dişli: modellenmiş diş, matkap Ø{f.hole_d * 1000:.3f} mm")
 clear()
 # yakalama adayları: eskiz noktası ve daire merkezi
 pc = bpy.data.curves.new("Nokta", "CURVE")

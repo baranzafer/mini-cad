@@ -1,4 +1,4 @@
-"""Delik hesapları (v0.33.0) — bpy / OCC'siz: standart ölçüler, döndürme profili, hacim.
+"""Delik hesapları (v0.33.0; v0.36.0: ağız pahı, havşa üstü pay, modellenmiş diş) — bpy / OCC'siz: standart ölçüler, döndürme profili, hacim.
 
 Delik, ekseni etrafında döndürülen bir profilden kurulan katının gövdeden çıkarılmasıdır
 (geometry.apply_holes). Profil (r, s) noktalarıdır: r eksenden uzaklık, s yüzeyden içeri
@@ -28,6 +28,13 @@ SIZES = list(ISO_COARSE)
 CLEARANCE = {"M2": 2.4, "M2.5": 2.9, "M3": 3.4, "M4": 4.5, "M5": 5.5, "M6": 6.6, "M8": 9.0,
              "M10": 11.0, "M12": 13.5, "M14": 15.5, "M16": 17.5, "M20": 22.0, "M24": 26.0}
 
+# v0.36.0: ISO 273 ince / kaba geçme (orta: CLEARANCE)
+CLEARANCE_FINE = {"M2": 2.2, "M2.5": 2.7, "M3": 3.2, "M4": 4.3, "M5": 5.3, "M6": 6.4, "M8": 8.4,
+                  "M10": 10.5, "M12": 13.0, "M14": 15.0, "M16": 17.0, "M20": 21.0, "M24": 25.0}
+CLEARANCE_COARSE = {"M2": 2.6, "M2.5": 3.1, "M3": 3.6, "M4": 4.8, "M5": 5.8, "M6": 7.0,
+                    "M8": 10.0, "M10": 12.0, "M12": 14.5, "M14": 16.5, "M16": 18.5,
+                    "M20": 24.0, "M24": 28.0}
+
 # Havşa başlı (kademeli) — imbus vida (ISO 4762) için: ad → (baş yuvası çapı, derinliği)
 CBORE = {"M2": (4.3, 2.0), "M2.5": (5.0, 2.5), "M3": (6.5, 3.3), "M4": (8.0, 4.4),
          "M5": (10.0, 5.4), "M6": (11.0, 6.5), "M8": (15.0, 8.6), "M10": (18.0, 10.8),
@@ -38,10 +45,12 @@ CBORE = {"M2": (4.3, 2.0), "M2.5": (5.0, 2.5), "M3": (6.5, 3.3), "M4": (8.0, 4.4
 CSINK = {"M2": 4.4, "M2.5": 5.5, "M3": 6.6, "M4": 9.0, "M5": 11.0, "M6": 13.0, "M8": 17.2,
          "M10": 21.5, "M12": 25.5, "M14": 28.5, "M16": 32.0, "M20": 40.0, "M24": 48.0}
 
-KINDS = (("SIMPLE", "Düz", "Düz silindirik delik"),
-         ("CBORE", "Havşa başlı", "Kademeli: baş yuvası + delik (imbus vida)"),
-         ("CSINK", "Havşalı", "Konik havşa + delik (havşa başlı vida)"),
-         ("TAPPED", "Dişli", "Kılavuz matkabı çapında delik; diş ölçüsü saklanır"))
+KINDS = (("SIMPLE", "Düz", "Düz silindirik delik (geçme deliği)"),
+         ("CBORE", "Kademeli", "Silindirik yuva + delik: silindir başlı (imbus) vida başı "
+          "yüzeyin altına gömülür"),
+         ("CSINK", "Konik havşa", "Konik havşa + delik: havşa başlı vidanın başı yüzeyle aynı "
+          "hizaya gömülür"),
+         ("TAPPED", "Dişli", "İç dişli delik: modellenmiş helisel diş ya da kılavuz matkabı"))
 
 
 def mm_to_units(mm, scale_length=1.0):
@@ -81,6 +90,12 @@ def profile(p, through_depth=None):
         raise ValueError("Delik derinliği sıfır")
     kind = p.get("kind", "SIMPLE")
     top = max(R * 0.5, depth * 0.02)           # yüzeyin üstüne taşma (çakışık yüz olmasın)
+    if p.get("top"):
+        top = max(top, float(p["top"]))        # v0.36: dişli delikte süpürmenin üstüne
+    if kind in ("SIMPLE", "TAPPED") and float(p.get("mouth_d") or 0.0) > 2.0 * R * 1.001:
+        # v0.36: ağız pahı / havşası — konik havşa gibi
+        p = dict(p, cs_d=p["mouth_d"], cs_angle=p.get("mouth_angle", 90.0), cs_head=0.0)
+        kind = "CSINK"
     tip = 0.0
     ang = float(p.get("tip_angle", 118.0) or 0.0)
     if not through and 1.0 < ang < 179.0:
@@ -97,9 +112,13 @@ def profile(p, through_depth=None):
         if rc <= R or not (0.05 < a < 1.5):
             raise ValueError("Havşa: çap delikten büyük, açı 6°–170° olmalı")
         hc = (rc - R) / math.tan(a)
-        if hc >= depth:
+        hh = max(float(p.get("cs_head") or 0.0), 0.0)   # v0.36: havşa üstü silindirik pay
+        if hc + hh >= depth:
             raise ValueError("Havşa derinliği delikten uzun")
-        pts += [(rc + top * math.tan(a), -top), (R, hc)]
+        if hh > 0:
+            pts += [(rc, -top), (rc, hh), (R, hh + hc)]
+        else:
+            pts += [(rc + top * math.tan(a), -top), (R, hc)]
     else:
         pts += [(R, -top)]
     pts += [(R, depth)]
@@ -152,7 +171,17 @@ def describe(p, fmt=lambda v: f"{v:g}"):
         t += f" · yuva Ø{fmt(p['cb_d'])}×{fmt(p['cb_depth'])}"
     elif p.get("kind") == "CSINK":
         t += f" · havşa Ø{fmt(p['cs_d'])} {p.get('cs_angle', 90):g}°"
-    if p.get("thread"):
+    elif float(p.get("mouth_d") or 0.0) > float(p["d"]):
+        t += f" · ağız pahı Ø{fmt(p['mouth_d'])}"
+    th = p.get("thr")
+    if p.get("kind") == "TAPPED" and th:
+        t = f"{th.get('name') or p.get('thread') or ''} " + t
+        t += " · modellenmiş diş" if th.get("modeled") else " · kozmetik diş"
+        if th.get("hand") == "LEFT":
+            t += " · sol"
+        if int(th.get("starts", 1)) > 1:
+            t += f" · {int(th['starts'])} ağız"
+    elif p.get("thread"):
         t = f"{p['thread']} " + t
     t += " · tümüyle geçen" if p.get("through") else f" · {fmt(p['depth'])} derin"
     return t

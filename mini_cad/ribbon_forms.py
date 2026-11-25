@@ -516,11 +516,24 @@ class FormHost:
             opts = [(i, n) for i, n, _d in e["meta"].items]
         RH = 20 * s
         rows = []
+        # v0.36.0: uzun listeler (diş ölçüleri) sütunlara bölünür
+        per = 16 if len(opts) > 16 else max(len(opts), 1)
+        opts = opts[:per * 4]
+        ncol = max(1, -(-len(opts) // per))
+        cw = max(x1 - x0, 90 * s) if ncol > 1 else x1 - x0
+        if ncol > 1 and self._geom is not None:
+            x0 = max(6 * s, min(x0, self._geom[1] - ncol * cw - 6 * s))
         y = y0 - 2 * s
-        for val, nm in opts[:24]:
-            rows.append(((x0, y - RH, x1, y), val, nm))
-            y -= RH
-        self.drop = {"id": e["id"], "rows": rows, "box": (x0 - 2 * s, y - 2 * s, x1 + 2 * s, y0)}
+        ymin = y
+        for k, (val, nm) in enumerate(opts):
+            c, r = divmod(k, per)
+            yy = y0 - 2 * s - r * RH
+            xx = x0 + c * cw
+            rows.append(((xx, yy - RH, xx + cw, yy), val, nm))
+            ymin = min(ymin, yy - RH)
+        x1 = x0 + ncol * cw if ncol > 1 else x1
+        self.drop = {"id": e["id"], "rows": rows,
+                     "box": (x0 - 2 * s, ymin - 2 * s, x1 + 2 * s, y0)}
 
     def move(self, mx, my, shift=False):
         if self.form is None:

@@ -1,4 +1,4 @@
-# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.35.0)
+# BlendCAD (eski adı Mini CAD) — Geliştirme Notları (v0.36.0)
 
 > **Ad değişikliği (v0.27.0):** eklentinin görünen adı **BlendCAD** oldu. Paket kimliği
 > (`id = "mini_cad"`), klasör adı, `minicad.*` operatörleri ve `MINICAD_*` sınıfları
@@ -12,21 +12,21 @@ hangi dosyaya bakılacağını söyler.
 
 ## 0. Yeni sohbette nasıl başlanır
 
-Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/charming-mayer-zekilm`** dalı (v0.35.0; v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
+Kod GitHub'da: `baranzafer/mini-cad` deposu, **`claude/awesome-hamilton-qmbaek`** dalı (v0.36.0; v0.35.0 `claude/charming-mayer-zekilm`, v0.26.0 `claude/mini-cad-continue-4zvqyj` dalında).
 - Eklenti `mini_cad/` klasöründe, testler ve araçlar `devkit/` klasöründe.
 - Kurulum zip'leri `dist/` klasöründe.
 - Her sürüm ayrı bir commit.
 
 **A) Claude Code (web) ile — önerilen, zip gerekmez**
 1. Yeni oturumu `baranzafer/mini-cad` deposuyla aç.
-2. Açılış mesajı: "Mini CAD projesine devam ediyoruz. Kod `claude/charming-mayer-zekilm`
+2. Açılış mesajı: "Mini CAD projesine devam ediyoruz. Kod `claude/awesome-hamilton-qmbaek`
    dalında; önce o dalı al ve DEVELOPMENT.md'yi oku." Ardından isteklerini yaz.
 3. Claude'un yapacağı kurulum:
    - Yeni oturumun kendi çalışma dalı farklı adda olabilir. O dal bu dalın son commit'inden
      başlatılır:
      ```bash
-     git fetch origin claude/charming-mayer-zekilm
-     git checkout -B <oturumun dalı> origin/claude/charming-mayer-zekilm
+     git fetch origin claude/awesome-hamilton-qmbaek
+     git checkout -B <oturumun dalı> origin/claude/awesome-hamilton-qmbaek
      ```
    - Başlangıç durumu için testler çalıştırılır:
      ```bash
@@ -622,6 +622,78 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
     - Ölçüm (`bpy_hole_check.py`, gerçek OCC): düz tümüyle / kör 118° / düz dip, havşa
       başlı, havşalı, dişli M6, iki delik, yan yüzden yatay delik — çıkan hacim analitik
       formülle 7 basamak aynı; delik ağzına 1 cm pah formülle aynı.
+  - **v0.36.0: modellenmiş diş, dişli delik ve uyumlu vida / somun** — `threadmath.py`
+    (bpy / OCC'siz), `threadgeo.py` (OCC), `thread.py` (Blender tarafı, operatör).
+    - Diş tanımı `core.MINICAD_Thread` (delikte `f.thr`, vida / somunda `ob.cad.part.thr`):
+      standart (ISO metrik kaba / ince, UNC, UNF, BSW, BSP G, Tr, ACME, kare, Rd yuvarlak,
+      S testere, Özel) + ölçü (StringProperty; listeler `threadmath.FAMILIES`), profil
+      (üçgen / trapez / kare / yuvarlak / testere / eğri), anma çapı, adım, profil açısı,
+      yük yanı açısı (testere), diş yüksekliği, tepe genişliği, tepe / dip yuvarlatma, sağ /
+      sol, ağız sayısı (1–8), özel profil eğrisi + genişlik oranı, diş kavrama (matkap),
+      diş boyu, geçme ön ayarı, boşluk, deliğe düşen pay, baskı genleşmesi, giriş pahı,
+      modellenmiş / kozmetik. Standart seçilince `thread.fill_standard` doldurur; değer elle
+      değişince aile Özel olur (pencere).
+    - Profil (threadmath): bir adımlık periyodik dış diş profili `outline` (s eksenel, t
+      dipten yükseklik; diş adımın ortasında, asimetrik testere dişi de sığar), köşe
+      yuvarlama, yüzeye DİK ofset (`offset`: miter + ilmek temizleme). Delikten çıkan
+      malzeme vida dişi biçimindedir: aynı profil delik için büyütülür (`fit_offsets` → delik
+      payı + genleşme), vida için küçültülür. `tooth_region` (delik: dişin kendisi, alttan
+      matkabın içine taşar) ve `groove_region` (vida: iki diş arası oluk, üstten silindirin
+      dışına taşar); ikisi de adımdan dar (helisin komşu turları değmez). `TRUNC = 0.12`:
+      matkap / vida silindiri ile süpürmenin kesim yüzü arasında h'nin %12'si açıklık
+      (M6'da çapta ~0.13 mm, ISO 6H / 6g aralığında) — daha yakın eş eksenli yüzeylerde OCC
+      kesimi sessizce boş dönüyordu. `clean_poly`: 1e-4·P'den kısa kenarlar atılır
+      (Whitworth yuvarlatmasında 1e-7·P kenarla süpürme kurulamıyordu).
+    - OCC (threadgeo): çokgen eksenel düzleme konup helis boyunca Frenet çerçevesiyle
+      süpürülür (`BRepOffsetAPI_MakePipeShell`, `SetMode(True)`). **Sağlamlık kuralları
+      (ölçülerek bulundu):** (1) bir katının kapak dairesi helisel yüzeyi kesmemeli — kesince
+      boolean sessizce hiçbir şey yapmıyor; bu yüzden matkabın uçları süpürmenin dışında,
+      vida uzun silindirden kesilip sonra uç pahlı zarfla (daireleri dişe değmeyen) kesişir,
+      dişli deliğin ağız pahı ayrı koni olarak alt dairesi diş tabanının içinde kalacak
+      biçimde birleşir; (2) ucu katının içinde biten süpürmeyle kesim de boş dönüyordu —
+      malzeme içinde bitecek diş önce büyük bir silindirle düz kırpılır (`sweeps(trim=…)`);
+      (3) önce matkap sonra diş kesilirse diş atlanıyordu — matkap ∪ diş tek araç
+      (`fuse_tool`) tek kesimde çıkarılır; (4) geçen delikte 100+ turluk helis kurulamıyordu
+      — diş boyu gövdenin eksen boyunca kalınlığından (`geometry._axis_extent`). Her
+      boolean `checked()` ile denetlenir (geçerli, tek katı, hacim analitik aralıkta, Pappus
+      `thread_volume_per_turn`); olmazsa bulanık toleransla yeniden; yine olmazsa Model
+      kaynaklı hata. Dişli delikte ayrıca yoklama noktaları (`probe_points`): dişin içindeki
+      nokta kesimden sonra hâlâ malzemedeyse "Diş açılamadı".
+    - Delik: TAPPED + `thr.modeled` → `geometry.apply_holes` `threadgeo.tapped_hole`
+      kullanır (matkap = `minor_drill`, diş, isteğe bağlı ağız pahı). Kozmetikte eski yol
+      (kılavuz matkabı + delik payı). Eski (v0.33–0.35) dişli delikler `_migrate`'te
+      kozmetik dişe göçer (görünüş aynı). Diğer türlere: geçme sınıfı (ISO 273 ince / orta /
+      kaba), kademeli yuvada vida başı (ISO 4762 / DIN 7984 / ISO 4017 + lokma payı /
+      ISO 7380), konik havşada tür (ISO 10642 / ISO 7046 / inç 82° / geniş), havşa üstü
+      silindirik pay, düz ve dişli delikte ağız pahı (`holemath.profile`: `mouth_d`,
+      `cs_head`, `top`). Hayalet artık deliğin gerçek kesit profilini (kademe, koni, uç)
+      ve dişli delikte diş dış çapını + adımı gösteren kısa helisi çizer.
+    - Vida / somun: yüzeyden değil ölçülerden kurulan BlendCAD gövdesi
+      (`cad.part_kind = SCREW / NUT`, ayarlar `cad.part`). `core.gather` `job["primitive"]`
+      gönderir; `engine._build` bunu `geometry.make_part` ile kurar (önbellek `_prim_cache`)
+      ve sonra bütün aşamalar (delik, fillet, boolean…) aynen uygulanır (`_after_faces`
+      ayrıldı). Yerel çerçeve: eksen +z, baş z ≥ 0 (havşa başta z ≤ 0), gövde z = −L'ye;
+      dünyaya objenin matrisiyle. Başlar: imbus, altıgen (30° pahlı), havşa, mercimek (küre
+      kapağı), yarıklı silindir, başsız; yuvalar: imbus (118° dipli), düz, yıldız. Somun
+      ISO 4032, iki yanı pahlı, iç diş delikle aynı kurallarla.
+    - Bağ: `part.link_obj / link_uid / link_pt`; `linked` açıkken diş tanımı ve geçme
+      delikten (`thread.source_thread`): vida penceresinden değiştirmek deliği de değiştirir.
+      Delikli gövde hesaplanınca / zamanlanınca bağlı parçalar da sıraya girer
+      (`core._dependents`). `thread.create_for_hole`: boy deliğe göre (kör: derinlik − P/2;
+      geçen: gövde kalınlığı + somun), baş delik türüne göre, yer: kademelide yuva dibi,
+      havşada yüzey (+ pay), somun geçen deliğin çıkış yüzünde (radyal kaydırılmış ışınla
+      kalınlık). Parçada üçgenleme dişe göre (`tune_mesh`).
+    - Arayüz: Delik penceresi türe göre (dişli: `thread_ui` — standart / ölçü, modellenmiş,
+      sağ / sol, ağız, diş boyu, ▸ profil ayrıntıları, geçme bölümü; diğerleri: vida ölçüsü,
+      geçme sınıfı, baş / havşa türü, ölçüler, ağız pahı); "Uyumlu vida", "Somun", "Her yere".
+      Yeni pencere "Vida / somun" (`part_form`, şerit: Uyumlu vida / Vida / somun / Somun).
+      Açılır listeler 16'dan uzunsa sütunlara bölünür.
+    - Ölçüm (`bpy_thread_check.py`): M6 kör dişli delikte çıkan hacim matkap ile tepe çapı
+      arasında, diş halkası dolu / boş karışık; uyumlu vida yeri, boyu; FDM boşluk ve baskı
+      genleşmesiyle delik büyür / vida küçülür; sol el 2 ağız; Tr / kare / Rd / S / BSW /
+      UNC / ince / G / ACME geçen; eğriden özel profil; eski dişli delik göçü; kademeli +
+      imbus + somun, havşa + havşa başlı; bağımsız başlar ve yuvalar; vidaya çapraz delik;
+      STEP; pencere PNG'leri.
   - **v0.34.0: kesişim noktasını eğriler üzerinde kaydırma** (`slide.py` bpy'siz,
     `draw_junction.py` JunctionMixin). Tel kafeste birden çok eğrinin buluştuğu nokta
     (kaydedilmiş eğrilerde ≥ 2 spline'ın ortak noktası ya da başka eğrinin içine değen uç —
@@ -762,7 +834,10 @@ core._apply()  sonuç → mesh, özellikler, core._display (kenarlar, bool_edges
 | `repair.py` | 257 | Onarımı eğri verisinde uygula, seçimi güncelle, yüzeyi yeniden dene, pencere / işaret verisi |
 | `health.py` | 952 | Model denetimi: her tam hesaptan / Bitir'den sonra bulgular ve onaylı düzeltmeler |
 | `holemath.py` | 158 | Delik standartları (ISO), döndürme profili, Pappus hacmi, açıklama (bpy'siz) |
-| `hole.py` | 430 | Delik yerleştirme aracı: hayalet, yakalama, tık / geri al / bitir / vazgeç, ön ayarlar |
+| `hole.py` | 500 | Delik yerleştirme aracı: hayalet (gerçek kesit profili), yakalama, tık / geri al / bitir / vazgeç, ön ayarlar |
+| `threadmath.py` | 720 | Diş standartları, periyodik profil, yuvarlatma, dik ofset, delik / vida çokgenleri, geçme, vida başı / somun tabloları (bpy'siz) |
+| `threadgeo.py` | 560 | OCC: helisel süpürme, denetimli boolean, dişli delik aracı, vida (baş, yuva, uç pahı), somun |
+| `thread.py` | 530 | Blender tarafı: diş ayarları, delikten uyumlu vida / somun, yerleştirme, gather için parça tanımı |
 | `slide.py` | 373 | Birleşim noktasını eğriler üzerinde kaydırma matematiği (bpy'siz): dallar, kırp / birleştir-uydur, Slider, yakalama |
 | `draw_junction.py` | 499 | JunctionMixin: birleşim bulma, üzerine gelme, kaydırma oturumu, taslağa / spline'a geri yazma, çizim |
 | `opacity.py` | 147 | Gövde saydamlığı ve çizerken saydam kipi |
@@ -1428,6 +1503,8 @@ Betiğin yaptıkları:
 | tools/bpy_health_check.py | GERÇEK Blender + OCC: fillet çok büyük → en büyük ölçü önerisi → uygulanır; büyük fillet uyarısı; çakışık yüzlü boolean → aracı kaydır; etkisiz boolean; yakın uç, kenar ortası uç, sıfır boy nokta düzeltmeleri; açık kabuk işaretleri; isteğe bağlı Öneriler PNG'si |
 | t79 | Delik hesapları: Pappus hacmi (düz, kör uçlu, düz dip, havşa başlı, havşalı), profil yüzeyin üstünden başlar, geçersiz değerler, ISO tabloları, birim ölçeği, açıklama |
 | tools/bpy_hole_check.py | GERÇEK Blender + OCC: her delik türünde çıkan hacim = analitik; iki delik; yatay delik; ağza pah; hatalı havşa; ön ayarlar (M8); yakalama adayları; yanı delen delik → içeri kaydır; hatalı delik önerisi; isteğe bağlı Delik penceresi PNG'si |
+| t82 | Diş hesapları: standartlar, bütün ölçülerde profil adıma sığar (boşluk 0 / 0.1P / 0.2P), aşırı boşluk reddi, ofset yönleri, sivri tepe ilmek temizliği, yuvarlak / özel / testere profili, matkap ve kavrama, geçme payları, Pappus, baş / somun / boy tabloları, ağız pahı ve havşa üstü pay |
+| tools/bpy_thread_check.py | GERÇEK Blender + OCC: modellenmiş dişli delikler (kör / geçen, 10 standart, eğriden özel profil, sol el 2 ağız, ağız pahı), uyumlu vida ve somun (yer, boy, delikle birlikte değişme, boşluk / genleşme), bağımsız başlar / yuvalar, vidaya delik, STEP, isteğe bağlı pencere PNG'leri (`... <mini_cad üstü> <çıktı klasörü>`) |
 | t80 | Birleşim kaydırma (slide.py): doğru zincirde ileri, yay üzerinde ileri / geri (yarıçap korunur), uç uzatma / kısaltma, + birleşiminde dallar ve bağlı eğrinin izlemesi, T birleşimi, yol üzerindeki yakalama ve kesişim, yay uzunluğu, birleştir-uydur |
 | tools/bpy_junction_check.py | GERÇEK Blender + OCC: kutu köşesi (3 kenar) üst kenar boyunca 0.2 kaydırılır; spline'lar doğru yazılır, gövde kapalı katı kalır, hacim azalır |
 | tools/bpy_opacity_check.py | GERÇEK Blender: opaklık malzemesi, yeniden hesapta korunma, opakta eski bağlantı, çizerken saydam, kullanıcı malzemesi korunur |
@@ -1734,3 +1811,14 @@ kaydedip çalıştır. Çapa bulunamazsa betik hata versin; sessizce geçmesin.
   Böyle bırak); araçların senkron hesabı arka planda en fazla 2.5 sn bekletir; süren hesap
   ilerlemesiyle görünür ve durdurulabilir; uzun hesaplar en yavaş işlemle bildirilir.
   Test t81; araç `bpy_longcalc_check.py`.
+
+- **0.36.0:** Diş ve vida: dişli delik gerçek helisel diş açar (ISO metrik kaba / ince, UNC,
+  UNF, Whitworth, boru G, trapez, ACME, kare, yuvarlak, testere, eğriden özel profil; sağ /
+  sol, çok ağızlı; diş yüksekliği, tepe genişliği, açı, yuvarlatma elle). 3B baskı için
+  geçme: boşluk (yüzeye dik), deliğe / vidaya paylaşım, baskı genleşmesi, ön ayarlar.
+  Delikten tek tıkla uyumlu vida (deliğe yerleşir, delikle birlikte değişir) ve geçen deliğe
+  somun; bağımsız vida / somun; vida başları ve anahtar yuvaları. Kademeli / konik havşa
+  delikler vida başına göre (geçme sınıfı, baş / havşa türü, havşa üstü pay), ağız pahı.
+  Tür adları netleşti (Kademeli / Konik havşa), hayalet seçilen türün gerçek kesitini
+  gösterir. Yeni modüller `threadmath.py`, `threadgeo.py`, `thread.py`; test t82; araç
+  `bpy_thread_check.py`.

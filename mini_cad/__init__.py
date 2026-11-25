@@ -6,7 +6,7 @@ Tel kafes -> yüzeyler (ortak topoloji) -> katı gövde -> bevel.
 
 from . import (blendcad, bool_overlay, constraints, core, draw, extrude, health, hole, kernel, links, opacity,
                panels, pick, recorder,
-               split, ui, wire)
+               split, thread, ui, wire)
 
 
 def register():
@@ -21,6 +21,7 @@ def register():
     blendcad.register()
     health.register()
     hole.register()
+    thread.register()
     extrude.register()
     opacity.register()
     pick.register()
@@ -38,6 +39,7 @@ def unregister():
     pick.unregister()
     opacity.unregister()
     extrude.unregister()
+    thread.unregister()
     hole.unregister()
     health.unregister()
     blendcad.unregister()

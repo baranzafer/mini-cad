@@ -326,7 +326,7 @@ def state(btn):
             return False
         return (bid == "TAPPED") == (f.hole_kind == "TAPPED")
     if bid in ("PATCH", "FILLET", "BOOL", "SWEEP", "BODY", "ORDER", "SETTINGS", "CONS_LIST",
-               "SURF_LIST", "BLEND", "KERNEL", "WIRE_MESH"):
+               "SURF_LIST", "BLEND", "KERNEL", "WIRE_MESH", "BOLT"):
         return _form_open(bid)
     return None
 
@@ -494,6 +494,9 @@ def _dispatch(context, kind, ident):
     if ident == "EXT_LIST":
         _open("EXTRUDE", keep=True)
         return None
+    # ---- vida / somun (v0.36.0)
+    if ident in ("SCREW_FIT", "BOLT", "NUT"):
+        return _part(context, ident)
     # ---- delik (v0.33.0)
     if ident in HOLE_KINDS:
         return _hole(context, HOLE_KINDS[ident])
@@ -621,6 +624,46 @@ def _hole(context, kind):
     form_state["hole_uid"] = op.fuid if op is not None else form_state.get("hole_uid")
     _open("HOLE", keep=True)
     return "Yüzeye tıkla: delik yeri · Enter: bitir"
+
+
+def _part(context, ident):
+    """v0.36.0: Uyumlu vida / Vida penceresi / Somun."""
+    from . import thread
+    t = _target(context)
+    f = None
+    if t is not None and not thread.is_part(t):
+        uid = form_state.get("hole_uid")
+        hs = [x for x in t.cad.features if x.op == "HOLE" and len(x.hole_pts)]
+        f = next((x for x in hs if x.uid == uid), None) or (hs[-1] if hs else None)
+    if ident in ("SCREW_FIT", "NUT") and f is not None:
+        if not _kernel_ready():
+            return "Hesap çekirdeği kurulu değil (Araçlar → Çekirdek)"
+        j = form_state.get("hole_pt", [0])[0]
+        kind = "NUT" if ident == "NUT" else "SCREW"
+        if kind == "NUT" and (f.hole_kind == "TAPPED" or not f.hole_through):
+            kind = None
+        if kind is not None:
+            ob, msg = thread.create_for_hole(context, t, f, j, kind)
+            if ob is not None:
+                form_state["part"] = ob.name
+                try:
+                    bpy.ops.ed.undo_push(message=f"BlendCAD: {ob.name}")
+                except Exception:
+                    pass
+            _open("BOLT", keep=True)
+            return msg
+    if ident == "SCREW_FIT":
+        _open("BOLT", keep=True)
+        return "Önce dişli ya da geçme deliği aç (Delik), sonra Uyumlu vida"
+    if ident == "NUT":
+        if not _kernel_ready():
+            return "Hesap çekirdeği kurulu değil (Araçlar → Çekirdek)"
+        ob = thread.create_free(context, "NUT")
+        form_state["part"] = ob.name
+        _open("BOLT", keep=True)
+        return f"{ob.name}: 3B imlecine eklendi"
+    _open("BOLT", keep=True)
+    return None
 
 
 def _forms():
